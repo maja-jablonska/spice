@@ -46,8 +46,8 @@ def get_option_args():
 
 def get_nvidia_dependent_options():
     if parameters.cpu:
-        return ["--gpus", "all", "--runtime=nvidia"]
-    return ["--runtime=nvidia", "--gpus", "all"]
+        return []
+    return [ "--gpus", "all", "--runtime=nvidia"]
 
 
 def get_system_dependent_options():
@@ -73,8 +73,9 @@ def get_common_options():
             "--cap-add", "sys_ptrace",
             "--tty",
             "-p", "8888:8888",
-            "--name", CONTAINER_NAME
-            ]
+            "-p", "6006:6006",
+            "--name", CONTAINER_NAME,
+            "-it"]
 
 
 def get_docker_image():
