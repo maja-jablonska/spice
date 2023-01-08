@@ -6,7 +6,7 @@ import subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INTRMEDIATE_LAYERS_DIR = os.path.join(SCRIPT_DIR, "intermediate_images")
-TF_BASE_IMAGE = "tensorflow/tensorflow:2.7.0-gpu-jupyter"
+TF_BASE_IMAGE = "tensorflow/tensorflow:latest-gpu-jupyter"
 IMAGE_NAME_PREFIX = "stellar_mesh_integration/docker/x86_64/linux/"
 DEFAULT_USER_UID = 1000
 DEFAULT_USER_GID = 1000

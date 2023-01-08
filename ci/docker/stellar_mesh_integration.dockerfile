@@ -14,6 +14,7 @@ FROM ${BASE_IMAGE} as user_image
     RUN chown -R ${UID}:${GID} /tf /usr/local/share/ ${HOME} /usr/local/cuda/	
 
     EXPOSE 8888
+    EXPOSE 6006
 
     USER developer
     
