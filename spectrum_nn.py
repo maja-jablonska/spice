@@ -48,12 +48,14 @@ class MLP_wavelength_sine_mu(nn.Module):
                     split_rngs={'params': False})
         
         x = DecManyWave(name="decoder")(log_waves)
-        x = x.at[:,1].add(A)
+        x = x.at[:,1].add(A) # mnożenie razy pewna stała kontinuum
         return x
 
 m = MLP_wavelength_sine_mu()
     
 def flux(log_wave: jnp.ndarray, mu: float) -> jnp.ndarray:
-    return m.apply({'params': restored_params},
+    x = m.apply({'params': restored_params},
                    (log_wave, mu),
                    train=False)
+    y = jnp.power(10, x[:, 1])
+    return jnp.array([jnp.multiply(x[:, 0], y), y])
