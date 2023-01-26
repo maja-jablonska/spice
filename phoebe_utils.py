@@ -2,7 +2,7 @@ import phoebe
 import numpy as np
 from phoebe import u
 import matplotlib.pyplot as plt
-
+from typing import Optional
 
 from enum import auto, Enum
 
@@ -45,33 +45,39 @@ class PhoebeConfig:
     def b(self) -> str:
         return self.__b
     
-    def get_parameter(self, time: float, qualifier: str, component: Component = Component.PRIMARY) -> np.array:
-        return self.b.get_parameter(qualifier=qualifier,
-                                    component=str(component),
-                                    dataset=self.dataset_name,
-                                    kind='mesh',
-                                    time=time).value
+    def get_parameter(self, time: float, qualifier: str, component: Optional[Component] = None) -> np.array:
+        if component is not None:
+            return self.b.get_parameter(qualifier=qualifier,
+                                        component=str(component),
+                                        dataset=self.dataset_name,
+                                        kind='mesh',
+                                        time=time).value
+        else:
+            return self.b.get_parameter(qualifier=qualifier,
+                            dataset=self.dataset_name,
+                            kind='mesh',
+                            time=time).value
     
-    def get_mesh_coordinates(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_mesh_coordinates(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'us', component).reshape((-1, 1)),
                                self.get_parameter(time, 'vs', component).reshape((-1, 1))], axis=1)
     
-    def get_mesh_normals(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_mesh_normals(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'uvw_normals', component)
     
-    def get_projected_areas(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_projected_areas(self, time: float, component: Optional[Component] = None) -> np.array:
         mesh_normals = self.get_mesh_normals(time, component)
         areas = self.get_parameter(time, 'areas', component)
         return areas*np.array([cos_angle_between(mn, LOS) for mn in mesh_normals])
     
-    def get_radial_velocities(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_radial_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'vws', component)
     
-    def get_loggs(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_loggs(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'loggs', component)
     
-    def get_teffs(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_teffs(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'teffs', component)
 
-    def get_mus(self, time: float, component: Component = Component.PRIMARY) -> np.array:
+    def get_mus(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'mus', component)
