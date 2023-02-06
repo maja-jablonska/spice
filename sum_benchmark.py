@@ -7,9 +7,7 @@ import matplotlib.pyplot as plt
 # TODO: how to save?
 import pickle
 
-with open('test_binary.pickle', 'rb') as f:
-    b = pickle.load(f)
-    
+from spectrum import *
 from spectrum_nn import flux
 import jax.numpy as jnp
 import jax
@@ -22,32 +20,43 @@ from jax import lax
 import math
 from functools import partial
 
-config = PhoebeConfig(b, 'bigmesh')
-time = config.times[0]
+from jax.config import config as jax_config
+jax_config.update("jax_enable_x64", True)
 
+with open('test_single_sun.pickle', 'rb') as f:
+    b = pickle.load(f)
+
+config = PhoebeConfig(b, 'mesh01')
+time = config.times[0]
 coords = config.get_mesh_coordinates(time)
 VW = config.get_radial_velocities(time)
 
 mus = config.get_mus(time)
-
-# Get only the visible vertices
 pos_mus = np.argwhere(mus>0)
 
 projected_areas = config.get_projected_areas(time)
 
 mus = jnp.array(mus[pos_mus])
 areas = jnp.array(projected_areas[pos_mus])
+vrads = jnp.array(VW[pos_mus])
 
-atmosphere_flux = jax.jit(jax.vmap(flux, in_axes=(None, 0)))
 
-
-def _flash_sum_w_checkpoints(areas, mus, chunk_size, precision=10000):
+def spectrum_flash_sum_no_checkpoint(log_wavelengths,
+                                       areas,
+                                       mus,
+                                       vrads,
+                                       chunk_size: int = DEFAULT_CHUNK_SIZE):
+    # Z każdym elementem powierzchni przekazujemy
+    # wektor jego wartości (mu, przyspieszenie, itd.)
+    # Część wartości będzie przekazywana do modelu
+    
     # Just the 1D case for now
     n_areas, n_samples = areas.shape
     mus_flattened = mus.reshape(areas.shape)
+    points = log_wavelengths.shape[0]
 
     def chunk_scanner(carries, _):
-        chunk_idx, atmo_sun = carries
+        chunk_idx, atmo_sum, areas_sum = carries
         k_chunk_sizes = min(chunk_size, n_areas)
 
         a_chunk = lax.dynamic_slice(areas,
@@ -56,45 +65,43 @@ def _flash_sum_w_checkpoints(areas, mus, chunk_size, precision=10000):
         m_chunk = lax.dynamic_slice(mus_flattened,
                                     (chunk_idx, 0),
                                     (k_chunk_sizes, n_samples))
+        vrad_chunk = lax.dynamic_slice(vrads,
+                                        (chunk_idx, 0),
+                                        (k_chunk_sizes, n_samples))
 
-        new_atmo_sum = atmo_sun + jnp.sum(
-            jnp.multiply(
-                a_chunk.reshape((-1, 1, 1)),
-                atmosphere_flux(jnp.linspace(0, 1, precision),
-                                jnp.ones_like(m_chunk).flatten())
-            ), axis=0)
-        return (chunk_idx + k_chunk_sizes, new_atmo_sum), None
+        
+        # atmosphere_mul is the spectrum simulated for the corresponding wavelengths and optionally given parameters of mu, logg, and T.
+        # It is then multiplied by the observed area to scale the contributions of spectra chunks
+        # Shape: (n_vertices, 2, n_wavelengths)
+        # 2 corresponds to the two components: continuum and full spectrum with lines
+        atmosphere_mul = jnp.multiply(
+            a_chunk.reshape((-1, 1, 1)),
+            atmosphere_flux(log_wavelengths,
+                            m_chunk))
 
-    (_, out), lse = lax.scan(chunk_scanner, init=(0, jnp.zeros((precision, 2))), xs=None, length=math.ceil(n_areas/chunk_size))
-    return out
+        # (observed) radial velocity correction for both continuum and spectrum correction
+        # Shape: (n_vertices, 2, n_wavelengths)
+        vrad_atmosphere = jax.vmap(
+            lambda a: v_interp(
+                log_wavelengths,
+                v_apply_vrad(
+                    log_wavelengths,
+                    vrad_chunk),
+                a), in_axes=(1,))(atmosphere_mul)
+        
+        # Sum the atmosphere contributions and normalize by all areas' sum
+        new_atmo_sum = atmo_sum + jnp.sum(vrad_atmosphere, axis=1)
+        new_areas_sum = areas_sum + jnp.sum(a_chunk, axis=0)
+        
+        return (chunk_idx + k_chunk_sizes, new_atmo_sum, new_areas_sum), None
 
-def _flash_sum(areas, mus, chunk_size, precision=10000):
-    # Just the 1D case for now
-    n_areas, n_samples = areas.shape
-    mus_flattened = mus.reshape(areas.shape)
-
-    @partial(jax.checkpoint, prevent_cse=False)
-    def chunk_scanner(carries, _):
-        chunk_idx, atmo_sun = carries
-        k_chunk_sizes = min(chunk_size, n_areas)
-
-        a_chunk = lax.dynamic_slice(areas,
-                                    (chunk_idx, 0),
-                                    (k_chunk_sizes, n_samples))
-        m_chunk = lax.dynamic_slice(mus_flattened,
-                                    (chunk_idx, 0),
-                                    (k_chunk_sizes, n_samples))
-
-        new_atmo_sum = atmo_sun + jnp.sum(
-            jnp.multiply(
-                a_chunk.reshape((-1, 1, 1)),
-                atmosphere_flux(jnp.linspace(0, 1, precision),
-                                jnp.ones_like(m_chunk).flatten())
-            ), axis=0)
-        return (chunk_idx + k_chunk_sizes, new_atmo_sum), None
-
-    (_, out), lse = lax.scan(chunk_scanner, init=(0, jnp.zeros((precision, 2))), xs=None, length=math.ceil(n_areas/chunk_size))
-    return out
+    # Return (2, n_vertices) for continuum and spectrum with lines
+    (_, out, areas_sum), lse = lax.scan(
+        chunk_scanner,
+        init=(0, jnp.zeros((2, log_wavelengths.shape[-1])), jnp.zeros(1,)),
+        xs=None,
+        length=math.ceil(n_areas/chunk_size))
+    return out/areas_sum
 
 
 def newest(path):
@@ -104,19 +111,25 @@ def newest(path):
 
 
 def naive_sum_memory_benchmark(logdir, filename, points):
-    atmosphere = jnp.sum(
-        jnp.multiply(
-            areas.reshape((-1, 1, 1)),
-            atmosphere_flux(jnp.linspace(0, 1, points),
-                            jnp.ones_like(mus).flatten())), axis=0)/jnp.sum(areas)
-    atmosphere.block_until_ready()
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
     
     with jax.profiler.trace("/notebooks/tmp"):
-        atmosphere = jnp.sum(
-            jnp.multiply(
-                areas.reshape((-1, 1, 1)),
-                atmosphere_flux(jnp.linspace(0, 1, points),
-                                jnp.ones_like(mus).flatten())), axis=0)/jnp.sum(areas)
+        atmosphere_mul = jnp.multiply(
+            areas.reshape((-1, 1, 1)),
+            atmosphere_flux(LOG_WAVELENGTHS,
+                            mus))
+
+        # (observed) radial velocity correction for both continuum and spectrum correction
+        # Shape: (n_vertices, 2, n_wavelengths)
+        vrad_atmosphere = jax.vmap(
+            lambda a: v_interp(
+                LOG_WAVELENGTHS,
+                v_apply_vrad(
+                    LOG_WAVELENGTHS,
+                    vrads),
+                a), in_axes=(1,))(atmosphere_mul)
+
+        atmosphere = jnp.sum(vrad_atmosphere, axis=1)/jnp.sum(areas, axis=0)
         atmosphere.block_until_ready()
         
     profiler_path = os.path.join(logdir, 'plugins/profile')
@@ -124,32 +137,36 @@ def naive_sum_memory_benchmark(logdir, filename, points):
     
     
 def naive_grad_memory_benchmark(logdir, filename, points):
-    atmosphere = jax.random.normal(jax.random.PRNGKey(1), shape=(points, 2))
-    atmosphere_flux_grad = jax.jit(
-    jax.grad(
-        lambda a, m: 
-        jnp.sum(jnp.abs(jnp.sum(jnp.multiply(
-        a.reshape((-1, 1, 1)), jax.vmap(flux, in_axes=(None, 0))(
-            jnp.linspace(0, 1, points),
-            jnp.ones_like(m).flatten())), axis=0)/jnp.sum(a)-atmosphere)[:, 0])
-    ))
-    afg = atmosphere_flux_grad(mus, areas)
-    afg.block_until_ready()
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
     
     with jax.profiler.trace("/notebooks/tmp"):
-        afg = atmosphere_flux_grad(mus, areas)
-        afg.block_until_ready()
+        atmosphere_mul = jnp.multiply(
+            areas.reshape((-1, 1, 1)),
+            atmosphere_flux(LOG_WAVELENGTHS,
+                            mus))
+
+        # (observed) radial velocity correction for both continuum and spectrum correction
+        # Shape: (n_vertices, 2, n_wavelengths)
+        vrad_atmosphere = lambda v: jax.vmap(
+            lambda a: v_interp(
+                LOG_WAVELENGTHS,
+                v_apply_vrad(
+                    LOG_WAVELENGTHS,
+                    v*vrads),
+                a), in_axes=(1,))(atmosphere_mul)
+
+        atmosphere = jax.jit(jax.grad(lambda v: (jnp.sum(vrad_atmosphere(v), axis=1)/jnp.sum(areas, axis=0))[0, 0]))(2.)
+        atmosphere.block_until_ready()
         
     profiler_path = os.path.join(logdir, 'plugins/profile')
     os.rename(newest(profiler_path), os.path.join(profiler_path, filename))
     
     
 def flash_w_checkpoints_sum_memory_benchmark(logdir, filename, points, chunk_size):
-    atmosphere = _flash_sum_w_checkpoints(areas, mus, chunk_size, points)/jnp.sum(areas)
-    atmosphere.block_until_ready()
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
     
     with jax.profiler.trace("/notebooks/tmp"):
-        atmosphere = _flash_sum_w_checkpoints(areas, mus, chunk_size, points)/jnp.sum(areas)
+        atmosphere = spectrum_flash_sum_no_checkpoint(LOG_WAVELENGTHS, areas, mus, vrads, chunk_size)
         atmosphere.block_until_ready()
         
     profiler_path = os.path.join(logdir, 'plugins/profile')
@@ -157,20 +174,10 @@ def flash_w_checkpoints_sum_memory_benchmark(logdir, filename, points, chunk_siz
     
 
 def flash_w_checkpoints_grad_memory_benchmark(logdir, filename, points, chunk_size):
-    atmosphere = jax.random.normal(jax.random.PRNGKey(1), shape=(points, 2))
-    atmosphere_flux_grad = jax.jit(
-    jax.grad(
-        lambda a, m: 
-        (jnp.sum(
-            jnp.power(_flash_sum_w_checkpoints(a, m, chunk_size, points)/jnp.sum(a)
-                    -atmosphere, 2)))
-        )
-    )
-    afg = atmosphere_flux_grad(mus, areas)
-    afg.block_until_ready()
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
     
     with jax.profiler.trace("/notebooks/tmp"):
-        afg = atmosphere_flux_grad(mus, areas)
+        afg = jax.jit(jax.grad(lambda v: spectrum_flash_sum_no_checkpoint(LOG_WAVELENGTHS, areas, mus, vrads*v, 171)[0, 83549]))(2.)
         afg.block_until_ready()
         
     profiler_path = os.path.join(logdir, 'plugins/profile')
@@ -178,20 +185,10 @@ def flash_w_checkpoints_grad_memory_benchmark(logdir, filename, points, chunk_si
     
 
 def flash_grad_memory_benchmark(logdir, filename, points, chunk_size):
-    atmosphere = jax.random.normal(jax.random.PRNGKey(1), shape=(points, 2))
-    atmosphere_flux_grad = jax.jit(
-    jax.grad(
-        lambda a, m: 
-        (jnp.sum(
-            jnp.power(_flash_sum(a, m, chunk_size, points)/jnp.sum(a)
-                    -atmosphere, 2)))
-        )
-    )
-    afg = atmosphere_flux_grad(mus, areas)
-    afg.block_until_ready()
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
     
     with jax.profiler.trace("/notebooks/tmp"):
-        afg = atmosphere_flux_grad(mus, areas)
+        afg = jax.jit(jax.grad(lambda v: spectrum_flash_sum(LOG_WAVELENGTHS, areas, mus, vrads*v, 171)[0, 83549]))(2.)
         afg.block_until_ready()
         
     profiler_path = os.path.join(logdir, 'plugins/profile')
@@ -199,12 +196,13 @@ def flash_grad_memory_benchmark(logdir, filename, points, chunk_size):
     
 
 def flash_sum_memory_benchmark(logdir, filename, points, chunk_size):
+    
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
+    
     click.echo(f'Chunk size: {chunk_size}')
-    atmosphere = _flash_sum(areas, mus, chunk_size, points)/jnp.sum(areas)
-    atmosphere.block_until_ready()
     
     with jax.profiler.trace("/notebooks/tmp"):
-        atmosphere = _flash_sum(areas, mus, chunk_size, points)/jnp.sum(areas)
+        atmosphere = spectrum_flash_sum(LOG_WAVELENGTHS, areas, mus, vrads, chunk_size)
         atmosphere.block_until_ready()
         
     profiler_path = os.path.join(logdir, 'plugins/profile')
@@ -227,6 +225,8 @@ def flash_sum_memory_benchmark(logdir, filename, points, chunk_size):
 def benchmark(logdir,
               machine_name, method_type,
               method, chunk_size, points):
+    
+    LOG_WAVELENGTHS = jnp.linspace(3.65, 3.85, points)
     
     click.echo(f'Preparing a benchmark of {method_type} {method} function...')
     
