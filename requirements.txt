@@ -1,0 +1,4 @@
+astropy
+flax
+phoebe
+plotly
