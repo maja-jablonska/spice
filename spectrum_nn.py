@@ -7,10 +7,14 @@ from flax.training import train_state, checkpoints
 
 from typing import Callable, Tuple
 
+import os 
+dir_path = os.path.dirname(os.path.realpath(__file__))
 
 model_name = "MLP_sine_2"
-CHECKPOINTS_DIR = "compute_grid/ckpts"
+CHECKPOINTS_DIR = os.path.join(dir_path, "compute_grid/ckpts")
+
 prefix = f"checkpoint_{model_name}_"
+print(CHECKPOINTS_DIR)
 restored_state = checkpoints.restore_checkpoint(ckpt_dir=CHECKPOINTS_DIR, target=None, prefix=prefix)
 restored_params = restored_state["params"]
 
