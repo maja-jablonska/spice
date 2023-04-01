@@ -219,12 +219,14 @@ def spherical_harmonic(m, n, polar_coordinates):
                                       polar_coordinates[:, 1],
                                       n_max=10)
 
+
 def apply_spherical_harm_pulsation(verts, faces, magnitude, m, n):
     # checkify.check(m<=n, "m has to be lesser or equal n")
     direction_vectors = verts/jnp.linalg.norm(verts, axis=1).reshape((-1, 1))
     polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(verts))
-    magnitudes = magnitude*spherical_harmonic(m, n, polar_coordinates)
-    verts = verts + magnitudes.real.reshape((-1, 1))*direction_vectors
+    sph_ham = spherical_harmonic(m, n, polar_coordinates).real
+    magnitudes = magnitude*sph_ham
+    verts = verts + magnitudes.reshape((-1, 1))*direction_vectors
     areas, centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts, faces.astype(jnp.int32))
     mus = jnp.dot(centers/jnp.linalg.norm(centers, axis=1).reshape((-1, 1)), jnp.array([0, 0, 1]))
-    return verts, faces, areas, centers, mus
+    return verts, faces, areas, centers, mus, sph_ham.reshape((-1, 1))
