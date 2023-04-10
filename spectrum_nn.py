@@ -14,7 +14,6 @@ model_name = "MLP_sine_2"
 CHECKPOINTS_DIR = os.path.join(dir_path, "compute_grid/ckpts")
 
 prefix = f"checkpoint_{model_name}_"
-print(CHECKPOINTS_DIR)
 restored_state = checkpoints.restore_checkpoint(ckpt_dir=CHECKPOINTS_DIR, target=None, prefix=prefix)
 restored_params = restored_state["params"]
 
