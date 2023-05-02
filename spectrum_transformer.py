@@ -71,6 +71,7 @@ class MLP_wavelength_att_mu(nn.Module):
         log_waves, mu, p = inputs
         
         A = jnp.log10(0.6*(mu + 2/3)) # Gray atmosphere
+        A -= 6.
         
         DecManyWave = nn.vmap(
                     MLP_single_wavelength_att, 
