@@ -236,3 +236,37 @@ def apply_spherical_harm_pulsation(verts, centers, faces, magnitude, m, n):
     areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts+vert_offsets, faces.astype(jnp.int32))
     
     return vert_offsets, faces, areas, centers, new_centers-centers, sph_ham.reshape((-1, 1)), center_sph_ham.reshape((-1, 1))
+
+
+@jax.jit
+def rotation_matrix(a: jnp.ndarray, theta: jnp.float64):
+    a_norm = a/jnp.linalg.norm(a)
+    a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
+                      [a_norm[2], 0., -a_norm[0]],
+                      [-a_norm[1], a_norm[0], 0.]])
+    return jnp.eye(3) + jnp.sin(theta)*a_hat + (1-jnp.cos(theta))*jnp.matmul(a_hat, a_hat)
+
+@jax.jit
+def rotation_matrix_grad(a: jnp.ndarray, theta: jnp.float64):
+    a_norm = a/jnp.linalg.norm(a)
+    a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
+                      [a_norm[2], 0., -a_norm[0]],
+                      [-a_norm[1], a_norm[0], 0.]])
+    return jnp.cos(theta)*a_hat + jnp.sin(theta)*jnp.matmul(a_hat, a_hat)
+
+
+@jax.jit
+def calculate_rotation(omega, rotation_axis, centers, t):
+    rotated_centers = jnp.matmul(centers, rotation_matrix(rotation_axis, omega*t))
+    rotated_centers_vel = jnp.matmul(centers, rotation_matrix_grad(rotation_axis, omega*t))
+    r = jnp.linalg.norm(jnp.cross(rotation_axis, -rotated_centers), axis=1)/jnp.linalg.norm(rotation_axis)
+    return rotated_centers, rotated_centers_vel, r
+
+
+@jax.jit
+def calculate_los_rotation(omega, rotation_axis, los_vector, centers, t):
+    all_centers, all_vels, radii = calculate_rotation(omega, rotation_axis, centers, t)
+    mus = jnp.dot(all_centers/jnp.linalg.norm(all_centers, axis=2).reshape((n, -1, 1)), los_vector)
+    los_vels = jnp.dot(all_vels/(jnp.nan_to_num(jnp.linalg.norm(all_vels, axis=2).reshape((n, -1, 1)))+1e-10), los_vector)
+    return all_centers, los_vels*r, mus
+
