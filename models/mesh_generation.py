@@ -221,13 +221,14 @@ def spherical_harmonic(m, n, polar_coordinates):
 
 def apply_spherical_harm_pulsation(verts, centers, faces, magnitude, m, n):
     #checkify.check(m<=n, "m has to be lesser or equal n")
-    direction_vectors = verts/jnp.linalg.norm(verts, axis=1).reshape((-1, 1))
+    vert_axis = len(verts.shape)-1
+    
+    direction_vectors = verts/jnp.linalg.norm(verts, axis=vert_axis, keepdims=True)
     
     polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(verts))
     center_polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(centers))
     
     sph_ham = spherical_harmonic(m, n, polar_coordinates).real
-    center_sph_ham = spherical_harmonic(m, n, center_polar_coordinates).real
     
     magnitudes = magnitude*sph_ham
     
@@ -235,7 +236,8 @@ def apply_spherical_harm_pulsation(verts, centers, faces, magnitude, m, n):
     
     areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts+vert_offsets, faces.astype(jnp.int32))
     
-    return vert_offsets, faces, areas, centers, new_centers-centers, sph_ham.reshape((-1, 1)), center_sph_ham.reshape((-1, 1))
+    return vert_offsets, faces, areas, centers, sph_ham[:, jnp.newaxis]
+
 
 
 @jax.jit
@@ -255,11 +257,16 @@ def rotation_matrix_grad(a: jnp.ndarray, theta: jnp.float64):
     return jnp.cos(theta)*a_hat + jnp.sin(theta)*jnp.matmul(a_hat, a_hat)
 
 
+rotation_matrices = jax.jit(jax.vmap(rotation_matrix, in_axes=(None, 0)))
+rotation_matrices_grad = jax.jit(jax.vmap(rotation_matrix_grad, in_axes=(None, 0)))
+
+
 @jax.jit
 def calculate_rotation(omega, rotation_axis, centers, t):
-    rotated_centers = jnp.matmul(centers, rotation_matrix(rotation_axis, omega*t))
-    rotated_centers_vel = jnp.matmul(centers, rotation_matrix_grad(rotation_axis, omega*t))
-    r = jnp.linalg.norm(jnp.cross(rotation_axis, -rotated_centers), axis=1)/jnp.linalg.norm(rotation_axis)
+    rotated_centers = jnp.matmul(centers, rotation_matrices(rotation_axis, omega*t))
+    rotated_centers_vel = jnp.matmul(centers, rotation_matrices_grad(rotation_axis, omega*t))
+    norm_axis = len(rotated_centers.shape)-1
+    r = jnp.linalg.norm(jnp.cross(rotation_axis, -rotated_centers), axis=norm_axis)/jnp.linalg.norm(rotation_axis)
     return rotated_centers, rotated_centers_vel, r
 
 
