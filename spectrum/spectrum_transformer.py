@@ -8,7 +8,7 @@ from flax.training import train_state, checkpoints
 from typing import Callable, Tuple
 
 import os 
-dir_path = os.path.dirname(os.path.realpath(__file__))
+dir_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..')
 
 model_name = "MLP_w_att_69099_st1000000_1000000"
 prefix = f"checkpoint_{model_name}"

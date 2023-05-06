@@ -4,4 +4,5 @@ flax==0.6.8
 h5py==3.6.0
 jax==0.4.8
 jaxlib==0.4.7
+overrides~=7.4.1
 phoebe==2.4.9

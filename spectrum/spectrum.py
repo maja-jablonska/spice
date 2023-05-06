@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax import lax
 import math
 from functools import partial
-from spectrum_transformer import flux
+from .spectrum_transformer import flux
 
 
 DEFAULT_CHUNK_SIZE: int = 1024
@@ -82,3 +82,8 @@ def spectrum_flash_sum(log_wavelengths,
         length=math.ceil(n_areas/chunk_size))
     return out/areas
 
+
+def get_spectra_flash_sum(CHUNK_SIZE: int = 256):
+    return jax.jit(
+        jax.vmap(lambda a, b, c, d, e: spectrum_flash_sum(a, b, c, d, e, CHUNK_SIZE),
+                 in_axes=(None, 0, 0, 0, 0)))
