@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 from .mesh_generation import icosphere, calculate_rotation, apply_spherical_harm_pulsation
 from overrides import overrides
+from spectrum import get_spectra_flash_sum
 
 
 class StarModel(metaclass=ABCMeta):
@@ -155,3 +156,17 @@ class MeshModel(StarModel):
         mus = self.get_mus(los_vector)
         mu_mask = mus>0
         return self.get_los_velocities(los_vector)[mu_mask]
+    
+    def model_spectra(self, los_vector: jnp.ndarray,
+                      log_wavelengths: jnp.array,
+                      chunk_size: int = 256) -> jnp.array:
+        mus = self.get_mus(los_vector)
+        mus = jnp.where(mus>0, mus, 0.)
+        los_vels = self.get_los_velocities(los_vector)
+        spectra_flash_sum = get_spectra_flash_sum(chunk_size)
+        
+        return spectra_flash_sum(log_wavelengths,
+                                 (mus*self.areas)[:, :, jnp.newaxis],
+                                 mus[:, :, jnp.newaxis],
+                                 los_vels[:, :, jnp.newaxis],
+                                 jnp.repeat(0.5*jnp.ones((1, 20)), mus.shape[0], axis=0))
