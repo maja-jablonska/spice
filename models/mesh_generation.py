@@ -265,7 +265,7 @@ def calculate_rotation(omega, rotation_axis, centers, t):
 
 @jax.jit
 def calculate_los_rotation(omega, rotation_axis, los_vector, centers, t):
-    all_centers, all_vels, radii = calculate_rotation(omega, rotation_axis, centers, t)
+    all_centers, all_vels, r = calculate_rotation(omega, rotation_axis, centers, t)
     mus = jnp.dot(all_centers/jnp.linalg.norm(all_centers, axis=2).reshape((n, -1, 1)), los_vector)
     los_vels = jnp.dot(all_vels/(jnp.nan_to_num(jnp.linalg.norm(all_vels, axis=2).reshape((n, -1, 1)))+1e-10), los_vector)
     return all_centers, los_vels*r, mus
