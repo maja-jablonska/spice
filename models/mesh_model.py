@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import jax.numpy as jnp
 from .mesh_generation import icosphere, calculate_rotation, apply_spherical_harm_pulsation
 from overrides import overrides
-from spectrum import get_spectra_flash_sum
+from spectrum import spectrum_flash_sum, get_spectra_flash_sum
 
 
 class StarModel(metaclass=ABCMeta):
@@ -124,6 +124,12 @@ class MeshModel(StarModel):
                            (jnp.linalg.norm(self.centers, axis=2, keepdims=True)+1e-10),
                            los_vector)
     
+    def get_mus_for_phase(self, phase_index: int, los_vector: jnp.ndarray) -> jnp.ndarray:
+        return -1.*jnp.dot(self.centers[phase_index]/
+                           (jnp.linalg.norm(self.centers[phase_index],
+                                            axis=1, keepdims=True)+1e-10),
+                           los_vector)
+    
     @overrides
     def apply_pulsations(pulsations: jnp.array) -> jnp.array:
         return self.__centers
@@ -151,11 +157,34 @@ class MeshModel(StarModel):
             ), los_vector)
         return self.__rotation_velocity*los_vels*self.__radii
     
+    def get_los_velocities_for_phase(self,
+                                     phase_index: int,
+                                     los_vector: jnp.ndarray = jnp.array([1., 0., 0.])) -> jnp.ndarray:
+        los_vels = jnp.dot(self.__velocities[phase_index]/(
+            jnp.linalg.norm(self.__velocities[phase_index], axis=1, keepdims=True)+1e-10
+            ), los_vector)
+        return self.__rotation_velocity*los_vels*self.__radii[phase_index]
+    
     @overrides
     def get_observed_los_velocities(self, los_vector: jnp.ndarray) -> jnp.ndarray:
         mus = self.get_mus(los_vector)
         mu_mask = mus>0
         return self.get_los_velocities(los_vector)[mu_mask]
+    
+    def model_spectrum(self, phase_index: int,
+                       los_vector: jnp.ndarray,
+                       log_wavelengths: jnp.array,
+                       chunk_size: int = 256) -> jnp.array:
+        mus = self.get_mus_for_phase(phase_index, los_vector)
+        mus = jnp.where(mus>0, mus, 0.)
+        los_vels = self.get_los_velocities_for_phase(phase_index, los_vector)
+        
+        return spectrum_flash_sum(log_wavelengths,
+                                  (mus*self.areas[phase_index])[:, jnp.newaxis],
+                                  mus[:, jnp.newaxis],
+                                  los_vels[:, jnp.newaxis],
+                                  0.5*jnp.ones((1, 20)),
+                                  chunk_size)
     
     def model_spectra(self, los_vector: jnp.ndarray,
                       log_wavelengths: jnp.array,
