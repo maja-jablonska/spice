@@ -4,12 +4,20 @@ import jax.numpy as jnp
 from .mesh_generation import icosphere, calculate_rotation, apply_spherical_harm_pulsation
 from overrides import overrides
 from spectrum import spectrum_flash_sum, get_spectra_flash_sum
+import phoebe
+import numpy as np
+from phoebe import u
+from typing import Optional
+from enum import auto, Enum
+import astropy.units as un
+
+
+DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.])
 
 
 class StarModel(metaclass=ABCMeta):
-    def __init__(self, radius: float, phases: jnp.array, timestamps: jnp.array):
+    def __init__(self, radius: float, timestamps: jnp.array):
         self.__radius = radius
-        self.__phases = phases
         self.__timestamps = timestamps
 
     @property
@@ -25,14 +33,6 @@ class StarModel(metaclass=ABCMeta):
         return self.__timestamps
     
     @abstractproperty
-    def vertices(self) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractproperty
-    def faces(self) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractproperty
     def areas(self) -> jnp.ndarray:
         raise NotImplementedError
     
@@ -45,29 +45,25 @@ class StarModel(metaclass=ABCMeta):
         raise NotImplementedError
     
     @abstractmethod
-    def apply_rotation(self, omega: float, rotation_axis: jnp.ndarray) -> jnp.array:
+    def apply_rotation(self, omega: float, rotation_axis: jnp.ndarray) -> jnp.ndarray:
         raise NotImplementedError
     
     @abstractmethod
-    def apply_pulsations(pulsations: jnp.array) -> jnp.array:
+    def apply_pulsations(pulsations: jnp.ndarray) -> jnp.ndarray:
         raise NotImplementedError
     
     @abstractmethod
-    def get_mus(self, los_vector: jnp.ndarray) -> jnp.ndarray:
+    def get_mus(self) -> jnp.ndarray:
         raise NotImplementedError
     
     @abstractmethod
-    def get_los_velocities(self, los_vector: jnp.ndarray) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def get_observed_los_velocities(self, los_vector: jnp.ndarray) -> jnp.ndarray:
+    def get_los_velocities(self) -> jnp.ndarray:
         raise NotImplementedError
     
 
 class MeshModel(StarModel):
-    def __init__(self, n_vertices: int, radius: float, phases: jnp.array, timestamps: jnp.array):
-        super().__init__(radius, phases, timestamps)
+    def __init__(self, n_vertices: int, radius: float, timestamps: jnp.ndarray):
+        super().__init__(radius, timestamps)
         
         verts, faces, areas, centers, _ = icosphere(n_vertices)
         self.__verts = jnp.repeat(verts[jnp.newaxis, :, :], self.phases.shape[0], axis=0)
@@ -118,25 +114,24 @@ class MeshModel(StarModel):
     def rotation_velocity(self) -> float:
         return self.__rotation_velocity
     
-    @overrides
     def get_mus(self, los_vector: jnp.ndarray) -> jnp.ndarray:
         return -1.*jnp.dot(self.centers/
                            (jnp.linalg.norm(self.centers, axis=2, keepdims=True)+1e-10),
                            los_vector)
     
-    def get_mus_for_phase(self, phase_index: int, los_vector: jnp.ndarray) -> jnp.ndarray:
-        return -1.*jnp.dot(self.centers[phase_index]/
-                           (jnp.linalg.norm(self.centers[phase_index],
+    def get_mus_for_time(self, time_index: int, los_vector: jnp.ndarray) -> jnp.ndarray:
+        return -1.*jnp.dot(self.centers[time_index]/
+                           (jnp.linalg.norm(self.centers[time_index],
                                             axis=1, keepdims=True)+1e-10),
                            los_vector)
     
     @overrides
-    def apply_pulsations(pulsations: jnp.array) -> jnp.array:
+    def apply_pulsations(pulsations: jnp.ndarray) -> jnp.ndarray:
         return self.__centers
 
     @overrides
     def apply_rotation(self, omega: float,
-                       rotation_axis: jnp.ndarray = jnp.array([0., 1., 0.])) -> jnp.array:
+                       rotation_axis: jnp.ndarray = jnp.array([0., 1., 0.])) -> jnp.ndarray:
         self.__omega = omega
         self.__rotation_velocity = omega*self.radius
         rotation_axis = rotation_axis/jnp.linalg.norm(rotation_axis)
@@ -149,32 +144,25 @@ class MeshModel(StarModel):
                                                                              self.timestamps)
         return jnp.vstack([self.__centers, self.__velocities])
     
-    @overrides
     def get_los_velocities(self,
-                           los_vector: jnp.ndarray = jnp.array([1., 0., 0.])) -> jnp.ndarray:
+                           los_vector: jnp.ndarray = DEFAULT_LOS_VECTOR) -> jnp.ndarray:
         los_vels = jnp.dot(self.__velocities/(
             jnp.linalg.norm(self.__velocities, axis=2, keepdims=True)+1e-10
             ), los_vector)
         return self.__rotation_velocity*los_vels*self.__radii
     
-    def get_los_velocities_for_phase(self,
-                                     phase_index: int,
-                                     los_vector: jnp.ndarray = jnp.array([1., 0., 0.])) -> jnp.ndarray:
-        los_vels = jnp.dot(self.__velocities[phase_index]/(
-            jnp.linalg.norm(self.__velocities[phase_index], axis=1, keepdims=True)+1e-10
+    def get_los_velocities_for_time(self,
+                                     time_index: int,
+                                     los_vector: jnp.ndarray = DEFAULT_LOS_VECTOR) -> jnp.ndarray:
+        los_vels = jnp.dot(self.__velocities[time_index]/(
+            jnp.linalg.norm(self.__velocities[time_index], axis=1, keepdims=True)+1e-10
             ), los_vector)
-        return self.__rotation_velocity*los_vels*self.__radii[phase_index]
-    
-    @overrides
-    def get_observed_los_velocities(self, los_vector: jnp.ndarray) -> jnp.ndarray:
-        mus = self.get_mus(los_vector)
-        mu_mask = mus>0
-        return self.get_los_velocities(los_vector)[mu_mask]
+        return self.__rotation_velocity*los_vels*self.__radii[time_index]
     
     def model_spectrum(self, phase_index: int,
                        los_vector: jnp.ndarray,
-                       log_wavelengths: jnp.array,
-                       chunk_size: int = 256) -> jnp.array:
+                       log_wavelengths: jnp.ndarray,
+                       chunk_size: int = 256) -> jnp.ndarray:
         mus = self.get_mus_for_phase(phase_index, los_vector)
         mus = jnp.where(mus>0, mus, 0.)
         los_vels = self.get_los_velocities_for_phase(phase_index, los_vector)
@@ -187,8 +175,8 @@ class MeshModel(StarModel):
                                   chunk_size)
     
     def model_spectra(self, los_vector: jnp.ndarray,
-                      log_wavelengths: jnp.array,
-                      chunk_size: int = 256) -> jnp.array:
+                      log_wavelengths: jnp.ndarray,
+                      chunk_size: int = 256) -> jnp.ndarray:
         mus = self.get_mus(los_vector)
         mus = jnp.where(mus>0, mus, 0.)
         los_vels = self.get_los_velocities(los_vector)
@@ -199,3 +187,141 @@ class MeshModel(StarModel):
                                  mus[:, :, jnp.newaxis],
                                  los_vels[:, :, jnp.newaxis],
                                  jnp.repeat(0.5*jnp.ones((1, 20)), mus.shape[0], axis=0))
+
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    return vector / np.linalg.norm(vector)
+
+def cos_angle_between(v1, v2):
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)
+
+class Component(Enum):
+    PRIMARY = auto()
+    SECONDARY = auto()
+    
+    def __str__(self):
+        return self.name.lower()
+
+class PhoebeModel(StarModel):
+    def __init__(self,
+                 n_triangles: int,
+                 mass: float,
+                 radius: float,
+                 teff: float,
+                 timestamps: np.ndarray):
+        super().__init__(radius, timestamps)
+        self.__b: phoebe.frontend.bundle.Bundle = phoebe.Bundle()
+        self.__b.add_component('star', component='primary',
+                               mass=mass, requiv=radius, teff=teff)
+        self.__b.set_hierarchy('star:primary')
+        self.__dataset_name = 'mesh01'
+        
+        self.__b.add_dataset('mesh',
+                             compute_times=list(timestamps),
+                             dataset=self.__dataset_name)
+        self.__b.set_value('columns', value=['teffs', 'vws', 'us', 'vs', 'ws',
+                                             'visible_centroids', 'mus'])
+        self.__b.run_compute(irrad_method='none',
+                             distortion_method='rotstar',
+                             model='rotmodel', overwrite=True)
+        self.__b.set_value('ntriangles', value=n_triangles)
+        # TODO: how NOT to run compute two times?
+        self.__b.run_compute(irrad_method='none',
+                             distortion_method='rotstar',
+                             model='rotmodel', overwrite=True)
+        
+    def __get_mesh_coordinates(self, time: float, component: Optional[Component] = None) -> jnp.ndarray:
+        return jnp.vstack([self.get_parameter(time, 'us', component),
+                           self.get_parameter(time, 'vs', component),
+                           self.get_parameter(time, 'ws', component)])
+    
+    def __get_mesh_normals(self, time: float, component: Optional[Component] = None) -> np.ndarray:
+        return self.get_parameter(time, 'uvw_normals', component)
+        
+    @property
+    def mass(self) -> float:
+        return self.b.get_parameter(qualifier='mass',
+                                    component=Component.PRIMARY).value
+    
+    @property
+    def teff(self) -> float:
+        return self.b.get_parameter(qualifier='teff',
+                                    component=Component.PRIMARY).value
+    
+    @property
+    def dataset_name(self) -> str:
+        return self.__dataset_name
+        
+    @property
+    def centers(self) -> jnp.ndarray:
+        return jnp.swapaxes(
+            jnp.array([self.__get_mesh_coordinates(time, Component.PRIMARY)
+                       for time in self.b.times]), 1, 2)
+
+    @property
+    def areas(self) -> jnp.ndarray:
+        return jnp.array([self.get_parameter(time, 'areas', Component.PRIMARY)
+                          for time in self.b.times])
+    
+    @property
+    def rotation_velocity(self) -> float:
+        per = self.b.get_parameter(qualifier='period',
+                                   component=Component.PRIMARY).value
+        rad = self.b.get_parameter(qualifier='requiv',
+                                   component=Component.PRIMARY).value
+        return (2*jnp.pi*(un.solRad*rad).to(un.km).value)/((un.day*per).to(un.s).value)
+    
+    @property
+    def b(self):
+        return self.__b
+    
+    @overrides
+    def get_mus(self) -> jnp.ndarray:
+        return jnp.array([self.get_parameter(time, 'mu', Component.PRIMARY)
+                          for time in self.timestamps])
+    
+    @property
+    def rotation_velocity(self) -> float:
+        return 2*jnp.pi*(self.radius*un.SolRad).to(un.km).value*self.__frequency
+    
+    def apply_rotation(self, period: float, inclination: float) -> jnp.ndarray:
+        self.__frequency = 1/period
+        self.__inclination = inclination
+        self.b.set_value(qualifier='incl', component='primary', value=inclination)
+        self.b.set_value(qualifier='period', component='primary', value=period)
+        self.b.run_compute(irrad_method='none',
+                           distortion_method='rotstar',
+                           model='rotmodel', overwrite=True)
+        return self.get_los_velocities()
+        
+    
+    @overrides
+    def apply_pulsations(pulsations: jnp.ndarray) -> jnp.ndarray:
+        return jnp.zeros(1,)
+    
+    @overrides
+    def get_los_velocities(self) -> jnp.ndarray:
+        return jnp.array([self.get_parameter(time, 'vws', Component.PRIMARY) for time in self.b.times])
+    
+    
+    def get_parameter(self, time: float, qualifier: str, component: Optional[Component] = None) -> np.array:
+        if component is not None:
+            return self.b.get_parameter(qualifier=qualifier,
+                                        component=str(component),
+                                        dataset=self.dataset_name,
+                                        kind='mesh',
+                                        time=time).value
+        else:
+            return self.b.get_parameter(qualifier=qualifier,
+                            dataset=self.dataset_name,
+                            kind='mesh',
+                            time=time).value
+    
+    def get_loggs(self, time: float, component: Optional[Component] = None) -> np.ndarray:
+        return self.get_parameter(time, 'loggs', component)
+    
+    def get_teffs(self, time: float, component: Optional[Component] = None) -> np.ndarray:
+        return self.get_parameter(time, 'teffs', component)
