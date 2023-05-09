@@ -176,6 +176,7 @@ class MeshModel(StarModel):
     
     def model_spectra(self, los_vector: jnp.ndarray,
                       log_wavelengths: jnp.ndarray,
+                      parameters: jnp.ndarray,
                       chunk_size: int = 256) -> jnp.ndarray:
         mus = self.get_mus(los_vector)
         mus = jnp.where(mus>0, mus, 0.)
@@ -186,7 +187,7 @@ class MeshModel(StarModel):
                                  (mus*self.areas)[:, :, jnp.newaxis],
                                  mus[:, :, jnp.newaxis],
                                  los_vels[:, :, jnp.newaxis],
-                                 jnp.repeat(0.5*jnp.ones((1, 20)), mus.shape[0], axis=0))
+                                 parameters)
 
 
 def unit_vector(vector):
@@ -212,7 +213,6 @@ class PhoebeModel(StarModel):
                  radius: float,
                  teff: float,
                  timestamps: np.ndarray):
-        super().__init__(radius, timestamps)
         self.__b: phoebe.frontend.bundle.Bundle = phoebe.Bundle()
         self.__b.add_component('star', component='primary',
                                mass=mass, requiv=radius, teff=teff)
@@ -223,7 +223,7 @@ class PhoebeModel(StarModel):
                              compute_times=list(timestamps),
                              dataset=self.__dataset_name)
         self.__b.set_value('columns', value=['teffs', 'vws', 'us', 'vs', 'ws',
-                                             'visible_centroids', 'mus'])
+                                             'visible_centroids', 'mus', 'areas'])
         self.__b.run_compute(irrad_method='none',
                              distortion_method='rotstar',
                              model='rotmodel', overwrite=True)
@@ -232,6 +232,10 @@ class PhoebeModel(StarModel):
         self.__b.run_compute(irrad_method='none',
                              distortion_method='rotstar',
                              model='rotmodel', overwrite=True)
+        
+        super().__init__(radius, self.__b.times)
+
+
         
     def __get_mesh_coordinates(self, time: float, component: Optional[Component] = None) -> jnp.ndarray:
         return jnp.vstack([self.get_parameter(time, 'us', component),
@@ -260,6 +264,9 @@ class PhoebeModel(StarModel):
         return jnp.swapaxes(
             jnp.array([self.__get_mesh_coordinates(time, Component.PRIMARY)
                        for time in self.b.times]), 1, 2)
+    
+    def get_areas_for_time(self, time: float) -> jnp.ndarray:
+        return self.get_parameter(time, 'areas', Component.PRIMARY)
 
     @property
     def areas(self) -> jnp.ndarray:
@@ -278,9 +285,12 @@ class PhoebeModel(StarModel):
     def b(self):
         return self.__b
     
+    def get_mus_for_time(self, time: float) -> jnp.ndarray:
+        return self.get_parameter(time, 'mus', Component.PRIMARY)
+    
     @overrides
     def get_mus(self) -> jnp.ndarray:
-        return jnp.array([self.get_parameter(time, 'mu', Component.PRIMARY)
+        return jnp.array([self.get_parameter(time, 'mus', Component.PRIMARY)
                           for time in self.timestamps])
     
     @property
@@ -301,6 +311,9 @@ class PhoebeModel(StarModel):
     @overrides
     def apply_pulsations(pulsations: jnp.ndarray) -> jnp.ndarray:
         return jnp.zeros(1,)
+    
+    def get_los_velocities_for_time(self, time: float) -> jnp.ndarray:
+        return self.get_parameter(time, 'vws', Component.PRIMARY)
     
     @overrides
     def get_los_velocities(self) -> jnp.ndarray:
@@ -325,3 +338,33 @@ class PhoebeModel(StarModel):
     
     def get_teffs(self, time: float, component: Optional[Component] = None) -> np.ndarray:
         return self.get_parameter(time, 'teffs', component)
+    
+    def model_spectrum(self, time: float,
+                       log_wavelengths: jnp.ndarray,
+                       parameters: jnp.ndarray,
+                       chunk_size: int = 256) -> jnp.ndarray:
+        mus = self.get_mus_for_time(time)
+        mus = jnp.where(mus>0, mus, 0.)
+        los_vels = self.get_los_velocities_for_time(time)
+        
+        return spectrum_flash_sum(log_wavelengths,
+                                  (mus*self.get_areas_for_time(time))[:, jnp.newaxis],
+                                  mus[:, jnp.newaxis],
+                                  los_vels[:, jnp.newaxis],
+                                  parameters,
+                                  chunk_size)
+    
+    def model_spectra(self,
+                      log_wavelengths: jnp.ndarray,
+                      parameters: jnp.ndarray,
+                      chunk_size: int = 256) -> jnp.ndarray:
+        mus = self.get_mus()
+        mus = jnp.where(mus>0, mus, 0.)
+        los_vels = self.get_los_velocities()
+        spectra_flash_sum = get_spectra_flash_sum(chunk_size)
+        
+        return spectra_flash_sum(log_wavelengths,
+                                 (mus*self.areas)[:, :, jnp.newaxis],
+                                 mus[:, :, jnp.newaxis],
+                                 los_vels[:, :, jnp.newaxis],
+                                 parameters)
