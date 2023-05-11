@@ -219,25 +219,25 @@ def spherical_harmonic(m, n, polar_coordinates):
                                       n_max=10)
 
 
-def apply_spherical_harm_pulsation(verts, centers, faces, magnitude, m, n):
+def apply_spherical_harm_pulsation(verts, centers, faces, areas, magnitude, m, n):
     #checkify.check(m<=n, "m has to be lesser or equal n")
     vert_axis = len(verts.shape)-1
     
     direction_vectors = verts/jnp.linalg.norm(verts, axis=vert_axis, keepdims=True)
     
     polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(verts))
-    center_polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(centers))
+    polar_coordinates_centers = jnp.nan_to_num(mesh_polar_vertices(centers))
     
     sph_ham = spherical_harmonic(m, n, polar_coordinates).real
+    sph_ham_centers = spherical_harmonic(m, n, polar_coordinates_centers).real
     
     magnitudes = magnitude*sph_ham
     
     vert_offsets = magnitudes.reshape((-1, 1))*direction_vectors
     
-    areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts+vert_offsets, faces.astype(jnp.int32))
+    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts+vert_offsets, faces.astype(jnp.int32))
     
-    return vert_offsets, faces, areas, centers, sph_ham[:, jnp.newaxis]
-
+    return vert_offsets, new_centers-centers, new_areas-areas, sph_ham_centers[:, jnp.newaxis]
 
 
 @jax.jit
