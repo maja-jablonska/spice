@@ -2,28 +2,90 @@ from abc import ABCMeta, abstractmethod, abstractproperty
 from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
-from .mesh_generation import icosphere, calculate_rotation, apply_spherical_harm_pulsation
+import jaxlib
+from .mesh_generation import vertex_to_polar, icosphere, calculate_rotation, apply_spherical_harm_pulsation
 from overrides import overrides
 from spectrum import spectrum_flash_sum, get_spectra_flash_sum
 import phoebe
 import numpy as np
 from phoebe import u
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 from enum import auto, Enum
 import astropy.units as un
+from jax.numpy import interp
+from functools import partial
+from collections import namedtuple
 
 
-DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([1., 0., 0.])
+class Abundance(Enum):
+    FeH = auto()
+    C = auto()
+    N = auto()
+    O = auto()
+    Li = auto()
+    Mg = auto()
+    Si = auto()
+    Ca = auto()
+    Ti = auto()
+    Na = auto()
+    Mn = auto()
+    Co = auto()
+    Ni = auto()
+    Ba = auto()
+    Sr = auto()
+    Eu = auto()
+    Fe = auto()
+
+
+SOLAR_TEFF = jnp.log10(5780)
+SOLAR_LOGG = jnp.log10(4.43)
+SOLAR_VTURB = 2.0 # TODO: check the solar Vrad
+# TODO: check the FeH
+# FeH - logarytm
+SOLAR_ABUNDANCES = jnp.array(
+    [0., 8.46, 7.83, 8.69, 0.96, 7.55, 7.51, 6.30,
+     4.97, 6.22, 5.42, 4.94, 6.20, 2.27, 2.83, 0.52, 7.46])
+
+
+DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.])
+DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([1., 0., 0.])
     
+
 vec_apply_spherical_harm_pulsation = jax.jit(jax.vmap(apply_spherical_harm_pulsation,
                                                       in_axes = (0, 0, 0, 0, 0, None, None)))
-    
+
+def __cos_law(lat1, lon1, lat2, lon2):
+    """
+    Calculate the great circle angular distance between two points
+    on the sphere (specified in radians)
+
+    All args must be of equal length.    
+
+    """
+    lat1 = jnp.pi/2 - lat1
+    lat2 = jnp.pi/2 - lat2
+    a = jnp.sin(lat1)*jnp.sin(lat2) + jnp.cos(lat1) * jnp.cos(lat2) * jnp.cos(lon2 - lon1)
+
+    return jnp.arccos(a)
+
+
+def __overabundance_spot_params(theta, phi, abun, abun_bg, radius, radius_factor, coord):
+    c_th, c_ph = vertex_to_polar(coord)
+    dist_rad = __cos_law(theta, phi, c_th-jnp.pi/2, c_ph-jnp.pi)
+    angles = jnp.array([0,radius*radius_factor,radius,jnp.pi])
+    abuns = jnp.array([abun, abun, abun_bg, abun_bg])
+    y = interp(dist_rad, angles, abuns, abun, abun_bg)
+    return y
+
+
+v_spot = jax.vmap(__overabundance_spot_params, in_axes=(None, None, None, None, None, None, 0))
+
 
 def inclination_to_axis_vector(inclination: Union[float, jnp.array]) -> jnp.array:
     if isinstance(inclination, float):
         los_vector = jnp.array([jnp.sin(jnp.deg2rad(inclination)),
                                 jnp.cos(jnp.deg2rad(inclination)), 0.])
-    elif isinstance(inclination, jnp.ndarray):
+    elif isinstance(inclination, jaxlib.xla_extension.ArrayImpl) or isinstance(inclination, np.ndarray):
         if inclination.shape==(1,):
             los_vector = jnp.array([jnp.sin(jnp.deg2rad(inclination[0])),
                                     jnp.cos(jnp.deg2rad(inclination[0])), 0.])
@@ -36,433 +98,197 @@ def inclination_to_axis_vector(inclination: Union[float, jnp.array]) -> jnp.arra
         raise ValueError('''Inclination has to be a either a float value, 1D array 
         with inclination value, or rotation axis as a 3D array''')
     return los_vector
+        
+        
+MeshModel = namedtuple('MeshModel', ['timestamps',
+                                     'los_vector',
+                                     'radius',
+                                     'mass',
+                                     'teffs',
+                                     'logg',
+                                     'vturb',
+                                     'abundances',
+                                     'vertices',
+                                     'centers',
+                                     'faces',
+                                     'areas',
+                                     'mus',
+                                     'velocities',
+                                     'los_velocities'])
 
 
-class StarModel(metaclass=ABCMeta):
-    def __init__(self, radius: float, timestamps: jnp.array):
-        self.__radius = radius
-        self.__timestamps = timestamps
+def mesh_model(n_vertices: int,
+               timestamps: jnp.ndarray,
+               radius: float = 1.0,
+               mass: float = 1.0,
+               teff: float = SOLAR_TEFF,
+               logg: float = SOLAR_LOGG,
+               vturb: float = SOLAR_VTURB,
+               abundances: jnp.ndarray = SOLAR_ABUNDANCES,
+               los_vector: jnp.ndarray = DEFAULT_LOS_VECTOR) -> MeshModel:
+    verts, faces, areas, centers, _ = icosphere(n_vertices)
+    teffs = jnp.ones_like(areas)*teff
+    abundances = jnp.repeat(abundances.reshape((1, -1)), areas.shape[0], axis=0)
+    vertices = jnp.repeat(verts[jnp.newaxis, :, :], timestamps.shape[0], axis=0)
+    faces = jnp.repeat(faces[jnp.newaxis, :, :], timestamps.shape[0], axis=0)
+    areas = jnp.repeat(areas[jnp.newaxis, :], timestamps.shape[0], axis=0)
+    centers = jnp.repeat(centers[jnp.newaxis, :, :], timestamps.shape[0], axis=0)
+    mus = -1.*jnp.dot(centers/
+                      (jnp.linalg.norm(centers, axis=2, keepdims=True)+1e-10),
+                      los_vector)
+    velocities = jnp.zeros_like(centers)
+    los_velocities = jnp.zeros_like(areas)
+    return MeshModel(timestamps=timestamps,
+                     los_vector=los_vector,
+                     radius=radius,
+                     mass=mass,
+                     teffs=teffs,
+                     logg=logg,
+                     vturb=vturb,
+                     abundances=abundances,
+                     vertices=vertices,
+                     centers=centers,
+                     faces=faces,
+                     areas=areas,
+                     mus=mus,
+                     velocities=velocities,
+                     los_velocities=los_velocities[:, :, jnp.newaxis])
 
-    @property
-    def radius(self):
-        return self.__radius
-    
-    @property
-    def timestamps(self) -> jnp.ndarray:
-        return self.__timestamps
-    
-    @abstractproperty
-    def areas(self) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractproperty
-    def centers(self) -> jnp.ndarray:
-        raise NotImplementedError
+@jax.jit
+def pulsation(mesh_model: Dict[str, list],
+              m: float, n: float,
+              magnitude: float,
+              t0: float, period: float) -> MeshModel:
+    phases = (mesh_model['timestamps'][:, jnp.newaxis]-t0)/period
+    amplifications = magnitude*jnp.sin(phases)
+    velocities = magnitude*jnp.cos(phases)
+    vert_offsets, center_offsets, area_offsets, sph_ham = vec_apply_spherical_harm_pulsation(mesh_model['vertices'],
+                                                                                             mesh_model['centers'],
+                                                                                             mesh_model['faces'],
+                                                                                             mesh_model['areas'],
+                                                                                             amplifications, m, n)
+    puls_velocities = mesh_model['velocities']+mesh_model['centers']*velocities[:, jnp.newaxis]*sph_ham
+    return MeshModel(timestamps=mesh_model['timestamps'],
+                     los_vector=mesh_model['los_vector'],
+                     radius=mesh_model['radius'],
+                     mass=mesh_model['mass'],
+                     teffs=mesh_model['teffs'],
+                     logg=mesh_model['logg'],
+                     vturb=mesh_model['vturb'],
+                     abundances=mesh_model['abundances'],
+                     vertices=mesh_model['vertices']+vert_offsets,
+                     centers=mesh_model['centers']+center_offsets,
+                     faces=mesh_model['faces'],
+                     areas=mesh_model['areas']+area_offsets,
+                     mus=mesh_model['mus'],
+                     velocities=puls_velocities,
+                     los_velocities=-1.*jnp.dot(puls_velocities, mesh_model['los_vector']))
 
-    @abstractproperty
-    def rotation_velocity(self) -> float:
-        raise NotImplementedError
+@jax.jit
+def rotation(mesh_model: Dict[str, list],
+             period: Optional[float] = None,
+             rotation_velocity: Optional[float] = None,
+             rotation_axis: jnp.array = DEFAULT_ROTATION_AXIS) -> MeshModel:
+    if period is None and rotation_velocity is None:
+        raise ValueError('Either period or rotation_speed has to be provided.')
+    elif period is not None and rotation_velocity is not None:
+        raise ValueError('Only one of period and rotation_speed has to be provided.')
+    elif period is not None:
+        # TODO: przeliczyć radius na km
+        omega = 2*jnp.pi/period # tu na s
+        rotation_velocity = omega*mesh_model['radius']
+    else:
+        omega = rotation_velocity/mesh_model['radius']
     
-    @abstractmethod
-    def apply_rotation(self, period: float, inclination: Union[float, jnp.ndarray]) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def apply_pulsation(self, m: float, n: float, magnitude: float, t0: float, period: float) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def get_mus(self) -> jnp.ndarray:
-        raise NotImplementedError
-        
-    @abstractmethod
-    def get_mus_for_time(self, time_index: int) -> jnp.ndarray:
-        raise NotImplementedError
-    
-    @abstractmethod
-    def get_los_velocities(self) -> jnp.ndarray:
-        raise NotImplementedError
-        
-    @abstractmethod
-    def get_los_velocities_for_time(self, time_index: int) -> jnp.ndarray:
-        raise NotImplementedError
-        
-    @abstractmethod
-    def model_spectrum(self,
-                       time_index: int,
-                       log_wavelengths: jnp.ndarray,
-                       parameters: jnp.ndarray,
-                       chunk_size: int) -> jnp.ndarray:
-        raise NotImplementedError
-        
-    @abstractmethod
-    def model_spectra(self,
-                      log_wavelengths: jnp.ndarray,
-                      parameters: jnp.ndarray,
-                      chunk_size: int) -> jnp.ndarray:
-        raise NotImplementedError
-    
+    rot_vertices_offsets, rot_center_offsets, rotation_velocities, radii = calculate_rotation(omega,
+                                                                                              rotation_axis,
+                                                                                              mesh_model['vertices'],
+                                                                                              mesh_model['centers'],
+                                                                                              mesh_model['timestamps'])
+    new_centers = mesh_model['centers']+rot_center_offsets
+    mus = -1.*jnp.dot(new_centers/
+                  (jnp.linalg.norm(new_centers, axis=2, keepdims=True)+1e-10),
+                  mesh_model['los_vector'])
+    rot_los_vels = (jnp.dot(rotation_velocities/(
+            jnp.linalg.norm(rotation_velocities, axis=2, keepdims=True)+1e-10),
+        mesh_model['los_vector'])*radii*rotation_velocity)[:, :, jnp.newaxis]
+    return MeshModel(timestamps=mesh_model['timestamps'],
+                     los_vector=mesh_model['los_vector'],
+                     radius=mesh_model['radius'],
+                     mass=mesh_model['mass'],
+                     teffs=mesh_model['teffs'],
+                     logg=mesh_model['logg'],
+                     vturb=mesh_model['vturb'],
+                     abundances=mesh_model['abundances'],
+                     vertices=mesh_model['vertices']+rot_vertices_offsets,
+                     centers=new_centers,
+                     faces=mesh_model['faces'],
+                     areas=mesh_model['areas'],
+                     mus=mus,
+                     velocities=mesh_model['velocities']+rotation_velocities,
+                     los_velocities=mesh_model['los_velocities'].reshape((len(mesh_model['timestamps']),
+                                                                       -1, 1))+rot_los_vels)
 
-class MeshModel(StarModel):
-    def __init__(self, n_vertices: int, radius: float, timestamps: jnp.ndarray):
-        super().__init__(radius, timestamps)
-        
-        verts, faces, areas, centers, _ = icosphere(n_vertices)
-        self.__verts = jnp.repeat(verts[jnp.newaxis, :, :], self.timestamps.shape[0], axis=0)
-        self.__faces = jnp.repeat(faces[jnp.newaxis, :, :], self.timestamps.shape[0], axis=0)
-        self.__areas = jnp.repeat(areas[jnp.newaxis, :], self.timestamps.shape[0], axis=0)
-        self.__centers = jnp.repeat(centers[jnp.newaxis, :, :], self.timestamps.shape[0], axis=0)
-        
-        self.__vert_offsets = jnp.zeros_like(self.__verts)
-        self.__face_offsets = jnp.zeros_like(self.__faces)
-        self.__area_offsets = jnp.zeros_like(self.__areas)
-        self.__center_offsets = jnp.zeros_like(self.__centers)
+@jax.jit
+def teff_spot(mesh_model: Dict[str, list],
+              center_theta: float, center_phi: float,
+              teff_difference: float,
+              radius: float, radius_factor: float) -> MeshModel:
+    teffs = v_spot(center_theta, center_phi, teff_difference, 0., radius, radius_factor, mesh_model['centers'][0])
+    return MeshModel(timestamps=mesh_model['timestamps'],
+                     los_vector=mesh_model['los_vector'],
+                     radius=mesh_model['radius'],
+                     mass=mesh_model['mass'],
+                     teffs=mesh_model['teffs']+teffs,
+                     logg=mesh_model['logg'],
+                     vturb=mesh_model['vturb'],
+                     abundances=mesh_model['abundances'],
+                     vertices=mesh_model['vertices'],
+                     centers=mesh_model['centers'],
+                     faces=mesh_model['faces'],
+                     areas=mesh_model['areas'],
+                     mus=mesh_model['mus'],
+                     velocities=mesh_model['velocities'],
+                     los_velocities=mesh_model['los_velocities'])
 
-        self.__radii = jnp.zeros_like(self.__areas)
-        
-        self.__omega = 0.0
-        self.__rotation_velocity = 0.0
-        self.__rotation_axis = jnp.array([0., 1., 0.])
-        self.__pulsation_velocities = jnp.zeros_like(self.__centers)
-        self.__rotation_velocities = jnp.zeros_like(self.__centers)
-        
-        self.__los_vector = DEFAULT_LOS_VECTOR
-    
-    @property
-    def vertices(self) -> jnp.ndarray:
-        return self.__verts+self.__vert_offsets
-    
-    @property
-    def faces(self) -> jnp.ndarray:
-        return self.__faces+self.__face_offsets
-    
-    @faces.setter
-    def faces(self, faces: jnp.ndarray):
-        self.__faces = faces
-    
-    @property
-    def areas(self) -> jnp.ndarray:
-        return self.__areas+self.__area_offsets
-    
-    @areas.setter
-    def areas(self, areas: jnp.ndarray):
-        self.__areas = areas
-    
-    @property
-    def centers(self) -> jnp.ndarray:
-        return self.__centers+self.__center_offsets
-    
-    @centers.setter
-    def centers(self, centers: jnp.ndarray):
-        self.__centers = centers
-        
-    @property
-    def rotation_axis(self) -> jnp.ndarray:
-        return self.__rotation_axis
-    
-    @property
-    def rotation_velocity(self) -> float:
-        return self.__rotation_velocity
-    
-    @property
-    def los_vector(self) -> jnp.array:
-        return self.__los_vector
-    
-    @los_vector.setter
-    def los_vector(self, new_los_vector: jnp.array):
-        self.__los_vector = new_los_vector
-        
-    @property
-    def velocities(self) -> jnp.ndarray:
-        return self.__pulsation_velocities+self.__rotation_velocities
-    
-    @overrides
-    def get_mus(self) -> jnp.ndarray:
-        return -1.*jnp.dot(self.centers/
-                           (jnp.linalg.norm(self.centers, axis=2, keepdims=True)+1e-10),
-                           self.los_vector)
-    
-    @overrides
-    def get_mus_for_time(self, time_index: int) -> jnp.ndarray:
-        return -1.*jnp.dot(self.centers[time_index]/
-                           (jnp.linalg.norm(self.centers[time_index],
-                                            axis=1, keepdims=True)+1e-10),
-                           self.los_vector)
-    
-    def reset_to_mesh(self):
-        self.__vert_offsets = jnp.zeros_like(self.__verts)
-        self.__face_offsets = jnp.zeros_like(self.__faces)
-        self.__area_offsets = jnp.zeros_like(self.__areas)
-        self.__center_offsets = jnp.zeros_like(self.__centers)
-        self.__pulsation_velocities = jnp.zeros_like(self.__centers)
-        self.__rotation_velocities = jnp.zeros_like(self.__centers)
-    
-    @overrides
-    def apply_pulsation(self, m: float, n: float, magnitude: float, t0: float, period: float) -> jnp.ndarray:
-        # Each pulsation is represented by:
-        # m, n, max_amplification, t0 (time of phase 0), period
-        
-        phases = 2*jnp.pi*(self.timestamps[:, jnp.newaxis]-t0)/period
-        amplifications = magnitude*jnp.sin(phases)
-        velocities = magnitude*jnp.cos(phases)
-        
-        # return vert_offsets, new_centers-centers, new_areas-areas
-        
-        # Shape
-        # (timesteps, n_pulsations, n_vertices, 3)
-        vert_offsets, center_offsets, area_offsets, sph_ham = vec_apply_spherical_harm_pulsation(self.vertices,
-                                                                                    self.centers,
-                                                                                    self.faces,
-                                                                                    self.areas,
-                                                                                    amplifications,
-                                                                                    m, n)
-        self.__center_offsets = self.__center_offsets+center_offsets
-        self.__vert_offsets = self.__vert_offsets+vert_offsets
-        self.__area_offsets = self.__area_offsets+area_offsets
-        self.__pulsation_velocities = self.__pulsation_velocities + velocities[:, jnp.newaxis]*sph_ham
+@jax.jit
+def abundance_spot(mesh_model: Dict[str, list],
+                   center_theta: float, center_phi: float,
+                   abundance_difference: float,
+                   radius: float, radius_factor: float,
+                   abundance_indx: int) -> MeshModel:
+    abuns = v_spot(center_theta, center_phi, abundance_difference, 0., radius, radius_factor, mesh_model['centers'][0])
+    return MeshModel(timestamps=mesh_model['timestamps'],
+                     los_vector=mesh_model['los_vector'],
+                     radius=mesh_model['radius'],
+                     mass=mesh_model['mass'],
+                     teffs=mesh_model['teffs'],
+                     logg=mesh_model['logg'],
+                     vturb=mesh_model['vturb'],
+                     abundances=mesh_model['abundances'].at[:, abundance_indx].set(
+                         mesh_model['abundances'][:, abundance_indx]+abuns),
+                     vertices=mesh_model['vertices'],
+                     centers=mesh_model['centers'],
+                     faces=mesh_model['faces'],
+                     areas=mesh_model['areas'],
+                     mus=mesh_model['mus'],
+                     velocities=mesh_model['velocities'],
+                     los_velocities=mesh_model['los_velocities'])
 
-        return jnp.vstack([self.centers, self.velocities])
-
-    @overrides
-    def apply_rotation(self, period: float,
-                       inclination: Union[float, jnp.ndarray] = jnp.array([0., 1., 0.])) -> jnp.ndarray:
-        los_vector = inclination_to_axis_vector(inclination)
-        self.__omega = 2*jnp.pi/period
-        self.__rotation_velocity = self.__omega*self.radius
-
-        self.__los_vector = inclination_to_axis_vector(90.-inclination)
-        self.__center_offsets, self.__rotation_velocities, self.__radii = calculate_rotation(self.__omega,
-                                                                                             self.__rotation_axis,
-                                                                                             self.__centers,
-                                                                                             self.timestamps)
-        return jnp.vstack([self.centers, self.velocities])
-    
-    @overrides
-    def get_los_velocities(self) -> jnp.ndarray:
-        los_vels = jnp.dot(self.velocities/(
-            jnp.linalg.norm(self.velocities, axis=2, keepdims=True)+1e-10
-        ), self.los_vector)
-        return self.__rotation_velocity*los_vels*self.__radii
-    
-    @overrides
-    def get_los_velocities_for_time(self, time_index: int) -> jnp.ndarray:
-        los_vels = jnp.dot(self.velocities[time_index]/(
-            jnp.linalg.norm(self.velocities[time_index], axis=1, keepdims=True)+1e-10
-            ), self.los_vector)
-        return self.__rotation_velocity*los_vels*self.__radii[time_index]
-    
-    @overrides
-    def model_spectrum(self,
-                       time_index: int,
-                       log_wavelengths: jnp.ndarray,
-                       parameters: jnp.ndarray,
-                       chunk_size: int = 256) -> jnp.ndarray:
-        mus = self.get_mus_for_time(time_index)
-        mus = jnp.where(mus>0, mus, 0.)
-        los_vels = self.get_los_velocities_for_time(time_index)
-        
-        return spectrum_flash_sum(log_wavelengths,
-                                  (mus*self.areas[time_index])[:, jnp.newaxis],
-                                  mus[:, jnp.newaxis],
-                                  los_vels[:, jnp.newaxis],
-                                  parameters,
-                                  chunk_size)
-    
-    @overrides
-    def model_spectra(self,
-                      log_wavelengths: jnp.ndarray,
-                      parameters: jnp.ndarray,
-                      chunk_size: int = 256) -> jnp.ndarray:
-        mus = self.get_mus()
-        mus = jnp.where(mus>0, mus, 0.)
-        los_vels = self.get_los_velocities()
-        spectra_flash_sum = get_spectra_flash_sum(chunk_size)
-        
-        return spectra_flash_sum(log_wavelengths,
-                                 (mus*self.areas)[:, :, jnp.newaxis],
-                                 mus[:, :, jnp.newaxis],
-                                 los_vels[:, :, jnp.newaxis],
-                                 parameters)
-
-
-def unit_vector(vector):
-    """ Returns the unit vector of the vector.  """
-    return vector / np.linalg.norm(vector)
-
-def cos_angle_between(v1, v2):
-    v1_u = unit_vector(v1)
-    v2_u = unit_vector(v2)
-    return np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)
-
-class Component(Enum):
-    PRIMARY = auto()
-    SECONDARY = auto()
-    
-    def __str__(self):
-        return self.name.lower()
-
-class PhoebeModel(StarModel):
-    def __init__(self,
-                 n_triangles: int,
-                 mass: float,
-                 radius: float,
-                 teff: float,
-                 timestamps: np.ndarray):
-        self.__b: phoebe.frontend.bundle.Bundle = phoebe.Bundle()
-        self.__b.add_component('star', component='primary',
-                               mass=mass, requiv=radius, teff=teff)
-        self.__b.set_hierarchy('star:primary')
-        self.__dataset_name = 'mesh01'
-        
-        self.__b.add_dataset('mesh',
-                             compute_times=list(timestamps),
-                             dataset=self.__dataset_name)
-        self.__b.set_value('columns', value=['teffs', 'vws', 'us', 'vs', 'ws', 'loggs',
-                                             'visible_centroids', 'mus', 'areas'])
-        self.__b.run_compute(irrad_method='none',
-                             distortion_method='rotstar',
-                             model='rotmodel', overwrite=True)
-        self.__b.set_value('ntriangles', value=n_triangles)
-        # TODO: how NOT to run compute two times?
-        self.__b.run_compute(irrad_method='none',
-                             distortion_method='rotstar',
-                             model='rotmodel', overwrite=True)
-        
-        super().__init__(radius, self.__b.times)
-
-
-        
-    def __get_mesh_coordinates(self, time: float, component: Optional[Component] = None) -> jnp.ndarray:
-        return jnp.vstack([self.get_parameter(time, 'us', component),
-                           self.get_parameter(time, 'vs', component),
-                           self.get_parameter(time, 'ws', component)])
-    
-    def __get_mesh_normals(self, time: float, component: Optional[Component] = None) -> np.ndarray:
-        return self.get_parameter(time, 'uvw_normals', component)
-        
-    @property
-    def mass(self) -> float:
-        return self.b.get_parameter(qualifier='mass',
-                                    component=Component.PRIMARY).value
-    
-    @property
-    def teff(self) -> float:
-        return self.b.get_parameter(qualifier='teff',
-                                    component=Component.PRIMARY).value
-    
-    @property
-    def dataset_name(self) -> str:
-        return self.__dataset_name
-        
-    @property
-    def centers(self) -> jnp.ndarray:
-        return jnp.swapaxes(
-            jnp.array([self.__get_mesh_coordinates(time, Component.PRIMARY)
-                       for time in self.b.times]), 1, 2)
-
-    @property
-    def areas(self) -> jnp.ndarray:
-        return jnp.array([self.get_parameter(time, 'areas', Component.PRIMARY)
-                          for time in self.b.times])
-    
-    def get_areas_for_time(self, time_index: int) -> jnp.ndarray:
-        return self.get_parameter(self.timestamps[time_index], 'areas', Component.PRIMARY)
-    
-    @property
-    def rotation_velocity(self) -> float:
-        per = self.b.get_parameter(qualifier='period',
-                                   component=Component.PRIMARY).value
-        rad = self.b.get_parameter(qualifier='requiv',
-                                   component=Component.PRIMARY).value
-        return (2*jnp.pi*(un.solRad*rad).to(un.km).value)/((un.day*per).to(un.s).value)
-    
-    @property
-    def b(self):
-        return self.__b
-    
-    @property
-    def rotation_velocity(self) -> float:
-        return 2*jnp.pi*(self.radius*un.SolRad).to(un.km).value*self.__frequency
-    
-    @overrides
-    def get_mus(self) -> jnp.ndarray:
-        return jnp.array([self.get_parameter(time, 'mus', Component.PRIMARY)
-                          for time in self.timestamps])
-    @overrides
-    def get_mus_for_time(self, time_index: int) -> jnp.ndarray:
-        return self.get_parameter(self.timestamps[time_index], 'mus', Component.PRIMARY)
-
-    @overrides
-    def apply_rotation(self, period: float,
-                       inclination: Union[float, jnp.ndarray] = jnp.array([0., 1., 0.])) -> jnp.ndarray:
-        self.__frequency = 1/period
-        self.__inclination = inclination
-        self.b.set_value(qualifier='incl', component='primary', value=inclination)
-        self.b.set_value(qualifier='period', component='primary', value=period)
-        self.b.run_compute(irrad_method='none',
-                           distortion_method='rotstar',
-                           model='rotmodel', overwrite=True)
-        return self.get_los_velocities()
-
-    @overrides
-    def apply_pulsation(self, m: float, n: float, magnitude: float, t0: float, period: float) -> jnp.ndarray:
-        return jnp.zeros(1,)
-    
-    @overrides
-    def get_los_velocities_for_time(self, time_index: int) -> jnp.ndarray:
-        return self.get_parameter(self.timestamps[time_index], 'vws', Component.PRIMARY)
-    
-    @overrides
-    def get_los_velocities(self) -> jnp.ndarray:
-        return jnp.array([self.get_parameter(time, 'vws', Component.PRIMARY) for time in self.b.times])
-
-    def get_parameter(self, time: float, qualifier: str, component: Optional[Component] = None) -> np.array:
-        if component is not None:
-            return self.b.get_parameter(qualifier=qualifier,
-                                        component=str(component),
-                                        dataset=self.dataset_name,
-                                        kind='mesh',
-                                        time=time).value
-        else:
-            return self.b.get_parameter(qualifier=qualifier,
-                            dataset=self.dataset_name,
-                            kind='mesh',
-                            time=time).value
-    
-    def get_loggs_for_time(self, time_index: int) -> np.ndarray:
-        return self.get_parameter(self.timestamps[time_index], 'loggs', Component.PRIMARY)
-    
-    def get_teffs_for_time(self, time_index: int) -> np.ndarray:
-        return self.get_parameter(self.timestamps[time_index], 'teffs', Component.PRIMARY)
-    
-    @overrides
-    def model_spectrum(self,
-                       time_index: int,
-                       log_wavelengths: jnp.ndarray,
-                       parameters: jnp.ndarray,
-                       chunk_size: int = 256) -> jnp.ndarray:
-        mus = self.get_mus_for_time(time_index)
-        mus = jnp.where(mus>0, mus, 0.)
-        los_vels = self.get_los_velocities_for_time(time_index)
-        
-        return spectrum_flash_sum(log_wavelengths,
-                                  (mus*self.get_areas_for_time(time_index))[:, jnp.newaxis],
-                                  mus[:, jnp.newaxis],
-                                  los_vels[:, jnp.newaxis],
-                                  parameters,
-                                  chunk_size)
-    @overrides
-    def model_spectra(self,
-                      log_wavelengths: jnp.ndarray,
-                      parameters: jnp.ndarray,
-                      chunk_size: int = 256) -> jnp.ndarray:
-        mus = self.get_mus()
-        mus = jnp.where(mus>0, mus, 0.)
-        los_vels = self.get_los_velocities()
-        spectra_flash_sum = get_spectra_flash_sum(chunk_size)
-        
-        return spectra_flash_sum(log_wavelengths,
-                                 (mus*self.areas)[:, :, jnp.newaxis],
-                                 mus[:, :, jnp.newaxis],
-                                 los_vels[:, :, jnp.newaxis],
-                                 parameters)
+@partial(jax.jit, static_argnums=(1, 3))
+def model_spectrum(mesh_model: MeshModel, time_index: int,
+                   log_wavelengths: jnp.ndarray, chunk_size: int = 256):
+    mus = mesh_model['mus'][time_index]
+    mus = jnp.where(mus>0, mus, 0.)
+    _teffs = mesh_model['teffs'][:, jnp.newaxis]
+    parameters = jnp.concatenate([_teffs,
+                                  jnp.ones_like(_teffs)*mesh_model['logg'],
+                                  jnp.ones_like(_teffs)*mesh_model['vturb'],
+                                  mesh_model['abundances']],
+                                 axis=1)
+    return spectrum_flash_sum(log_wavelengths,
+                              (mus*mesh_model['areas'][time_index])[:, jnp.newaxis],
+                              mus,
+                              mesh_model['los_velocities'][time_index],
+                              parameters,
+                              chunk_size)

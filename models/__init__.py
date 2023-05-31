@@ -1,1 +1,1 @@
-from .mesh_model import MeshModel
+from .mesh_model import MeshModel, Abundance

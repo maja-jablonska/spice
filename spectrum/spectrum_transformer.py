@@ -94,5 +94,5 @@ def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarr
     #return jnp.array([x[:, 0], x[:, 1]])
     return jnp.array([jnp.multiply(x[:, 0], jnp.power(10, x[:, 1])),
                       jnp.power(10, x[:, 1])])
-#     y = jnp.power(10, x[:, 1])
-#     return jnp.array([jnp.multiply(x[:, 0], y), y])
+# #     y = jnp.power(10, x[:, 1])
+# #     return jnp.array([jnp.multiply(x[:, 0], y), y])
