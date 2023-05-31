@@ -202,11 +202,17 @@ def apply_pulsation(verts, faces, magnitude: float):
 
 def vertex_to_polar(v):
     v += 1e-5
-    return jnp.array([jnp.arccos(v[2]), jnp.sign(v[1])*jnp.arccos(v[0]/jnp.sqrt(v[0]**2+v[1]**2))])
+    r = jnp.sqrt(v[0]**2+v[1]**2+v[2]**2)+1e-5
+    return jnp.nan_to_num(
+        jnp.array([
+            jnp.arctan2(v[2], r),
+            jnp.arctan2(v[1], v[0])
+        ])
+    )
 
 @jax.jit
 def mesh_polar_vertices(vertices):
-    return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))+jnp.array([0, jnp.pi])
+    return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))
 
 
 def spherical_harmonic(m, n, polar_coordinates):
@@ -262,12 +268,15 @@ rotation_matrices_grad = jax.jit(jax.vmap(rotation_matrix_grad, in_axes=(None, 0
 
 
 @jax.jit
-def calculate_rotation(omega, rotation_axis, centers, t):
-    rotated_centers = jnp.matmul(centers, rotation_matrices(rotation_axis, omega*t))
-    rotated_centers_vel = jnp.matmul(centers, rotation_matrices_grad(rotation_axis, omega*t))
+def calculate_rotation(omega, rotation_axis, vertices, centers, t):
+    rot_mat = rotation_matrices(rotation_axis, omega*t)
+    rot_mat_grad = rotation_matrices_grad(rotation_axis, omega*t)
+    rotated_vertices = jnp.matmul(vertices, rot_mat)
+    rotated_centers = jnp.matmul(centers, rot_mat)
+    rotated_centers_vel = jnp.matmul(centers, rot_mat_grad)
     norm_axis = len(rotated_centers.shape)-1
     r = jnp.linalg.norm(jnp.cross(rotation_axis, -rotated_centers), axis=norm_axis)/jnp.linalg.norm(rotation_axis)
-    return rotated_centers, rotated_centers_vel, r
+    return rotated_vertices-vertices, rotated_centers-centers, rotated_centers_vel, r
 
 
 @jax.jit
