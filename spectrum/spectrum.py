@@ -15,7 +15,7 @@ apply_vrad_log = lambda x, vrad: x+jnp.log10(vrad/C + 1)
 v_apply_vrad = jax.jit(jax.vmap(apply_vrad, in_axes=(None, 0)))
 v_apply_vrad_log = jax.jit(jax.vmap(apply_vrad_log, in_axes=(None, 0)))
 
-atmosphere_flux = jax.jit(jax.vmap(flux, in_axes=(0, 0, None)))
+atmosphere_flux = jax.jit(jax.vmap(flux, in_axes=(0, 0, 0)))
 
 def spectrum_flash_sum(log_wavelengths,
                        areas,
@@ -31,6 +31,7 @@ def spectrum_flash_sum(log_wavelengths,
     n_areas, n_samples = areas.shape
     mus_flattened = mus.reshape(areas.shape)
     vrads_flattened = vrads.reshape(areas.shape)
+    parameters = parameters.reshape((n_areas, 20))
     points = log_wavelengths.shape[0]
 
     @partial(jax.checkpoint, prevent_cse=False)
@@ -52,6 +53,10 @@ def spectrum_flash_sum(log_wavelengths,
         vrad_chunk = lax.dynamic_slice(vrads_flattened,
                                         (chunk_idx, 0),
                                         (k_chunk_sizes, n_samples))
+        # (CHUNK_SIZE, 20)
+        p_chunk = lax.dynamic_slice(parameters,
+                                    (chunk_idx, 0),
+                                    (k_chunk_sizes, 20))
         
         # Shape: (CHUNK_SIZE, n_wavelengths)
         shifted_log_wavelengths = v_apply_vrad_log(log_wavelengths, vrad_chunk)
@@ -67,7 +72,7 @@ def spectrum_flash_sum(log_wavelengths,
             a_chunk.reshape((-1, 1, 1)), # Czemy nie 2D? Broadcastowanie?
             atmosphere_flux(shifted_log_wavelengths, # (n,)
                             m_chunk,
-                            parameters))
+                            p_chunk))
         
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)#/jnp.sum(a_chunk, axis=0)
         new_chunk_sum = chunk_sum + jnp.sum(a_chunk, axis=0)
