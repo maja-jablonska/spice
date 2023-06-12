@@ -1,4 +1,4 @@
-from typing import Tuple
+from jax.typing import ArrayLike
 import jax.numpy as jnp
 
 # Define constants
@@ -6,7 +6,7 @@ h = 6.62607015e-27  # Planck's constant [erg*s]
 c = 2.99792458e10   # Speed of light [cm/s]
 k = 1.380649e-16    # Boltzmann constant [erg/K]
 
-def blackbody_intensity(log_wave: jnp.array, mu: float, parameters: jnp.array) -> jnp.array:
+def blackbody_intensity(log_wave: float, mu: float, parameters: ArrayLike) -> ArrayLike:
     """
     Compute the blackbody intensity.
 
@@ -27,4 +27,6 @@ def blackbody_intensity(log_wave: jnp.array, mu: float, parameters: jnp.array) -
     # Compute blackbody intensity
     intensity = 2 * h * c ** 2 / wave_cm ** 5 * 1 / (jnp.exp(h * c / (wave_cm * k * T)) - 1)
 
-    return jnp.tile(intensity,(2,1))
+    return jnp.tile(intensity, (2, 1))
+
+
