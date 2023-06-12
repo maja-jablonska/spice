@@ -1,12 +1,13 @@
+from typing import Tuple
+from jax.typing import ArrayLike
 import jax.numpy as jnp
 import jax
-from jax.experimental import checkify
 
 # https://sinestesia.co/blog/tutorials/python-icospheres/
 
-PHI = (1 + jnp.sqrt(5)) / 2
+PHI: float = (1 + jnp.sqrt(5)) / 2
 
-def vertex(x, y, z):
+def vertex(x: float, y: float, z: float) -> float:
     """ Return vertex coordinates fixed to the unit sphere """
     length = jnp.sqrt(jnp.power(x, 2) + jnp.power(y, 2) + jnp.power(z, 2))
     coords = jnp.array([x, y, z])
@@ -26,7 +27,7 @@ def vertex(x, y, z):
 # 1: f(1) = 5*4^2 = 80
 # 1: v(1) = 4*(20-2) = 72
 
-def init_vertices_faces(subdiv: int):
+def init_vertices_faces(subdiv: int) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
     
     init_verts = jnp.array([
           vertex(-1,  PHI, 0),
@@ -87,7 +88,14 @@ def init_vertices_faces(subdiv: int):
     return verts, verts_mask, faces
 
 @jax.jit
-def middle_point(point_1, point_2, verts, verts_mask, middle_point_cache):
+def middle_point(point_1: int,
+                 point_2: int,
+                 verts: ArrayLike,
+                 verts_mask: ArrayLike,
+                 middle_point_cache: ArrayLike) -> Tuple[float,
+                                                         ArrayLike,
+                                                         ArrayLike, 
+                                                         ArrayLike]:
     """ Find a middle point and project to the unit sphere """
     # We check if we have already cut this edge first
     # to avoid duplicated verts
@@ -119,7 +127,10 @@ def middle_point(point_1, point_2, verts, verts_mask, middle_point_cache):
                         lambda: expand_verts(verts, verts_mask, point_1, point_2, middle_point_cache))
 
 @jax.jit
-def subdivide_trie(carry, tri):
+def subdivide_trie(carry: Tuple[ArrayLike, ArrayLike, ArrayLike], tri: ArrayLike) -> Tuple[ArrayLike,
+                                                                                           ArrayLike,
+                                                                                           ArrayLike,
+                                                                                           ArrayLike]:
     verts, verts_mask, middle_point_cache = carry
     
     def _subdivide(verts, verts_mask, middle_point_cache, tri):
@@ -157,7 +168,9 @@ relax = jax.vmap(lambda x, n: fill_placeholders(x, n), in_axes=(0, None))
 
 
 @jax.jit
-def subdivide(faces, verts, verts_mask):
+def subdivide(faces: ArrayLike, verts: ArrayLike, verts_mask: ArrayLike) -> Tuple[ArrayLike,
+                                                                                  ArrayLike,
+                                                                                  ArrayLike]:
     verts_total_size = verts.shape[0]
     keys_cache = (-1*jnp.ones((verts_total_size, verts_total_size))).astype(int)
     (verts, verts_mask, _), new_faces = jax.lax.scan(subdivide_trie,
@@ -169,14 +182,14 @@ def subdivide(faces, verts, verts_mask):
 relax_all = lambda chunks, n: jax.vmap(lambda x: relax(x[:4], int(n/4)), in_axes=(0,))(chunks.reshape((-1, n, 3))).reshape((-1, 3))
 
 @jax.jit
-def face_center(verts, face):
+def face_center(verts: ArrayLike, face: ArrayLike) -> Tuple[ArrayLike, float]:
     a, b, c = verts[face[0]], verts[face[1]], verts[face[2]]
     ab = b-a
     ac = c-a
     A = jnp.linalg.norm(jnp.cross(ab, ac))/2
     return A, (a+b+c)/3
 
-def _icosphere(subdiv: int): 
+def _icosphere(subdiv: int) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
     verts, verts_mask, faces = init_vertices_faces(subdiv)
     
     for s in range(subdiv):
@@ -185,104 +198,17 @@ def _icosphere(subdiv: int):
         faces = relax_all(faces, current_s)
     
     areas, centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts, faces.astype(jnp.int32))
-    return verts, faces, areas, centers, verts_mask
+    return verts, faces, areas, centers
 
-def icosphere(points: int):
+def icosphere(points: int) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
+    """Create an icosphere with at least that n points.
+
+    Args:
+        points (int): Minimal number of vertices in the icosphere
+
+    Returns:
+        Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
+    """
     subdivs = jnp.ceil(.5*jnp.log2(points/5)-1).astype(int)
-    verts, faces, areas, centers, verts_mask = _icosphere(subdivs)
-    return verts, faces, areas, centers, verts_mask
-
-@jax.jit
-def apply_pulsation(verts, faces, magnitude: float):
-    direction_vectors = verts/jnp.linalg.norm(verts, axis=1).reshape((-1, 1))
-    verts = verts + magnitude*direction_vectors
-    areas, centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts, faces.astype(jnp.int32))
-    mus = jnp.dot(centers/jnp.linalg.norm(centers, axis=1).reshape((-1, 1)), jnp.array([0, 0, 1]))
-    return verts, faces, areas, centers, mus
-
-def vertex_to_polar(v):
-    v += 1e-5
-    r = jnp.sqrt(v[0]**2+v[1]**2+v[2]**2)+1e-5
-    return jnp.nan_to_num(
-        jnp.array([
-            jnp.arctan2(v[2], r),
-            jnp.arctan2(v[1], v[0])
-        ])
-    )
-
-@jax.jit
-def mesh_polar_vertices(vertices):
-    return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))
-
-
-def spherical_harmonic(m, n, polar_coordinates):
-    m_array = (m*jnp.ones_like(polar_coordinates[:, 0])).astype(int)
-    n_array = (n*jnp.ones_like(polar_coordinates[:, 1])).astype(int)
-    return jax.scipy.special.sph_harm(m_array,
-                                      n_array,
-                                      polar_coordinates[:, 0],
-                                      polar_coordinates[:, 1],
-                                      n_max=10)
-
-
-def apply_spherical_harm_pulsation(verts, centers, faces, areas, magnitude, m, n):
-    #checkify.check(m<=n, "m has to be lesser or equal n")
-    vert_axis = len(verts.shape)-1
-    
-    direction_vectors = verts/jnp.linalg.norm(verts, axis=vert_axis, keepdims=True)
-    
-    polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(verts))
-    polar_coordinates_centers = jnp.nan_to_num(mesh_polar_vertices(centers))
-    
-    sph_ham = spherical_harmonic(m, n, polar_coordinates).real
-    sph_ham_centers = spherical_harmonic(m, n, polar_coordinates_centers).real
-    
-    magnitudes = magnitude*sph_ham
-    
-    vert_offsets = magnitudes.reshape((-1, 1))*direction_vectors
-    
-    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts+vert_offsets, faces.astype(jnp.int32))
-    
-    return vert_offsets, new_centers-centers, new_areas-areas, sph_ham_centers[:, jnp.newaxis]
-
-
-@jax.jit
-def rotation_matrix(a: jnp.ndarray, theta: jnp.float64):
-    a_norm = a/jnp.linalg.norm(a)
-    a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
-                      [a_norm[2], 0., -a_norm[0]],
-                      [-a_norm[1], a_norm[0], 0.]])
-    return jnp.eye(3) + jnp.sin(theta)*a_hat + (1-jnp.cos(theta))*jnp.matmul(a_hat, a_hat)
-
-@jax.jit
-def rotation_matrix_grad(a: jnp.ndarray, theta: jnp.float64):
-    a_norm = a/jnp.linalg.norm(a)
-    a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
-                      [a_norm[2], 0., -a_norm[0]],
-                      [-a_norm[1], a_norm[0], 0.]])
-    return jnp.cos(theta)*a_hat + jnp.sin(theta)*jnp.matmul(a_hat, a_hat)
-
-
-rotation_matrices = jax.jit(jax.vmap(rotation_matrix, in_axes=(None, 0)))
-rotation_matrices_grad = jax.jit(jax.vmap(rotation_matrix_grad, in_axes=(None, 0)))
-
-
-@jax.jit
-def calculate_rotation(omega, rotation_axis, vertices, centers, t):
-    rot_mat = rotation_matrices(rotation_axis, omega*t)
-    rot_mat_grad = rotation_matrices_grad(rotation_axis, omega*t)
-    rotated_vertices = jnp.matmul(vertices, rot_mat)
-    rotated_centers = jnp.matmul(centers, rot_mat)
-    rotated_centers_vel = jnp.matmul(centers, rot_mat_grad)
-    norm_axis = len(rotated_centers.shape)-1
-    r = jnp.linalg.norm(jnp.cross(rotation_axis, -rotated_centers), axis=norm_axis)/jnp.linalg.norm(rotation_axis)
-    return rotated_vertices-vertices, rotated_centers-centers, rotated_centers_vel, r
-
-
-@jax.jit
-def calculate_los_rotation(omega, rotation_axis, los_vector, centers, t):
-    all_centers, all_vels, r = calculate_rotation(omega, rotation_axis, centers, t)
-    mus = jnp.dot(all_centers/jnp.linalg.norm(all_centers, axis=2).reshape((n, -1, 1)), los_vector)
-    los_vels = jnp.dot(all_vels/(jnp.nan_to_num(jnp.linalg.norm(all_vels, axis=2).reshape((n, -1, 1)))+1e-10), los_vector)
-    return all_centers, los_vels*r, mus
-
+    verts, faces, areas, centers = _icosphere(subdivs)
+    return verts, faces, areas, centers
