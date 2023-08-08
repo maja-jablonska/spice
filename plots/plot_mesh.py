@@ -79,6 +79,7 @@ def plot_3D(mesh: MeshModel,
 
 def plot_2D(mesh: MeshModel,
             property: Union[str, int] = DEFAULT_PROPERTY,
+            axes: Optional[Tuple[plt.figure, plt.axes, plt.axes]] = None,
             cmap: str = 'turbo',
             x_index: int = 0,
             y_index: int = 1,
@@ -88,15 +89,26 @@ def plot_2D(mesh: MeshModel,
     elif x_index >= 3 or y_index >= 3:
         raise ValueError('x_index and y_index must be 0, 1, or 2!')
     
+    if axes is None:
+        fig = plt.figure(figsize=(6, 5))
+        spec = fig.add_gridspec(10, 12)
+        plot_ax = fig.add_subplot(spec[:, :11])
+        cbar_ax = fig.add_subplot(spec[2:8, 11])
+    else:
+        try:
+            fig, plot_ax, cbar_ax = axes
+        except ValueError:
+            raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
+    
     xy_labels = ['$X [R_\odot]$', '$Y [R_\odot]$', '$Z [R_\odot]$']
     
     to_be_mapped, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
     positive_mu_mask = mesh.mus>0
 
-    plt.scatter(mesh.centers[positive_mu_mask, x_index], mesh.centers[positive_mu_mask, y_index],
+    plot_ax.scatter(mesh.centers[positive_mu_mask, x_index], mesh.centers[positive_mu_mask, y_index],
                 c=to_be_mapped[positive_mu_mask], cmap=cmap)
-    plt.gca().set_xlabel(xy_labels[x_index], fontsize=14)
-    plt.gca().set_ylabel(xy_labels[y_index], fontsize=14)
+    plot_ax.set_xlabel(xy_labels[x_index], fontsize=14)
+    plot_ax.set_ylabel(xy_labels[y_index], fontsize=14)
     
-    cbar = plt.colorbar()
+    cbar = fig.colorbar(mpl.cm.ScalarMappable(cmap=cmap), cax=cbar_ax)
     cbar.set_label(cbar_label, fontsize=12)
