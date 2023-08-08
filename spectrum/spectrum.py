@@ -78,13 +78,13 @@ def spectrum_flash_sum(intensity_fn,
         # 2 corresponds to the two components: continuum and full spectrum with lines
         # n_wavelengths, n_verices, 2 (continuum+spectrum), 1
         atmosphere_mul = jnp.multiply(
-                a_chunk[jnp.newaxis, :, jnp.newaxis, jnp.newaxis], # Czemy nie 2D? Broadcastowanie?
+                m_chunk[jnp.newaxis, :, jnp.newaxis, jnp.newaxis]*a_chunk[jnp.newaxis, :, jnp.newaxis, jnp.newaxis], # Czemy nie 2D? Broadcastowanie?
                 v_intensity(shifted_log_wavelengths, # (n,)
                             m_chunk,
                             p_chunk))
         
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=1)#/jnp.sum(a_chunk, axis=0)
-        new_chunk_sum = chunk_sum + jnp.sum(a_chunk, axis=0)
+        new_chunk_sum = chunk_sum + jnp.sum(m_chunk*a_chunk, axis=0)
         
         return (chunk_idx + k_chunk_sizes, new_atmo_sum, new_chunk_sum), None
 
