@@ -16,17 +16,15 @@ def blackbody_intensity(log_wave: float, mu: float, parameters: ArrayLike) -> Ar
     parameters (jnp.array): Array of parameters. In this case, only one element is used which represents the temperature in Kelvin.
 
     Returns:
-    jnp.array: Array of blackbody intensities.
+    jnp.array: Array of blackbody intensities in erg/s/cm2/A
     """
     # Convert log wavelength from angstroms to cm
     wave_cm = 10 ** (log_wave - 8)  # 1 Angstrom = 1e-8 cm
 
     # Extract temperature from parameters
-    T = parameters[0]
+    T = 10 ** parameters[0]
 
     # Compute blackbody intensity
-    intensity = 2 * h * c ** 2 / wave_cm ** 5 * 1 / (jnp.exp(h * c / (wave_cm * k * T)) - 1)
+    intensity = ((2 * h * c ** 2 / wave_cm ** 5 * 1 / (jnp.exp(h * c / (wave_cm * k * T)) - 1)))*1e-8
 
     return jnp.tile(intensity, (2, 1))
-
-
