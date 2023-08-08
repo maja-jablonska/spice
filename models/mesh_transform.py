@@ -3,10 +3,13 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .mesh_model import MeshModel, MAX_PULSATION_MODES, DEFAULT_ROTATION_AXIS
+from .spots import v_spot
 from .utils import (apply_spherical_harm_pulsation, cast_to_los,
                     rotation_matrix, rotation_matrix_prim,
-                    evaluate_rotation_matrix, evaluate_rotation_matrix_prim, calculate_axis_radii)
+                    evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
+                    calculate_axis_radii)
 import warnings
+from functools import partial
 
 
 @jax.jit
@@ -59,7 +62,7 @@ def add_rotation(mesh: MeshModel,
 def evaluate_rotation(mesh: MeshModel, t: ArrayLike):
     theta = (mesh.rotation_velocity*t)/mesh.radius
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
-    t_rotation_matrix_prim = evaluate_rotation_matrix(mesh.rotation_matrix_prim, theta)
+    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta)
     rotated_vertices = jnp.matmul(mesh.vertices, t_rotation_matrix)
     rotated_centers = jnp.matmul(mesh.centers, t_rotation_matrix)
     rotated_centers_vel = mesh.rotation_velocity*jnp.matmul(mesh.centers, t_rotation_matrix_prim)
