@@ -105,7 +105,7 @@ def simulate_spectrum(intensity_fn: Callable[[float, float, ArrayLike], ArrayLik
     return spectrum_flash_sum(intensity_fn,
                               log_wavelengths,
                               m.areas,
-                              m.mus,
+                              jnp.where(m.mus>0, m.mus, 0.),
                               m.los_velocities,
                               m.parameters,
                               chunk_size)

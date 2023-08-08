@@ -18,17 +18,6 @@ NO_ROTATION_MATRIX = jnp.zeros((3, 3))
 MAX_PULSATION_MODES = 20
 NO_PULSATION_ARRAYS = jnp.zeros(MAX_PULSATION_MODES)
 
-def inclination_to_axis_vector(inclination: ArrayLike) -> jnp.array:
-    if inclination.shape==(1,):
-        los_vector = jnp.array([jnp.sin(jnp.deg2rad(inclination[0])),
-                                jnp.cos(jnp.deg2rad(inclination[0])), 0.])
-    elif inclination.shape==(3,):
-        los_vector = inclination/jnp.linalg.norm(inclination)
-    else:
-        raise ValueError('''Inclination has to be a either a float value, 1D array 
-        with inclination value, or rotation axis as a 3D array''')
-
-
 class MeshModel(NamedTuple):
     # Stellar properties
     radius: float
