@@ -62,9 +62,12 @@ def plot_3D(mesh: MeshModel,
     plot_ax.set_ylabel('$Y [R_\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\odot]$', fontsize=14)
 
-    plot_ax.quiver(*(-2.0*mesh.radius*mesh.los_vector), *mesh.los_vector,
+    normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+    normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+
+    plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
                    color='red', linewidth=3., label='LOS vector')
-    plot_ax.quiver(*(0.75*mesh.radius*mesh.rotation_axis), *mesh.rotation_axis,
+    plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
                    color='black', linewidth=3., label='Rotation axis')
     plot_ax.legend()
 
@@ -75,6 +78,8 @@ def plot_3D(mesh: MeshModel,
     
     cbar = fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cbar_ax)
     cbar.set_label(cbar_label, fontsize=12)
+
+    return fig, plot_ax, cbar_ax
 
 
 def plot_2D(mesh: MeshModel,
@@ -112,3 +117,5 @@ def plot_2D(mesh: MeshModel,
     
     cbar = fig.colorbar(mpl.cm.ScalarMappable(cmap=cmap), cax=cbar_ax)
     cbar.set_label(cbar_label, fontsize=12)
+
+    return fig, plot_ax, cbar_ax
