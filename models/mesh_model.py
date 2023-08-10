@@ -79,12 +79,13 @@ class IcosphereModel(MeshModel):
             _type_: _description_
         """
         vertices, faces, areas, centers = icosphere(n_vertices)
+        sphere_area = 4*jnp.pi*jnp.power(radius, 2)
 
         if len(parameters.shape) == 1:
             parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats = areas.shape[0], axis = 0)
 
         return MeshModel.__new__(cls, radius, mass, abs_luminosity,
-                vertices, faces, centers, areas, parameters,
+                vertices*radius, faces, centers*radius, areas*sphere_area/jnp.sum(areas), parameters,
                 jnp.zeros_like(centers),
                 DEFAULT_ROTATION_AXIS, NO_ROTATION_MATRIX, NO_ROTATION_MATRIX, calculate_axis_radii(centers, DEFAULT_ROTATION_AXIS), 0.,
                 NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS,

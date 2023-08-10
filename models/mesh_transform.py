@@ -60,18 +60,18 @@ def add_rotation(mesh: MeshModel,
 
 @jax.jit
 def evaluate_rotation(mesh: MeshModel, t: ArrayLike):
-    theta = (mesh.rotation_velocity*t)/mesh.radius
-    t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
-    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta)
-    rotated_vertices = jnp.matmul(mesh.vertices, t_rotation_matrix)
-    rotated_centers = jnp.matmul(mesh.centers, t_rotation_matrix)
-    rotated_centers_vel = mesh.rotation_velocity*jnp.matmul(mesh.centers, t_rotation_matrix_prim)
+    theta = (mesh.rotation_velocity*t)/mesh.radius # cm
+    t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta) # cm
+    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta) # cm
+    rotated_vertices = jnp.matmul(mesh.vertices, t_rotation_matrix) # cm
+    rotated_centers = jnp.matmul(mesh.centers, t_rotation_matrix) # cm
+    rotated_centers_vel = mesh.rotation_velocity*jnp.matmul(mesh.centers/mesh.radius, t_rotation_matrix_prim) # cm
 
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
     return mesh._replace(vertices = rotated_vertices,
                          centers = rotated_centers,
                          velocities = rotated_centers_vel,
-                         los_velocities = cast_to_los(rotated_centers_vel, mesh.los_vector)*new_axis_radii,
+                         los_velocities = cast_to_los(rotated_centers_vel, mesh.los_vector),
                          axis_radii = new_axis_radii)
 
 
