@@ -111,37 +111,6 @@ def evaluate_rotation_matrix_prim(rotation_matrix_grad: ArrayLike, theta: ArrayL
     return jnp.cos(theta)*rotation_matrix_grad + jnp.sin(theta)*jnp.matmul(rotation_matrix_grad, rotation_matrix_grad)
 
 
-# @jax.jit
-# def calculate_rotation(omega: ArrayLike,
-#                        rotation_axis: ArrayLike,
-#                        vertices: ArrayLike,
-#                        centers: ArrayLike,
-#                        t: ArrayLike) -> Tuple[ArrayLike,
-#                                               ArrayLike,
-#                                               ArrayLike,
-#                                               ArrayLike]:
-#     rot_mat = rotation_matrices(rotation_axis, omega*t)
-#     rot_mat_grad = rotation_matrices_grad(rotation_axis, omega*t)
-#     rotated_vertices = jnp.matmul(vertices, rot_mat)
-#     rotated_centers = jnp.matmul(centers, rot_mat)
-#     rotated_centers_vel = jnp.matmul(centers, rot_mat_grad)
-#     norm_axis = len(rotated_centers.shape)-1
-#     r = jnp.linalg.norm(jnp.cross(rotation_axis, -rotated_centers), axis=norm_axis)/jnp.linalg.norm(rotation_axis)
-#     return rotated_vertices-vertices, rotated_centers-centers, rotated_centers_vel, r
-
-
-# @jax.jit
-# def calculate_los_rotation(omega: ArrayLike,
-#                            rotation_axis: ArrayLike,
-#                            los_vector: ArrayLike,
-#                            centers: ArrayLike,
-#                            t: ArrayLike) -> Tuple[ArrayLike, ArrayLike, ArrayLike]:
-#     all_centers, all_vels, r = calculate_rotation(omega, rotation_axis, centers, t)
-#     mus = jnp.dot(all_centers/jnp.linalg.norm(all_centers, axis=2).reshape((n, -1, 1)), los_vector)
-#     los_vels = jnp.dot(all_vels/(jnp.nan_to_num(jnp.linalg.norm(all_vels, axis=2).reshape((n, -1, 1)))+1e-10), los_vector)
-#     return all_centers, los_vels*r, mus
-
-
 @jax.jit
 def cast_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
     """Cast 3D vectors to the line-of-sight
