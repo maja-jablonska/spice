@@ -6,11 +6,11 @@ from typing import Callable
 from models import MeshModel
 import math
 from functools import partial
-#from .spectrum_transformer import flux
+from .utils import ERG_S_TO_W, SPHERE_STERADIAN, ZERO_POINT_LUM_W
 
 
 DEFAULT_CHUNK_SIZE: int = 1024
-C: float = 299792.458 #km/s
+C: float = 299792.458 # km/s
 
 apply_vrad = lambda x, vrad: x*(vrad/C + 1)
 # Docelowo: vrad w log
@@ -109,3 +109,34 @@ def simulate_spectrum(intensity_fn: Callable[[float, float, ArrayLike], ArrayLik
                               m.los_velocities,
                               m.parameters,
                               chunk_size)
+
+
+@jax.jit
+def luminosity(spectrum: ArrayLike, wavelengths: ArrayLike, mesh: MeshModel) -> ArrayLike:
+    """Calculate total luminosity output
+
+    Args:
+        spectrum (ArrayLike): spectrum in erg/s/cm^2/A
+        wavelengths (ArrayLike): wavelengths in A
+        mesh (MeshModel): mesh model
+
+    Returns:
+        ArrayLike: luminosity in erg/s
+    """
+    half_surface_area = 2*jnp.pi*jnp.power(mesh.radius, 2)
+    luminosity = jnp.trapz(jnp.nan_to_num(spectrum[:, 0]),
+                           wavelengths)*SPHERE_STERADIAN/2*half_surface_area
+    return luminosity
+
+
+@jax.jit
+def absolute_bol_luminosity(luminosity: ArrayLike) -> ArrayLike:
+    """Calculate bolometric absolute luminosity
+
+    Args:
+        luminosity (ArrayLike): total bolometric luminosity in erg/s
+
+    Returns:
+        ArrayLike: total luminosity in magnitude
+    """
+    return -2.5*jnp.log10(luminosity*ERG_S_TO_W)+71.1974

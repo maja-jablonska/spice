@@ -23,6 +23,7 @@ class MeshModel(NamedTuple):
     radius: float
     mass: float
     abs_luminosity: float
+    log_g: ArrayLike
 
     # Mesh properties
     vertices: ArrayLike
@@ -63,15 +64,16 @@ class IcosphereModel(MeshModel):
     # TODO: show this instead of MeshModel initializer
     @classmethod
     def construct(cls, n_vertices: int,
-                  radius: float, mass: float,
+                  radius: float,
+                  mass: float,
                   abs_luminosity: float,
                   parameters: ArrayLike): # What to do about parameters?
         """Construct an Icosphere.
 
         Args:
             n_vertices (int): Minimal number of vertices (used to calculate number of divisions)
-            radius (float): Radius in solar radii
-            mass (float): Mass in solar masses
+            radius (float): Radius in cm
+            mass (float): Mass in kg
             abs_luminosity (float): Absolute luminosity in solar luminosities
             parameters (ArrayLike): Array of global parameters
 
@@ -80,11 +82,12 @@ class IcosphereModel(MeshModel):
         """
         vertices, faces, areas, centers = icosphere(n_vertices)
         sphere_area = 4*jnp.pi*jnp.power(radius, 2)
+        log_g = jnp.log(6.6743e-11*mass/jnp.power(radius, 2)/9.80665)
 
         if len(parameters.shape) == 1:
             parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats = areas.shape[0], axis = 0)
 
-        return MeshModel.__new__(cls, radius, mass, abs_luminosity,
+        return MeshModel.__new__(cls, radius, mass, abs_luminosity, log_g*jnp.ones_like(areas),
                 vertices*radius, faces, centers*radius, areas*sphere_area/jnp.sum(areas), parameters,
                 jnp.zeros_like(centers),
                 DEFAULT_ROTATION_AXIS, NO_ROTATION_MATRIX, NO_ROTATION_MATRIX, calculate_axis_radii(centers, DEFAULT_ROTATION_AXIS), 0.,
