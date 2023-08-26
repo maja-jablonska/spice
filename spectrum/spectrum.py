@@ -130,6 +130,20 @@ def luminosity(spectrum: ArrayLike, wavelengths: ArrayLike, mesh: MeshModel) -> 
 
 
 @jax.jit
+def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, sample_responses: ArrayLike) -> ArrayLike:
+    return jnp.interp(wavelengths, sample_wavelengths, sample_responses)
+
+
+@jax.jit
+def passband_luminosity(spectrum: ArrayLike, filter_responses: ArrayLike,
+                        wavelengths: ArrayLike, mesh: MeshModel) -> ArrayLike:
+    half_surface_area = 2*jnp.pi*jnp.power(mesh.radius, 2)
+    luminosity = jnp.trapz(jnp.nan_to_num(spectrum[:, 0])*filter_responses,
+                           wavelengths)*SPHERE_STERADIAN/2*half_surface_area
+    return luminosity
+
+
+@jax.jit
 def absolute_bol_luminosity(luminosity: ArrayLike) -> ArrayLike:
     """Calculate bolometric absolute luminosity
 
