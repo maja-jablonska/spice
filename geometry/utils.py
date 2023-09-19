@@ -1,0 +1,120 @@
+import jax
+import jax.numpy as jnp
+from jax.typing import ArrayLike
+from typing import Tuple
+
+
+def sort_xy(points: ArrayLike) -> ArrayLike:
+    """Sort points clockwise
+
+    Args:
+        points (ArrayLike): x, y coordinates (n, 2)
+
+    Returns:
+        ArrayLike: points with x, y coordinates sorted clockwise
+    """
+    x, y = points[:, 0], points[:, 1]
+    x0 = jnp.mean(x)
+    y0 = jnp.mean(y)
+
+    r = jnp.sqrt((x-x0)**2 + (y-y0)**2)
+
+    angles = jnp.where((y-y0) > 0, jnp.arccos((x-x0)/r), 2*jnp.pi-jnp.arccos((x-x0)/r))
+
+    mask = jnp.argsort(angles)
+
+    return points[mask, :]
+
+
+
+def inside(p1: ArrayLike, p2: ArrayLike, q: ArrayLike) -> bool:
+    """Check if the point is inside the polygon edge
+
+    Args:
+        p1 (ArrayLike): Polygon edge point 1
+        p2 (ArrayLike): Polygon edge point 2
+        q (ArrayLike): Point to be checked
+
+    Returns:
+        bool: Point is inside polygon
+    """
+    return (p2[0]-p1[0])*(q[1]-p1[1])-(p2[1]-p1[1])*(q[0]-p1[0])>=0
+
+
+def last_non_nan_arg(arr: ArrayLike) -> ArrayLike:
+    """Return the last non-nan index of the array
+
+    Args:
+        arr (ArrayLike): Array
+
+    Returns:
+        ArrayLike: Last non-nan index of the array
+    """    
+    return jnp.max(jnp.argwhere(jnp.all(~jnp.isnan(arr), axis=1), size=arr.shape[0], fill_value=0)).astype(int)
+
+
+def last_non_nan(arr: ArrayLike) -> ArrayLike:
+    """Return the last non-nan value of the array
+
+    Args:
+        arr (ArrayLike): Array
+
+    Returns:
+        ArrayLike: Last non-nan row of the array
+    """    
+    return arr[jnp.max(jnp.argwhere(jnp.all(~jnp.isnan(arr), axis=1), size=arr.shape[0], fill_value=0))]
+
+
+def append_to_last_nan(arr: ArrayLike, to_add: ArrayLike) -> ArrayLike:
+    """Append the row to the first nan row
+
+    Args:
+        arr (ArrayLike): Array to add the row to
+        to_add (ArrayLike): The row to be added
+
+    Returns:
+        ArrayLike: Array with an appended row
+    """    
+    next_ind = jnp.min(jnp.argwhere(jnp.all(jnp.isnan(arr), axis=1), size=arr.shape[0], fill_value=arr.shape[0]-1))
+    return arr.at[next_ind].set(to_add.flatten())
+
+
+def repeat_last(arr: ArrayLike) -> ArrayLike:
+    """Repeat the last non-nan row to fill the whole array
+
+    Args:
+        arr (ArrayLike):
+
+    Returns:
+        ArrayLike: Array with nan values filled with last non-nan values
+    """    
+    return jax.lax.cond(jnp.any(jnp.all(jnp.isnan(arr), axis=1)),
+                        lambda: jax.lax.fori_loop(0, jnp.sum(jnp.all(jnp.isnan(arr), axis=1)),
+                                                  lambda i, _arr: append_to_last_nan(_arr, last_non_nan(_arr)),
+                                                  arr),
+                        lambda: arr)
+
+
+def wrap(arr: ArrayLike) -> ArrayLike:
+    """Copy the first row and concatenate to the first array
+
+    Args:
+        arr (ArrayLike):
+
+    Returns:
+        ArrayLike: Array with the copy of the first row appended
+    """    
+    return jnp.concatenate([arr, arr[0].reshape((-1, arr.shape[1]))])
+
+
+def polygon_area(x: ArrayLike, y: ArrayLike) -> ArrayLike:
+    """Calculate a polygon's surface area from its x and y coordinates
+
+    Args:
+        x (ArrayLike): x coordinates of the polygon
+        y (ArrayLike): y coordinates of the polygon
+
+    Returns:
+        ArrayLike: polygon's surface area
+    """    
+    return 0.5*jnp.abs(jnp.dot(x,jnp.roll(y,1))-jnp.dot(y,jnp.roll(x,1)))

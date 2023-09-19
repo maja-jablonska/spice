@@ -13,6 +13,22 @@ from functools import partial
 
 
 @jax.jit
+def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
+    """Transform the mesh by a vector
+
+    Args:
+        mesh (MeshModel): Mesh to transform
+        vector (ArrayLike): transform vector
+
+    Returns:
+        MeshModel: Mesh with transformed center and vertices coordinates
+    """    
+
+    return mesh._replace(vertices = mesh.vertices+vector,
+                         centers = mesh.centers+vector)
+
+
+@jax.jit
 def add_pulsation(mesh: MeshModel,
                   m: int, n: int, t_0: float, period: float, amplitude: float) -> MeshModel:
     """Generate a mesh with a pulsation applied
