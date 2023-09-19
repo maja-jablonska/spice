@@ -25,6 +25,7 @@ def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
     """    
 
     return mesh._replace(vertices = mesh.vertices+vector,
+                         los_vertices = cast_to_los(mesh.los_vertices+vector, mesh.los_vector),
                          centers = mesh.centers+vector)
 
 
@@ -89,6 +90,7 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike):
     return mesh._replace(vertices = rotated_vertices,
                          centers = rotated_centers,
                          velocities = rotated_centers_vel*1e-5, # back to km/s
+                         los_vertices=cast_to_los(rotated_vertices, mesh.los_vector),
                          mus = cast_to_los(rotated_centers, mesh.los_vector),
                          los_velocities = cast_to_los(rotated_centers_vel, mesh.los_vector)*1e-5,
                          axis_radii = new_axis_radii)
