@@ -52,6 +52,7 @@ class MeshModel(NamedTuple):
 
     # Mesh LOS properties
     los_vector: ArrayLike
+    los_vertices: ArrayLike
     mus: ArrayLike
     los_velocities: ArrayLike
 
@@ -92,7 +93,7 @@ class IcosphereModel(MeshModel):
                 jnp.zeros_like(centers),
                 DEFAULT_ROTATION_AXIS, NO_ROTATION_MATRIX, NO_ROTATION_MATRIX, calculate_axis_radii(centers, DEFAULT_ROTATION_AXIS), 0.,
                 NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS, NO_PULSATION_ARRAYS,
-                DEFAULT_LOS_VECTOR, cast_to_los(centers, DEFAULT_LOS_VECTOR), jnp.zeros_like(areas))
+                DEFAULT_LOS_VECTOR, cast_to_los(vertices*radius, DEFAULT_LOS_VECTOR), cast_to_los(centers, DEFAULT_LOS_VECTOR), jnp.zeros_like(areas))
     
     @overrides
     def pulsation_modes(self) -> int:
