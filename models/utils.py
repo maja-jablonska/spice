@@ -43,47 +43,6 @@ def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def spherical_harmonic(m: float, n: float, polar_coordinates: ArrayLike) -> ArrayLike:
-    m_array = (m*jnp.ones_like(polar_coordinates[:, 0])).astype(int)
-    n_array = (n*jnp.ones_like(polar_coordinates[:, 1])).astype(int)
-    return jax.scipy.special.sph_harm(m_array,
-                                      n_array,
-                                      polar_coordinates[:, 0],
-                                      polar_coordinates[:, 1],
-                                      n_max=10)
-
-
-@jax.jit
-def apply_spherical_harm_pulsation(verts: ArrayLike,
-                                   centers: ArrayLike,
-                                   faces: ArrayLike,
-                                   areas: ArrayLike,
-                                   magnitude: float,
-                                   m: float, n: float) -> Tuple[ArrayLike,
-                                                                ArrayLike,
-                                                                ArrayLike,
-                                                                ArrayLike]:
-    #checkify.check(m<=n, "m has to be lesser or equal n")
-    vert_axis = len(verts.shape)-1
-    
-    direction_vectors = verts/jnp.linalg.norm(verts, axis=vert_axis, keepdims=True)
-    
-    polar_coordinates = jnp.nan_to_num(mesh_polar_vertices(verts))
-    polar_coordinates_centers = jnp.nan_to_num(mesh_polar_vertices(centers))
-    
-    sph_ham = spherical_harmonic(m, n, polar_coordinates).real
-    sph_ham_centers = spherical_harmonic(m, n, polar_coordinates_centers).real
-    
-    magnitudes = magnitude*sph_ham
-    
-    vert_offsets = magnitudes.reshape((-1, 1))*direction_vectors
-    
-    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts+vert_offsets, faces.astype(jnp.int32))
-    
-    return vert_offsets, new_centers-centers, new_areas-areas, sph_ham_centers[:, jnp.newaxis]
-
-
-@jax.jit
 def rotation_matrix(rotation_axis: ArrayLike) -> ArrayLike:
     a_norm = rotation_axis/jnp.linalg.norm(rotation_axis)
     a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
