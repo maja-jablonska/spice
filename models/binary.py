@@ -2,91 +2,81 @@ import jax.numpy as jnp
 from scipy.optimize import newton
 from functools import partial
 import jax
+from jax.typing import ArrayLike
+from typing import NamedTuple, Tuple
+from .mesh_model import MeshModel
+from .mesh_transform import transform, evaluate_body_orbit
+import astropy.units as u
+from .orbit_utils import get_orbit_jax
 
-class c:# Solar mas
-    Msun = 1.989e30 # kg
-    # Astronomical unit
-    AU = 1.496e11 # m
-    # Gravitational constant
-    G = 6.674e-11 # m^3 kg^-1 s^-2
-    # Year in seconds
-    yr = 365.25*24*3600 # s
-    # Day
-    day = 24*3600 # s
-    # Earth mass
-    Mearth = 5.972e24 # kg
-    # Parsec
-    pc = 3.086e16 # m
-    # Solar radius
-    Rsun = 6.957e8 # m
-    # light year
-    ly = 9.461e15 # m
-    # mas
-    mas = 4.848e-9 # rad
 
-# Function to calculate the orbital period of a binary system
+YEAR_TO_SECONDS = (u.year).to(u.s)
 
-@partial(jax.jit, static_argnums=(2,))
-def solve_kepler_jax(M_t, e, iterations = 10):
-    E = M_t
-    # Manually unroll the loop, 3 iterations
-    # this is not enough for high eccentricities
-    # TODO: improve this!!!
-    def kepler_scan(E, x):
-        E = E - (E - e * jnp.sin(E) - M_t) / (1 - e * jnp.cos(E))
-        return E, x
-    
-    E, _ = jax.lax.scan(kepler_scan, E, jnp.linspace(0, 1, iterations))
 
-    # E = E - (E - e * jnp.sin(E) - M_t) / (1 - e * jnp.cos(E))
-    # E = E - (E - e * jnp.sin(E) - M_t) / (1 - e * jnp.cos(E))
-    # E = E - (E - e * jnp.sin(E) - M_t) / (1 - e * jnp.cos(E))
-    return E
+class Binary(NamedTuple):
+    body1: MeshModel
+    body2: MeshModel
 
-def rotate_matrix_OX(angle):
-    return jnp.array([[1, 0, 0],
-                     [0, jnp.cos(angle), -jnp.sin(angle)],
-                     [0, jnp.sin(angle), jnp.cos(angle)]])
+    # Orbital elements
+    P: float
+    ecc: float
+    T: float
+    i: float
+    omega: float
+    Omega: float
 
-def rotate_matrix_OZ(angle):
-    return jnp.array([[jnp.cos(angle), -jnp.sin(angle), 0],
-                     [jnp.sin(angle), jnp.cos(angle), 0],
-                     [0, 0, 1]])
+    evaluated_times: ArrayLike
 
-def get_transform_matrix(elements):
-    i, omega, Omega = elements
-    # rotate the orbit
-    M_Omega = rotate_matrix_OZ(Omega)
-    M_omega = rotate_matrix_OZ(omega)
-    M_i = rotate_matrix_OX(i)
-    return M_Omega @ M_i @ M_omega
+    body1_centers: ArrayLike
+    body2_centers: ArrayLike
+    body1_velocities: ArrayLike
+    body2_velocities: ArrayLike
 
-def transform_orbit(x, v, elements):
-    M = get_transform_matrix(elements)
-    M = M.at[2,:].multiply(-1.0) # TODO: check if this is correct, this might be a result of some incorrect rotation
+    @classmethod
+    def from_bodies(cls, body1: MeshModel, body2: MeshModel):
+          return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers), jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
 
-    return M @ x, M @ v
 
-def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega):
-    M1 = m1*c.Msun
-    M2 = m2*c.Msun
-    a = (P**2 * c.G * (M1 + M2) / (4 * jnp.pi**2))**(1/3)
-    M_t = 2*jnp.pi / P * (time - T) # mean anomaly
-    E = solve_kepler_jax(M_t, ecc) # eccentric anomaly
-    nu = 2 * jnp.arctan2(jnp.sqrt((1+ecc)/(1-ecc)) * jnp.sin(E/2), jnp.cos(E/2)) # true anomaly
-    r = a * (1 - ecc * jnp.cos(E)) # distance
-    vec_x = jnp.array([r* jnp.cos(nu), r* jnp.sin(nu), jnp.zeros_like(r)])
-    C = jnp.sqrt(c.G*(M1+M2)/(a*(1-ecc**2)))
-    vec_v = jnp.array([-C * jnp.sin(nu), C * (ecc + jnp.cos(nu)), jnp.zeros_like(r)])
-    # now get orbits for the bodies 1 and 2
-    vec_v1 = -vec_v * M2 / (M1 + M2)
-    vec_v2 = vec_v * M1 / (M1 + M2)
-    vec_x1 = -vec_x * M2 / (M1 + M2)
-    vec_x2 = vec_x * M1 / (M1 + M2)
-    # visual orbit:
-    # Positive x is North, positive y is West, (positive z is towards the observer ?)
-    vec_x_obs, vec_v_obs = transform_orbit(vec_x, vec_v, (i, omega, Omega))
-    vec_x1_obs, vec_v1_obs = transform_orbit(vec_x1, vec_v1, (i, omega, Omega))
-    vec_x2_obs, vec_v2_obs = transform_orbit(vec_x2, vec_v2, (i, omega, Omega))
-    # In this code: the negative y is East and negative x is North
-    return jnp.stack((vec_x_obs, vec_v_obs, vec_x1_obs, vec_v1_obs, vec_x2_obs, vec_v2_obs), axis=0)
+@partial(jax.jit, static_argnums=(7,))
+def add_orbit(binary: Binary, P: float, ecc: float,
+              T: float, i: float, omega: float, Omega: float, orbit_resolution_points: ArrayLike):
+        orbit_resolution_times = jnp.linspace(0, P, orbit_resolution_points)
+        orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass, P,
+                              ecc, T, i, omega, Omega)
+        return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega,
+                               evaluated_times=orbit_resolution_times,
+                               body1_centers=orbit[2, :, :], body2_centers=orbit[4, :, :],
+                               body1_velocities=orbit[3, :, :], body2_velocities=orbit[5, :, :])
+
+
+@jax.jit
+def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[MeshModel, MeshModel]:
+      interpolate_orbit = jax.jit(jax.vmap(lambda x: jnp.interp(time, binary.evaluated_times, x, period=binary.P), in_axes=(0,)))
+      
+      body1_center = interpolate_orbit(binary.body1_centers)
+      body2_center = interpolate_orbit(binary.body2_centers)
+      body1_velocity = interpolate_orbit(binary.body1_velocities)
+      body2_velocity = interpolate_orbit(binary.body2_velocities)
+
+      return (evaluate_body_orbit(transform(binary.body1, binary.body1.center+body1_center), body1_velocity),
+              evaluate_body_orbit(transform(binary.body2, binary.body2.center+body2_center), body2_velocity))
+
+
+# @jax.jit
+# def evaluate_orbit(binary: Binary, time: ArrayLike) -> ArrayLike:
+#     orbit_values = get_orbit_jax(
+#         binary.body1.mass,
+#         binary.body2.mass,
+#         binary.P,
+#         binary.ecc,
+#         binary.T,
+#         binary.i,
+#         binary.omega,
+#         binary.Omega
+#     )
+
+#     transformed_body1 = transform(binary.body1, orbit_values[:, 2])
+
+#     return binary._replace(
+#         body1 = 
+#     )
