@@ -18,6 +18,7 @@ def cast_to_los(mesh: MeshModel, los_vector: ArrayLike) -> MeshModel:
 
     return mesh._replace(
         los_vector = los_vector,
+        los_vertices = cast_to_los(mesh.los_vertices, los_vector),
         mus = cast_to_los(mesh.mus, los_vector),
         los_velocities = cast_to_los(mesh.velocities, los_vector)
     )
