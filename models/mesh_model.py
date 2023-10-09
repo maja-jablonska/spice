@@ -9,7 +9,7 @@ from typing import NamedTuple
 from overrides import overrides
 
 from .mesh_generation import icosphere
-from .utils import calculate_axis_radii, cast_to_los
+from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane
 
 
 DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.]) # from the Y direction
@@ -48,7 +48,10 @@ class MeshModel(NamedTuple):
 
     # Mesh LOS properties
     los_vector: ArrayLike
-    los_vertices: ArrayLike
+    los_z: ArrayLike
+    cast_vertices: ArrayLike
+    cast_centers: ArrayLike
+    
     mus: ArrayLike
     los_velocities: ArrayLike
 
@@ -113,6 +116,8 @@ class IcosphereModel(MeshModel):
                 rotation_velocity=0.,
                 orbital_velocity=0.,
                 los_vector=DEFAULT_LOS_VECTOR,
-                los_vertices=cast_to_los(vertices*radius, DEFAULT_LOS_VECTOR),
+                los_z=cast_to_los(centers*radius, DEFAULT_LOS_VECTOR),
+                cast_vertices=cast_to_normal_plane(vertices*radius, DEFAULT_LOS_VECTOR),
+                cast_centers=cast_to_normal_plane(centers*radius, DEFAULT_LOS_VECTOR),
                 mus=cast_to_los(centers, DEFAULT_LOS_VECTOR),
                 los_velocities=jnp.zeros_like(areas))

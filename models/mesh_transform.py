@@ -4,7 +4,8 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS
 from .spots import v_spot
-from .utils import (cast_to_los,
+from .utils import (cast_to_los, cast_normalized_to_los,
+                    cast_to_normal_plane,
                     rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
                     calculate_axis_radii)
@@ -23,8 +24,11 @@ def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
     Returns:
         MeshModel: Mesh with transformed center and vertices coordinates
     """    
-
-    return mesh._replace(center=vector)
+    cast_vector = cast_to_normal_plane(vector, mesh.los_vector)
+    return mesh._replace(center=vector,
+                         los_z=cast_to_los(vector+mesh.d_vertices, mesh.los_vector),
+                         cast_vertices=cast_to_normal_plane(cast_vector+mesh.d_vertices, mesh.los_vector),
+                         cast_centers=cast_to_normal_plane(cast_vector+mesh.d_centers, mesh.los_vector))
 
 
 @jax.jit
@@ -54,8 +58,10 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike):
     return mesh._replace(d_vertices = rotated_vertices,
                          d_centers = rotated_centers,
                          rotation_velocities = rotated_centers_vel*1e-5, # back to km/s
-                         los_vertices=cast_to_los(rotated_vertices, mesh.los_vector),
-                         mus = cast_to_los(rotated_centers, mesh.los_vector),
+                         los_z=cast_to_los(mesh.center+rotated_centers, mesh.los_vector),
+                         cast_vertices=cast_to_normal_plane(mesh.center+rotated_vertices, mesh.los_vector),
+                         cast_centers=cast_to_normal_plane(mesh.center+rotated_centers, mesh.los_vector),
+                         mus = cast_normalized_to_los(rotated_centers, mesh.los_vector),
                          los_velocities = cast_to_los(rotated_centers_vel, mesh.los_vector)*1e-5,
                          axis_radii = new_axis_radii)
 

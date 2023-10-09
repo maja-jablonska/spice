@@ -60,23 +60,3 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[MeshModel, MeshMode
 
       return (evaluate_body_orbit(transform(binary.body1, binary.body1.center+body1_center), body1_velocity),
               evaluate_body_orbit(transform(binary.body2, binary.body2.center+body2_center), body2_velocity))
-
-
-# @jax.jit
-# def evaluate_orbit(binary: Binary, time: ArrayLike) -> ArrayLike:
-#     orbit_values = get_orbit_jax(
-#         binary.body1.mass,
-#         binary.body2.mass,
-#         binary.P,
-#         binary.ecc,
-#         binary.T,
-#         binary.i,
-#         binary.omega,
-#         binary.Omega
-#     )
-
-#     transformed_body1 = transform(binary.body1, orbit_values[:, 2])
-
-#     return binary._replace(
-#         body1 = 
-#     )
