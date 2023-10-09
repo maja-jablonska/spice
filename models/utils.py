@@ -85,6 +85,22 @@ def cast_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
+def cast_to_normal_plane(vectors: ArrayLike, normal_vector: ArrayLike) -> ArrayLike:
+    """Cast 3D vectors to a 2D plane determined by a normal vector
+
+    Args:
+        vectors (ArrayLike): Properties to be casted (n, 3)
+        normal_vector (ArrayLike): Normal vector (3,)
+
+    Returns:
+        ArrayLike: Casted vectors (n, 3), where one of the axes contains only zeroes
+    """
+    n_normal_vector = normal_vector/jnp.linalg.norm(normal_vector)
+    cast_onto_n = jnp.dot(vectors, n_normal_vector).reshape((-1, 1))
+    return vectors-cast_onto_n*n_normal_vector
+
+
+@jax.jit
 def cast_normalized_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
     """Cast 3D vectors to the line-of-sight
 
