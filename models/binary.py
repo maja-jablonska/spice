@@ -8,6 +8,7 @@ from .mesh_model import MeshModel
 from .mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
 from .orbit_utils import get_orbit_jax
+from .mesh_view import resolve_occlusion
 
 
 YEAR_TO_SECONDS = (u.year).to(u.s)
@@ -53,10 +54,16 @@ def add_orbit(binary: Binary, P: float, ecc: float,
 def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[MeshModel, MeshModel]:
       interpolate_orbit = jax.jit(jax.vmap(lambda x: jnp.interp(time, binary.evaluated_times, x, period=binary.P), in_axes=(0,)))
       
+      jax.debug.print("Interpolating orbits")
       body1_center = interpolate_orbit(binary.body1_centers)
       body2_center = interpolate_orbit(binary.body2_centers)
       body1_velocity = interpolate_orbit(binary.body1_velocities)
       body2_velocity = interpolate_orbit(binary.body2_velocities)
 
-      return (evaluate_body_orbit(transform(binary.body1, binary.body1.center+body1_center), body1_velocity),
-              evaluate_body_orbit(transform(binary.body2, binary.body2.center+body2_center), body2_velocity))
+      jax.debug.print("Evaluating body orbits")
+      body1 = evaluate_body_orbit(transform(binary.body1, binary.body1.center+body1_center), body1_velocity)
+      body2 = evaluate_body_orbit(transform(binary.body2, binary.body2.center+body2_center), body2_velocity)
+      
+      return jax.lax.cond(jnp.mean(body1.los_z)>jnp.mean(body2.los_z),
+                          lambda: (body1, resolve_occlusion(body2, body1)),
+                          lambda: (resolve_occlusion(body1, body2), body2))
