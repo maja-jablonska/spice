@@ -10,6 +10,7 @@ from overrides import overrides
 
 from .mesh_generation import icosphere
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane
+from geometry.utils import get_cast_areas
 
 
 DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.]) # from the Y direction
@@ -51,6 +52,7 @@ class MeshModel(NamedTuple):
     los_z: ArrayLike
     cast_vertices: ArrayLike
     cast_centers: ArrayLike
+    cast_areas: ArrayLike
     
     mus: ArrayLike
     los_velocities: ArrayLike
@@ -105,6 +107,9 @@ class IcosphereModel(MeshModel):
 
         if len(parameters.shape) == 1:
             parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats = areas.shape[0], axis = 0)
+        
+        cast_vertices = cast_to_normal_plane(vertices*radius, DEFAULT_LOS_VECTOR)
+        cast_centers = cast_to_normal_plane(centers*radius, DEFAULT_LOS_VECTOR)
 
         return MeshModel.__new__(cls, 0., radius, mass, abs_luminosity, log_g*jnp.ones_like(areas),
                 d_vertices=vertices*radius, faces=faces, d_centers=centers*radius, areas=areas*sphere_area/jnp.sum(areas), parameters=parameters,
@@ -117,7 +122,8 @@ class IcosphereModel(MeshModel):
                 orbital_velocity=0.,
                 los_vector=DEFAULT_LOS_VECTOR,
                 los_z=cast_to_los(centers*radius, DEFAULT_LOS_VECTOR),
-                cast_vertices=cast_to_normal_plane(vertices*radius, DEFAULT_LOS_VECTOR),
-                cast_centers=cast_to_normal_plane(centers*radius, DEFAULT_LOS_VECTOR),
+                cast_vertices=cast_vertices,
+                cast_centers=cast_centers,
+                cast_areas=get_cast_areas(cast_vertices[faces.astype(int)]),
                 mus=cast_to_los(centers, DEFAULT_LOS_VECTOR),
                 los_velocities=jnp.zeros_like(areas))
