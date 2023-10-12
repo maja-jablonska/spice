@@ -118,3 +118,23 @@ def polygon_area(x: ArrayLike, y: ArrayLike) -> ArrayLike:
         ArrayLike: polygon's surface area
     """    
     return 0.5*jnp.abs(jnp.dot(x,jnp.roll(y,1))-jnp.dot(y,jnp.roll(x,1)))
+
+
+polygon_areas = jax.jit(jax.vmap(polygon_area, in_axes=(0, 0)))
+
+def cast_indexes(cast_vertices: ArrayLike):
+    jax.debug.print("Getting cast indexes")
+    zeroth_ind = jnp.argmax(jnp.all(jnp.isclose(cast_vertices, 0), axis=1))
+    # Looks silly, but it needs to be jitable
+    return jax.lax.cond(zeroth_ind == 0,
+                        lambda: jnp.array([1, 2]),
+                        lambda: jax.lax.cond(zeroth_ind == 1,
+                                     lambda: jnp.array([0, 2]),
+                                     lambda: jnp.array([0, 1])))
+
+
+def get_cast_areas(face_vertices: ArrayLike) -> ArrayLike:
+    jax.debug.print("Getting cast areas")
+    cast_ind = cast_indexes(face_vertices)
+    return polygon_areas(face_vertices[:, :, cast_ind[0]],
+                         face_vertices[:, :, cast_ind[1]])
