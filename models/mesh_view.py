@@ -30,7 +30,6 @@ def get_mesh_view(mesh: MeshModel, los_vector: ArrayLike) -> MeshModel:
 
 @jax.jit
 def visible_area(vertices1: ArrayLike, vertices2: ArrayLike) -> ArrayLike:
-    jax.debug.print("Calculating visible areas")
     clipped = jnp.nan_to_num(clip(vertices1, vertices2))
     return polygon_area(clipped[:, 0], clipped[:, 1])
 
@@ -42,7 +41,6 @@ import datetime
 
 @jax.jit
 def resolve_occlusion(mesh1: MeshModel, mesh2: MeshModel) -> ArrayLike:
-    jax.debug.print("Resolving occlusion")
     face_vertices1 = mesh1.cast_vertices[mesh1.faces.astype(int)]
     face_vertices2 = mesh2.cast_vertices[mesh2.faces.astype(int)]
     nonzero_indexer = cast_indexes(mesh1.cast_vertices)
