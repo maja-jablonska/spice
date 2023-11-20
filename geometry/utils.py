@@ -53,7 +53,7 @@ def last_non_nan_arg(arr: ArrayLike) -> ArrayLike:
     return jnp.max(jnp.argwhere(jnp.all(~jnp.isnan(arr), axis=1), size=arr.shape[0], fill_value=0)).astype(int)
 
 
-def last_non_nan(arr: ArrayLike) -> ArrayLike:
+def last_non_nan(arr: ArrayLike, axis=1) -> ArrayLike:
     """Return the last non-nan value of the array
 
     Args:
@@ -62,7 +62,7 @@ def last_non_nan(arr: ArrayLike) -> ArrayLike:
     Returns:
         ArrayLike: Last non-nan row of the array
     """    
-    return arr[jnp.max(jnp.argwhere(jnp.all(~jnp.isnan(arr), axis=1), size=arr.shape[0], fill_value=0))]
+    return arr[jnp.max(jnp.argwhere(jnp.all(~jnp.isnan(arr), axis=axis), size=arr.shape[0], fill_value=0))]
 
 
 def append_to_last_nan(arr: ArrayLike, to_add: ArrayLike) -> ArrayLike:
