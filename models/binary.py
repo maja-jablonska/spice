@@ -8,7 +8,7 @@ from .mesh_model import MeshModel
 from .mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
 from .orbit_utils import get_orbit_jax
-from .mesh_view import gnool_jit, resolve_occlusion, Grid
+from .mesh_view import resolve_occlusion, Grid
 
 
 YEAR_TO_SECONDS = (u.year).to(u.s)
@@ -51,9 +51,8 @@ def add_orbit(binary: Binary, P: float, ecc: float,
 
 
 @partial(jax.jit, static_argnums=(2,))
-def evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[MeshModel, MeshModel]:
+def _evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[MeshModel, MeshModel]:
       interpolate_orbit = jax.jit(jax.vmap(lambda x: jnp.interp(time, binary.evaluated_times, x, period=binary.P), in_axes=(0,)))
-      
       jax.debug.print("Interpolating orbits")
       body1_center = interpolate_orbit(binary.body1_centers)
       body2_center = interpolate_orbit(binary.body2_centers)
@@ -67,3 +66,18 @@ def evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[MeshMod
       return jax.lax.cond(jnp.mean(body1.los_z)>jnp.mean(body2.los_z),
                           lambda: (body1, resolve_occlusion(body2, body1, grid)),
                           lambda: (resolve_occlusion(body1, body2, grid), body2))
+      
+      
+v_evaluate_orbit = jax.jit(jax.vmap(_evaluate_orbit, in_axes=(None, 0, None)), static_argnums=(2,))
+
+
+def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[MeshModel, MeshModel]:
+      grid = Grid.construct(binary.body1, binary.body2, n_cells)
+      
+      return _evaluate_orbit(binary, time, grid)
+
+
+def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20) -> Tuple[MeshModel, MeshModel]:
+      grid = Grid.construct(binary.body1, binary.body2, n_cells)
+
+      return v_evaluate_orbit(binary, times, grid)
