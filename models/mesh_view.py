@@ -11,13 +11,6 @@ from functools import partial
 from jax.tree_util import register_pytree_node_class
 
 
-def register_pytree_node_dataclass(cls):
-  _flatten = lambda obj: jax.tree_flatten(dataclasses.asdict(obj))
-  _unflatten = lambda d, children: cls(**d.unflatten(children))
-  jax.tree_util.register_pytree_node(cls, _flatten, _unflatten)
-  return cls
-
-
 @register_pytree_node_class
 class Grid:
     
@@ -29,7 +22,9 @@ class Grid:
                  grid: ArrayLike,
                  n_cells: int,
                  n_centers_m1: int,
-                 n_centers_m2: int):
+                 n_centers_m2: int,
+                 n_points_m1: int,
+                 n_points_m2: int):
         self.x = x
         self.y = y
         self.x_span = x_span
@@ -38,25 +33,31 @@ class Grid:
         self.n_cells = n_cells
         self.n_centers_m1 = n_centers_m1
         self.n_centers_m2 = n_centers_m2
+        self.n_points_m1 = n_points_m1
+        self.n_points_m2 = n_points_m2
         
     @classmethod
     def construct(cls, m1: MeshModel, m2: MeshModel, n_cells: int):
         vs1, vs2 = m1.cast_vertices[m1.faces.astype(int)], m2.cast_vertices[m2.faces.astype(int)]
-        vs1, vs2 = vs1[cast_indexes(vs1)], vs2[cast_indexes(vs2)]
+        vs1, vs2 = vs1[:, :, cast_indexes(vs1)], vs2[:, :, cast_indexes(vs2)]
         
         x_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, :, 0], vs2[:, :, 0]])), jnp.max(jnp.concatenate([vs1[:, :, 0], vs2[:, :, 0]])), n_cells)
         y_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, :, 1], vs2[:, :, 1]])), jnp.max(jnp.concatenate([vs1[:, :, 1], vs2[:, :, 1]])), n_cells)
 
         nx, ny = jnp.meshgrid(x_range, y_range)
         x, y = jnp.meshgrid(x_range, y_range, sparse=True)
+        x, y = x.flatten(), y.flatten()
         return cls(
-            x.flatten(), y.flatten(),
-            x_range[1]-x_range[0],
-            y_range[1]-y_range[0],
-            jnp.vstack([nx.ravel(), ny.ravel()]).T,
-            n_cells,
-            m1.cast_centers.shape[0],
-            m2.cast_centers.shape[0]
+            x=x,
+            y=y,
+            x_span=x[1]-x[0],
+            y_span=y[1]-y[0],
+            grid=jnp.vstack([nx.ravel(), ny.ravel()]).T,
+            n_cells=n_cells,
+            n_centers_m1=m1.cast_centers.shape[0],
+            n_centers_m2=m2.cast_centers.shape[0],
+            n_points_m1=jnp.ceil(4*m1.cast_centers.shape[0]/(n_cells*n_cells)).astype(int).item(),
+            n_points_m2=jnp.ceil(4*m2.cast_centers.shape[0]/(n_cells*n_cells)).astype(int).item()
         )
         
     def __hash__(self) -> int:
@@ -69,42 +70,12 @@ class Grid:
         return "Grid(n_cells={})".format(self.n_cells)
     
     def tree_flatten(self):
-        return (self.grid, self.x, self.y, self.x_span, self.y_span, self.n_cells, self.n_centers_m1, self.n_centers_m2), None
+        return (self.x, self.y, self.x_span, self.y_span, self.grid, self.n_cells,
+                self.n_centers_m1, self.n_centers_m2, self.n_points_m1, self.n_points_m2), None
     
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children)
-
-    
-    
-def some_hash_function(x):
-  return int(jnp.sum(x))
-    
-    
-class HashableArrayWrapper:
-  def __init__(self, val):
-    self.val = val
-  def __hash__(self):
-    return some_hash_function(self.val)
-  def __eq__(self, other):
-    return (isinstance(other, HashableArrayWrapper) and
-            jnp.all(jnp.equal(self.val, other.val)))
-
-def gnool_jit(fun, static_array_argnums=()):
-  @partial(jax.jit, static_argnums=static_array_argnums)
-  def callee(*args):
-    args = list(args)
-    for i in static_array_argnums:
-      args[i] = args[i].val
-    return fun(*args)
-
-  def caller(*args):
-    args = list(args)
-    for i in static_array_argnums:
-      args[i] = HashableArrayWrapper(args[i])
-    return callee(*args)
-
-  return caller
 
 
 @jax.jit
@@ -138,30 +109,6 @@ total_visible_area = jax.jit(jax.vmap(visible_area, in_axes=(None, 0)))
 
 visibility_areas = jax.jit(jax.vmap(total_visible_area, in_axes=(0, None)))
 
-@jax.jit
-def construct_grid(m1: MeshModel, m2: MeshModel) -> Grid:
-    N_GRID = 20
-    vs1, vs2 = m1.cast_vertices[m1.faces.astype(int)], m2.cast_vertices[m2.faces.astype(int)]
-    vs1, vs2 = vs1[cast_indexes(vs1)], vs2[cast_indexes(vs2)]
-    
-    x_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, :, 0], vs2[:, :, 0]])), jnp.max(jnp.concatenate([vs1[:, :, 0], vs2[:, :, 0]])), N_GRID)
-    y_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, :, 1], vs2[:, :, 1]])), jnp.max(jnp.concatenate([vs1[:, :, 1], vs2[:, :, 1]])), N_GRID)
-
-    nx, ny = jnp.meshgrid(x_range, y_range)
-    x, y = jnp.meshgrid(x_range, y_range, sparse=True)
-    x, y = x.flatten(), y.flatten()
-    x_span = x_range[1]-x_range[0]
-    y_span = y_range[1]-y_range[0]
-    return Grid(**{
-            'grid': jnp.vstack([nx.ravel(), ny.ravel()]).T,
-            'x': x,
-            'y': y,
-            'x_span': x_span,
-            'y_span': y_span,
-            'n_cells': N_GRID,
-            'n_centers_m1': m1.cast_centers.shape[0],
-            'n_centers_m2': m2.cast_centers.shape[0]
-        })
 
 @jax.jit
 def get_grid_index(grid: Grid, cast_point: ArrayLike) -> ArrayLike:
@@ -199,12 +146,9 @@ def assign_element_to_grid(i: int, carry: ArrayLike, m: MeshModel):
     
 @partial(jax.jit, static_argnums=(2,))
 def create_grid_dictionaries(m1: MeshModel, m2: MeshModel, grid: Grid):
-    # N_POINTS = jnp.ceil(4*(m1.cast_centers.shape[0]/(grid_cells*grid_cells))).astype(int)
-    # N_POINTS2 = jnp.ceil(4*(m2.cast_centers.shape[0]/(grid_cells*grid_cells))).astype(int)
-    grid_cells = grid.n_cells
-    grids_m1 = jnp.nan*jnp.ones((grid_cells, grid_cells, grid_cells))
+    grids_m1 = jnp.nan*jnp.ones((grid.x.shape[0], grid.y.shape[0], grid.n_points_m1))
     reverse_grids_m1 = jnp.nan*jnp.ones((grid.n_centers_m1, 2))
-    grids_m2 = jnp.nan*jnp.ones((grid_cells, grid_cells, grid_cells))
+    grids_m2 = jnp.nan*jnp.ones((grid.x.shape[0], grid.y.shape[0], grid.n_points_m2))
     reverse_grids_m2 = jnp.nan*jnp.ones((grid.n_centers_m2, 2))
 
     return (
@@ -215,8 +159,7 @@ def create_grid_dictionaries(m1: MeshModel, m2: MeshModel, grid: Grid):
 
 @jax.jit
 def get_neighbouring(x: int, y: int):
-    
-    neighbours = jnp.array([[x, y], [x-1, y-1], [x-1, y], [x-1, y+1],
+    neighbours = jnp.array([[x, y],[x-1, y-1], [x-1, y], [x-1, y+1],
                             [x, y-1], [x, y+1],
                             [x+1, y-1], [x+1, y], [x+1, y+1]])
     return neighbours
@@ -225,63 +168,30 @@ def get_neighbouring(x: int, y: int):
 @partial(jax.jit, static_argnums=(3,))
 def resolve_occlusion_for_face(m1: MeshModel, m2: MeshModel, face_index: int, grid: Grid):
     (_, _, reverse_grids_m1), (_, grids_m2, _) = create_grid_dictionaries(m1, m2, grid)
+    nonzero_indexer_1 = cast_indexes(m1.cast_centers)
+    nonzero_indexer_2 = cast_indexes(m2.cast_centers)
     ix, iy = jnp.nan_to_num(reverse_grids_m1[face_index], reverse_grids_m1.shape[0]+1).astype(int)
     grid_neighbours = get_neighbouring(ix, iy)
     points_in_grid = (grids_m2[grid_neighbours[:, 0], grid_neighbours[:, 1]]).flatten()
     points_mask = jnp.where(jnp.isnan(points_in_grid), 0., 1.)*(m1.mus[face_index]>0).astype(float)
-    return jnp.sum(total_visible_area(m1.cast_vertices[m1.faces[face_index].astype(int)][:, [1, 2]],
-                                      m2.cast_vertices[m2.faces[points_in_grid.astype(int)].astype(int)][:, :, [1, 2]])*points_mask)
+    return jnp.sum(total_visible_area(m1.cast_vertices[m1.faces[face_index].astype(int)][:, nonzero_indexer_1],
+                                      m2.cast_vertices[m2.faces[points_in_grid.astype(int)].astype(int)][:, :, nonzero_indexer_2])*points_mask)
     
 v_resolve_occlusion_for_face = jax.jit(jax.vmap(resolve_occlusion_for_face, in_axes=(None, None, 0, None)), static_argnums=(3,))
     
 @partial(jax.jit, static_argnums=(2,))
 def resolve_occlusion(m1: MeshModel, m2: MeshModel, grid: Grid) -> ArrayLike:
-    cast_mesh2_center = cast_to_normal_plane(m2.center, m1.los_vector)
-    cast_mesh2_center = cast_mesh2_center[0, cast_indexes(cast_mesh2_center)]
-    nonzero_indexer = cast_indexes(m1.cast_centers)
-    mean_separation = jnp.mean(jnp.sqrt(2*m1.areas))
-    o = v_resolve_occlusion_for_face(m1, m2, jnp.arange(len(m1.faces)), grid)
-    jax.debug.print("{a}", a = (jnp.sqrt(jnp.sum(jnp.square(m1.cast_vertices[m1.faces.astype(int)][:, :, nonzero_indexer]-cast_mesh2_center), axis=2))).shape)
-    #return (jnp.sqrt(jnp.sum(jnp.square(m1.cast_centers[:, nonzero_indexer]-cast_mesh2_center), axis=1))<(m2.radius-mean_separation)).astype(float)
-    return m1._replace(
-        cast_areas=jnp.where(
-            jnp.sqrt(jnp.sum(jnp.square(m1.cast_centers[:, nonzero_indexer]-cast_mesh2_center), axis=1))<(m2.radius-1.1*mean_separation),
-            0.,
-            m1.cast_areas-o
-        ))
-    # cast_mesh2_center = cast_to_normal_plane(mesh2.center, mesh1.los_vector)
+    # cast_mesh2_center = cast_to_normal_plane(m2.center, m1.los_vector)
     # cast_mesh2_center = cast_mesh2_center[0, cast_indexes(cast_mesh2_center)]
-    # mean_separation = jnp.mean(jnp.sqrt(2*mesh1.areas))
-
-    # face_vertices1 = mesh1.cast_vertices[mesh1.faces.astype(int)]
-    # face_vertices2 = mesh2.cast_vertices[mesh2.faces.astype(int)]
-    # nonzero_indexer = cast_indexes(mesh1.cast_vertices)
-    # cast_vertices1 = face_vertices1[:, :, nonzero_indexer]
-    # cast_vertices2 = face_vertices2[:, :, nonzero_indexer]
-    # occluded = jnp.where(mesh2.mus>0,
-    #                              visibility_areas(cast_vertices1, cast_vertices2,
-    #                                               cast_mesh2_center, mesh2.radius, mean_separation),
-    #                              0.)
-    # return mesh1._replace(
-    #         cast_areas=jnp.where(mesh1.mus>0, mesh1.cast_areas-occluded, 0)
-    #     )
-
-
-# @jax.jit
-# def resolve_occlusion(mesh1: MeshModel, mesh2: MeshModel) -> ArrayLike:
-#     cast_mesh2_center = cast_to_normal_plane(mesh2.center, mesh1.los_vector)
-#     cast_mesh2_center = cast_mesh2_center[0, cast_indexes(cast_mesh2_center)]
-#     mean_separation = jnp.mean(jnp.sqrt(2*mesh1.areas))
-
-#     face_vertices1 = mesh1.cast_vertices[mesh1.faces.astype(int)]
-#     face_vertices2 = mesh2.cast_vertices[mesh2.faces.astype(int)]
-#     nonzero_indexer = cast_indexes(mesh1.cast_vertices)
-#     cast_vertices1 = face_vertices1[:, :, nonzero_indexer]
-#     cast_vertices2 = face_vertices2[:, :, nonzero_indexer]
-#     occluded = jnp.where(mesh2.mus>0,
-#                                  visibility_areas(cast_vertices1, cast_vertices2,
-#                                                   cast_mesh2_center, mesh2.radius, mean_separation),
-#                                  0.)
-#     return mesh1._replace(
-#             cast_areas=jnp.where(mesh1.mus>0, mesh1.cast_areas-occluded, 0)
-#         )
+    # nonzero_indexer = cast_indexes(m1.cast_centers)
+    # mean_separation = jnp.mean(jnp.sqrt(2*m1.areas))
+    o = v_resolve_occlusion_for_face(m1, m2, jnp.arange(len(m1.faces)), grid)
+    return m1._replace(
+        cast_areas=m1.cast_areas-o
+    )
+    # return m1._replace(
+    #     cast_areas=jnp.where(
+    #         jnp.sqrt(jnp.sum(jnp.square(m1.cast_centers[:, nonzero_indexer]-cast_mesh2_center), axis=1))<(m2.radius-1.1*mean_separation),
+    #         0.,
+    #         m1.cast_areas-o
+    #     ))
