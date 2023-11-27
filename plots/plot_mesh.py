@@ -5,7 +5,7 @@ import numpy as np
 from models import MeshModel
 from jax.typing import ArrayLike
 
-COLORMAP_PROPERTIES = ['mus', 'los_velocities']
+COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas']
 DEFAULT_PROPERTY = 'mus'
 
 DEFAULT_PLOT_PROPERTY_LABELS = {
