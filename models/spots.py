@@ -40,6 +40,20 @@ def add_spot(mesh: MeshModel,
              radius: float,
              radius_factor: float,
              param_index: int) -> MeshModel:
+    """Add a spot to the mesh model.
+
+    Args:
+        mesh (MeshModel): mesh model
+        theta (float): theta coordinate of the spot center
+        phi (float): phi coordinate of the spot center
+        param_delta (float): difference in the parameter value between the spot and the background
+        radius (float): spot radius in radians
+        radius_factor (float): factor of the difference gradient on the spot edge
+        param_index (int): index of the parameter in the parameters array
+
+    Returns:
+        MeshModel: mesh with the spot added
+    """
     spot_parameters = v_spot(theta, phi, param_delta, 0., radius, radius_factor, mesh.centers)
     return mesh._replace(parameters = mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index]+spot_parameters))
@@ -52,6 +66,20 @@ def add_spots(mesh: MeshModel,
               radii: ArrayLike,
               radius_factors: ArrayLike,
               param_indices: ArrayLike) -> MeshModel:
+    """Add multiple spots to the mesh model
+
+    Args:
+        mesh (MeshModel): mesh model
+        thetas (ArrayLike): theta coordinates of the spots centers
+        phis (ArrayLike): phi coordinates of the spots centers
+        param_deltas (ArrayLike): difference in the parameter valuea between the spota and the background
+        radii (ArrayLike): spot radii in radians
+        radius_factors (ArrayLike): factors of the difference gradients on the spot edges
+        param_indices (ArrayLike): indices of the parameters in the parameters array
+
+    Returns:
+        MeshModel: mesh with the spots added
+    """
     def scan(carry, params):
         return add_spot(carry, *params[:-1], params[-1].astype(int)), params
     
