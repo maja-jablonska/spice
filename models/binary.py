@@ -53,13 +53,11 @@ def add_orbit(binary: Binary, P: float, ecc: float,
 @partial(jax.jit, static_argnums=(2,))
 def _evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[MeshModel, MeshModel]:
       interpolate_orbit = jax.jit(jax.vmap(lambda x: jnp.interp(time, binary.evaluated_times, x, period=binary.P), in_axes=(0,)))
-      jax.debug.print("Interpolating orbits")
       body1_center = interpolate_orbit(binary.body1_centers)
       body2_center = interpolate_orbit(binary.body2_centers)
       body1_velocity = interpolate_orbit(binary.body1_velocities)
       body2_velocity = interpolate_orbit(binary.body2_velocities)
 
-      jax.debug.print("Evaluating body orbits")
       body1 = evaluate_body_orbit(transform(binary.body1, binary.body1.center+body1_center), body1_velocity)
       body2 = evaluate_body_orbit(transform(binary.body2, binary.body2.center+body2_center), body2_velocity)
       

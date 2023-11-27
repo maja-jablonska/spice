@@ -13,7 +13,6 @@ from jax.tree_util import register_pytree_node_class
 
 @register_pytree_node_class
 class Grid:
-    
     def __init__(self,
                  x: ArrayLike,
                  y: ArrayLike,
@@ -180,18 +179,18 @@ def resolve_occlusion_for_face(m1: MeshModel, m2: MeshModel, face_index: int, gr
 v_resolve_occlusion_for_face = jax.jit(jax.vmap(resolve_occlusion_for_face, in_axes=(None, None, 0, None)), static_argnums=(3,))
     
 @partial(jax.jit, static_argnums=(2,))
-def resolve_occlusion(m1: MeshModel, m2: MeshModel, grid: Grid) -> ArrayLike:
-    # cast_mesh2_center = cast_to_normal_plane(m2.center, m1.los_vector)
-    # cast_mesh2_center = cast_mesh2_center[0, cast_indexes(cast_mesh2_center)]
-    # nonzero_indexer = cast_indexes(m1.cast_centers)
-    # mean_separation = jnp.mean(jnp.sqrt(2*m1.areas))
+def resolve_occlusion(m1: MeshModel, m2: MeshModel, grid: Grid) -> MeshModel:
+    """Calculate the occlusion of m1 by m2
+
+    Args:
+        m1 (MeshModel): occluded mesh model
+        m2 (MeshModel): occluding mesh model
+        grid (Grid): grid for calculation optimization
+
+    Returns:
+        MeshModel: m1 with updated visible areas
+    """
     o = v_resolve_occlusion_for_face(m1, m2, jnp.arange(len(m1.faces)), grid)
     return m1._replace(
         cast_areas=m1.cast_areas-o
     )
-    # return m1._replace(
-    #     cast_areas=jnp.where(
-    #         jnp.sqrt(jnp.sum(jnp.square(m1.cast_centers[:, nonzero_indexer]-cast_mesh2_center), axis=1))<(m2.radius-1.1*mean_separation),
-    #         0.,
-    #         m1.cast_areas-o
-    #     ))
