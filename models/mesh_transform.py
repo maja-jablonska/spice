@@ -37,7 +37,17 @@ def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
 @jax.jit
 def add_rotation(mesh: MeshModel,
                  rotation_velocity: ArrayLike,
-                 rotation_axis: ArrayLike = DEFAULT_ROTATION_AXIS):
+                 rotation_axis: ArrayLike = DEFAULT_ROTATION_AXIS) -> MeshModel:
+    """Add a rigid rotation to the mesh model
+
+    Args:
+        mesh (MeshModel): mesh to add the rotation to
+        rotation_velocity (ArrayLike): rotation velocity in km/s
+        rotation_axis (ArrayLike, optional): rootation axis vector. Defaults to [0., 0., 1.].
+
+    Returns:
+        MeshModel: mesh with rotation added
+    """
     rot_matrix = rotation_matrix(rotation_axis)
     rot_matrix_grad = rotation_matrix_prim(rotation_axis)
     
@@ -48,7 +58,16 @@ def add_rotation(mesh: MeshModel,
 
 
 @jax.jit
-def evaluate_rotation(mesh: MeshModel, t: ArrayLike):
+def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
+    """Evaluate the effects of a rotation at a given timestep t
+
+    Args:
+        mesh (MeshModel): mesh model of a body with a rigid rotation
+        t (ArrayLike): timestep t
+
+    Returns:
+        MeshModel: mesh model with updated parameters
+    """
     rotation_velocity_cm = mesh.rotation_velocity*1e5
     theta = (rotation_velocity_cm*t)/mesh.radius # cm
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta) # cm
@@ -72,5 +91,14 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike):
 
 
 def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
+    """Evaluate the effects of an orbit on a mesh model
+
+    Args:
+        m (MeshModel): mesh model of an orbiting body
+        orbital_velocity (float): orbital velocity in km/s
+
+    Returns:
+        MeshModel: mesh model with updated parameters
+    """
     m = m._replace(orbital_velocity=orbital_velocity)
     return m._replace(los_velocities=cast_to_los(m.velocities, m.los_vector))

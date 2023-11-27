@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
-from geometry.utils import inside, last_non_nan, last_non_nan_arg, append_to_last_nan, repeat_last, sort_xy
+from geometry.utils import inside, last_non_nan, append_to_last_nan, repeat_last, sort_xy
 
 
 @jax.jit
@@ -31,7 +31,18 @@ def x_y_no_vertical(p1, p2, q1, q2):
 
 
 @jax.jit
-def compute_intersection(p1, p2, q1, q2):
+def compute_intersection(p1: ArrayLike, p2: ArrayLike, q1: ArrayLike, q2: ArrayLike) -> ArrayLike:
+    """Calculate the intersection of two lines
+
+    Args:
+        p1 (ArrayLike): point 1 of line 1
+        p2 (ArrayLike): point 2 of line 1
+        q1 (ArrayLike): point 1 of line 2
+        q2 (ArrayLike): point 2 of line 2
+
+    Returns:
+        ArrayLike: coordinates of the intersection of two lines
+    """
     x, y = jax.lax.cond(jnp.isclose(p1[0]-p2[0], 0),
                         x_y_first_line_vertical,
                         lambda a, b, c, d: jax.lax.cond(
