@@ -35,6 +35,7 @@ def spectrum_flash_sum(intensity_fn,
     
     # Just the 1D case for now
     n_areas = areas.shape[0]
+    n_parameters = parameters.shape[-1]
     mus_flattened = mus.flatten()
     vrads_flattened = vrads.flatten()
 
@@ -46,6 +47,7 @@ def spectrum_flash_sum(intensity_fn,
     @partial(jax.checkpoint, prevent_cse=False)
     def chunk_scanner(carries, _):
         chunk_idx, atmo_sum, chunk_sum = carries
+        
         k_chunk_sizes = min(chunk_size, n_areas)
 
         # (CHUNK_SIZE, 1)
@@ -65,7 +67,7 @@ def spectrum_flash_sum(intensity_fn,
         # (CHUNK_SIZE, 20)
         p_chunk = lax.dynamic_slice(parameters,
                                     (chunk_idx, 0),
-                                    (k_chunk_sizes, 20))
+                                    (k_chunk_sizes, n_parameters))
     
         # Shape: (CHUNK_SIZE, n_wavelengths)
         shifted_log_wavelengths = v_apply_vrad_log(log_wavelengths, vrad_chunk)
