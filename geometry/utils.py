@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
-from typing import Tuple
 
 
 def sort_xy(points: ArrayLike) -> ArrayLike:
@@ -136,9 +135,17 @@ def polygon_area(x: ArrayLike, y: ArrayLike) -> ArrayLike:
 
 polygon_areas = jax.jit(jax.vmap(polygon_area, in_axes=(0, 0)))
 
-def cast_indexes(cast_vertices: ArrayLike):
+def cast_indexes(cast_vertices: ArrayLike) -> ArrayLike:
+    """When casting 3D vectors to 2D, get the indices of non-reduced dimensions
+
+    Args:
+        cast_vertices (ArrayLike): vertices after 3D to 2D casting
+
+    Returns:
+        ArrayLike: non-reduced (non-zero) dimensions
+    """
     zeroth_ind = jnp.argmax(jnp.all(jnp.isclose(cast_vertices, 0), axis=1))
-    # Looks silly, but it needs to be jitable
+
     return jax.lax.cond(zeroth_ind == 0,
                         lambda: jnp.array([1, 2]),
                         lambda: jax.lax.cond(zeroth_ind == 1,
@@ -147,6 +154,14 @@ def cast_indexes(cast_vertices: ArrayLike):
 
 
 def get_cast_areas(face_vertices: ArrayLike) -> ArrayLike:
+    """Get visible, 2D-casted polygon areas
+
+    Args:
+        face_vertices (ArrayLike): polygons' vertices after 3D to 2D casting
+
+    Returns:
+        ArrayLike: areas of 2D-casted polygons
+    """
     cast_ind = cast_indexes(face_vertices)
     return polygon_areas(face_vertices[:, :, cast_ind[0]],
                          face_vertices[:, :, cast_ind[1]])
