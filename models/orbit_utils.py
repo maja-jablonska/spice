@@ -65,22 +65,6 @@ def transform_orbit(x, v, elements):
     return M @ x, M @ v
 
 def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega) -> ArrayLike:
-    """_summary_
-
-    Args:
-        time (_type_): times of observations
-        m1 (_type_): first body's mass in kg
-        m2 (_type_): second body's mass in kg
-        P (_type_): period in years
-        ecc (_type_): eccentricity
-        T (_type_): time of perihelion passage (same unit as time units)
-        i (_type_): inclination
-        omega (_type_): _description_
-        Omega (_type_): _description_
-
-    Returns:
-        _type_: _description_
-    """
     M1 = m1
     M2 = m2
     period_seconds = P*c.yr
