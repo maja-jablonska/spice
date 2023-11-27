@@ -1,11 +1,8 @@
-import jax
-from jax import lax, random, numpy as jnp
-import flax
+from jax import numpy as jnp
 import numpy as np
 from flax import linen as nn
-from flax.training import train_state, checkpoints
-
-from typing import Callable, Tuple
+import os
+import jax
 
 import pickle
 
@@ -13,7 +10,7 @@ def read_from_pickle(fn):
     with open(fn, "rb") as f:
         return pickle.load(f)
     
-restored_params = read_from_pickle("spectrum_korg.pickle")
+restored_params = read_from_pickle(os.path.join(os.path.dirname(__file__), "spectrum_korg.pickle"))
 
 labels_names = ['logteff', 'logg', 'mu']
 
@@ -142,35 +139,11 @@ def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarr
     # parameters: logteff, logg, "Li", "Be", ... , "U"
 
     mu_array = jnp.array([mu])
+    log_wave = jnp.atleast_2d(log_wave)
     p = jnp.concatenate((parameters[:2], mu_array, parameters[2:]), axis=0)
     
     x = m.apply({'params': restored_params},
                    {"logwave":log_wave, "parameters": p},
                    train=False)
-    return x
-
-# if __name__ == "__main__":
-#     import matplotlib.pyplot as plt
-    
-#     log_w = jnp.linspace(jnp.log10(4000), jnp.log10(4500), 100000)
-#     s = flux(log_wave=log_w, 
-#          mu=1.0, 
-#          parameters=jnp.ones(92)*0.5)
-    
-#     y1_values = s[:, 0]
-#     y2_values = s[:, 1]
-#     x_values = 10 ** log_w
-#     y_diff = 10 ** (y1_values - y2_values)
-    
-#     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-
-#     # Plot the y-values on the top axis (same as before)
-#     ax1.plot(x_values, y1_values)
-#     ax1.plot(x_values, y2_values)
-
-#     # Plot the new y_diff on the bottom axis
-#     ax2.plot(x_values, y_diff,"x-")
-
-#     # Show the plot
-#     plt.tight_layout()
-#     plt.show()
+    return jnp.array([jnp.multiply(x[:, 0], jnp.power(10, x[:, 1])),
+                      jnp.power(10, x[:, 1])])
