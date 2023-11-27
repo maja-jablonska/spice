@@ -4,8 +4,10 @@ import jax
 from jax.typing import ArrayLike
 from typing import Tuple
 from functools import partial
+import warnings
 
 from .mesh_generation import icosphere, face_center
+from utils import ExperimentalWarning
 
 @jax.jit
 def apply_pulsation(verts: ArrayLike,
@@ -21,6 +23,7 @@ def apply_pulsation(verts: ArrayLike,
     Returns:
         Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: _description_
     """
+    warnings.warn("This feature is experimental - use with caution.", ExperimentalWarning)
     direction_vectors = verts/jnp.linalg.norm(verts, axis=1).reshape((-1, 1))
     verts = verts + magnitude*direction_vectors
     areas, centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts, faces.astype(jnp.int32))
