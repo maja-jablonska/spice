@@ -140,10 +140,12 @@ def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarr
 
     mu_array = jnp.array([mu])
     log_wave = jnp.atleast_2d(log_wave)
+    
+    # The temperature should be in log10(log10(teff))
+    parameters = parameters.at[0].set(jnp.log10(jnp.log10(parameters[0])))
     p = jnp.concatenate((parameters[:2], mu_array, parameters[2:]), axis=0)
     
     x = m.apply({'params': restored_params},
                    {"logwave":log_wave, "parameters": p},
                    train=False)
-    return jnp.array([jnp.multiply(x[:, 0], jnp.power(10, x[:, 1])),
-                      jnp.power(10, x[:, 1])])
+    return jnp.power(10, x).T
