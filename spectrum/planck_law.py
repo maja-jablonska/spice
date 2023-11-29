@@ -22,7 +22,7 @@ def blackbody_intensity(log_wave: float, mu: float, parameters: ArrayLike) -> Ar
     wave_cm = 10 ** (log_wave - 8)  # 1 Angstrom = 1e-8 cm
 
     # Extract temperature from parameters
-    T = 10 ** parameters[0]
+    T = parameters[0]
 
     # Compute blackbody intensity
     intensity = ((2 * h * c ** 2 / wave_cm ** 5 * 1 / (jnp.exp(h * c / (wave_cm * k * T)) - 1)))*1e-8
