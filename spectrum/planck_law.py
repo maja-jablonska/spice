@@ -1,22 +1,24 @@
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 
+
 # Define constants
 h = 6.62607015e-27  # Planck's constant [erg*s]
 c = 2.99792458e10   # Speed of light [cm/s]
 k = 1.380649e-16    # Boltzmann constant [erg/K]
 
-def blackbody_intensity(log_wave: float, mu: float, parameters: ArrayLike) -> ArrayLike:
+
+def blackbody_intensity(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
     """
     Compute the blackbody intensity.
 
-    Parameters:
-    log_wave (jnp.array): Array of logarithmic wavelengths (log10 of wavelength in Angstroms).
-    mu (float): Cosine of the angle between the line of sight and the surface normal. It ranges from -1 to 1.
-    parameters (jnp.array): Array of parameters. In this case, only one element is used which represents the temperature in Kelvin.
+    Args:
+        log_wave (ArrayLike): Array of logarithmic wavelengths (log10 of wavelength in Angstroms).
+        mu (float): Cosine of the angle between the line of sight and the surface normal. It ranges from -1 to 1.
+        parameters (ArrayLike): Array of parameters. In this case, only one element is used which represents the temperature in Kelvin.
 
     Returns:
-    jnp.array: Array of blackbody intensities in erg/s/cm2/A
+        ArrayLike: Array of blackbody intensities in erg/s/cm2/A
     """
     # Convert log wavelength from angstroms to cm
     wave_cm = 10 ** (log_wave - 8)  # 1 Angstrom = 1e-8 cm

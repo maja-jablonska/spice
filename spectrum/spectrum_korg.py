@@ -1,14 +1,15 @@
 from jax import numpy as jnp
+from jax.typing import ArrayLike
 import numpy as np
 from flax import linen as nn
 import os
-import jax
-
 import pickle
+
 
 def read_from_pickle(fn):
     with open(fn, "rb") as f:
         return pickle.load(f)
+    
     
 restored_params = read_from_pickle(os.path.join(os.path.dirname(__file__), "spectrum_korg.pickle"))
 
@@ -135,7 +136,17 @@ print("Models defined.")
 
 m = MLP_wavelength_att()
 
-def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarray:
+def flux(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
+    """Calculates the flux using the Korg-trained transformer-based model.
+
+    Args:
+        log_wave (ArrayLike): Array of logarithmic wavelengths (log10 of wavelength in Angstroms).
+        mu (float): Cosine of the angle between the line of sight and the surface normal. It ranges from -1 to 1.
+        parameters (ArrayLike): Array of parameters - logteff, logg, "Li", "Be", ... , "U"
+
+    Returns:
+        ArrayLike: Array of intensities in []
+    """
     # parameters: logteff, logg, "Li", "Be", ... , "U"
 
     mu_array = jnp.array([mu])
