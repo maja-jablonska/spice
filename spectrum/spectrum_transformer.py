@@ -1,13 +1,12 @@
-import jax
-from jax import lax, random, numpy as jnp
-import flax
+from jax.typing import ArrayLike
+from jax import numpy as jnp
 import numpy as np
 from flax import linen as nn
 from flax.training import checkpoints
 
-from typing import Callable, Tuple
-
 import os 
+
+
 dir_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..')
 
 model_name = "MLP_w_att_69099_st1000000_1000000"
@@ -87,7 +86,17 @@ print("Models defined.")
 
 m = MLP_wavelength_att_mu()
 
-def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarray:
+def flux(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
+    """Calculates the flux using the transformer-based model trained on a spectra grid.
+
+    Args:
+        log_wave (ArrayLike): Array of logarithmic wavelengths (log10 of wavelength in Angstroms).
+        mu (float): Cosine of the angle between the line of sight and the surface normal. It ranges from -1 to 1.
+        parameters (ArrayLike): Array of parameters - logteff, logg, "Li", "Be", ... , "U"
+
+    Returns:
+        ArrayLike: Array of intensities in []
+    """
     # The temperature should be log10(log10(teff))
     parameters = parameters.at[0].set(jnp.log10(jnp.log10(parameters[0])))
     x = m.apply({'params': restored_params},
