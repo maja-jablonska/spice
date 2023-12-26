@@ -1,12 +1,8 @@
-from typing import Union
-from jax import jit
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 from typing import NamedTuple
-
-from overrides import overrides
 
 from .mesh_generation import icosphere
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane
@@ -88,7 +84,7 @@ class IcosphereModel(MeshModel):
                   radius: float,
                   mass: float,
                   abs_luminosity: float,
-                  parameters: ArrayLike): # What to do about parameters?
+                  parameters: ArrayLike) -> "IcosphereModel": # What to do about parameters?
         """Construct an Icosphere.
 
         Args:
@@ -99,7 +95,7 @@ class IcosphereModel(MeshModel):
             parameters (ArrayLike): Array of global parameters
 
         Returns:
-            _type_: _description_
+            IcosphereModel:
         """
         vertices, faces, areas, centers = icosphere(n_vertices)
         sphere_area = 4*jnp.pi*jnp.power(radius, 2)
