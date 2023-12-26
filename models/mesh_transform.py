@@ -1,16 +1,12 @@
-from typing import Tuple
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS
-from .spots import v_spot
 from .utils import (cast_to_los, cast_normalized_to_los,
                     cast_to_normal_plane,
                     rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
                     calculate_axis_radii)
-import warnings
-from functools import partial
 from geometry.utils import get_cast_areas
 
 
