@@ -6,7 +6,7 @@ from typing import Callable
 from models import MeshModel
 import math
 from functools import partial
-from .utils import ERG_S_TO_W, SPHERE_STERADIAN, ZERO_POINT_LUM_W
+from .utils import ERG_S_TO_W, SPHERE_STERADIAN
 
 
 DEFAULT_CHUNK_SIZE: int = 1024
@@ -29,9 +29,10 @@ def spectrum_flash_sum(intensity_fn,
                        vrads,
                        parameters,
                        chunk_size: int = 256):
-    # Z każdym elementem powierzchni przekazujemy
-    # wektor jego wartości (mu, przyspieszenie, itd.)
-    # Część wartości będzie przekazywana do modelu
+    '''
+        Each surface element has a vector of parameters (mu, LOS velocity, etc)
+        Some of these parameters are the flux model's input
+    '''
     
     # Just the 1D case for now
     n_areas = areas.shape[0]
@@ -136,6 +137,7 @@ def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, samp
     return jnp.interp(wavelengths, sample_wavelengths, sample_responses)
 
 
+# TODO: debug
 @jax.jit
 def passband_luminosity(spectrum: ArrayLike, filter_responses: ArrayLike,
                         wavelengths: ArrayLike, mesh: MeshModel) -> ArrayLike:
