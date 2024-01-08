@@ -1,3 +1,6 @@
+from .spectrum import BaseSpectrum
+from overrides import override
+from typing import Callable, Dict, List, Union
 from jax.typing import ArrayLike
 from jax import numpy as jnp
 import numpy as np
@@ -22,18 +25,23 @@ labels_names = ['Teff', 'logg', 'Vturb', 'FeH',
           'C', 'N', 'O', 'Li', 'Mg', 'Si', 
           'Ca', 'Ti', 'Na', 'Mn', 'Co', 
           'Ni', 'Ba', 'Sr', 'Eu', 'Fe']
+element_names = labels_names[3:]
 
-max_params = np.array([np.log10(7999.0), 5.5, 2.0, 0.5, 10.0512, 
+max_params = np.array([7999.0, 5.5, 2.0, 0.5, 10.0512, 
                        9.4641, 10.2513, 3.9998, 8.8423, 
                        8.886, 7.4469, 6.022, 7.7607, 
                        6.2947, 6.4165, 7.2375, 4.7222, 
                        5.2535, 2.9325, 8.0])
 
-min_params = np.array([np.log10(2500.0), -0.49, 0.5, -4.998, 2.5942, 
+min_params = np.array([2500.0, -0.49, 0.5, -4.998, 2.5942, 
                        2.0183, 3.5896, -0.9999, 2.2702, 
                        2.3443, 1.1272, -0.3188, 0.3513, 
                        -0.4472, -0.2082, 0.7536, -3.6691, 
                        -3.0606, -5.4177, 2.5016])
+
+default_params = (min_params+max_params)/2.0
+default_abundances = default_params[3:]
+
 
 def frequency_encoding(x, min_period, max_period, dimension):
     periods = jnp.logspace(jnp.log10(min_period), jnp.log10(max_period), num=dimension)
@@ -103,3 +111,38 @@ def flux(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
                    (jnp.atleast_2d(log_wave), mu, parameters),
                    train=False)
     return jnp.power(10, x).T
+
+
+class TransformerSpectrum(BaseSpectrum):
+    @override
+    @staticmethod
+    def get_label_names(self) -> List[str]:
+        return labels_names
+    
+    @override
+    @staticmethod
+    def is_in_bounds(parameters: ArrayLike) -> bool:
+        return jnp.all(parameters>=min_params) and jnp.all(parameters<=max_params)
+    
+    @override
+    @staticmethod
+    def get_default_parameters() -> ArrayLike:
+        return default_params
+    
+    @override(check_signature=False)
+    @staticmethod
+    def to_parameters(Teff: float = default_params[0],
+                      logg: float = default_params[1],
+                      Vturb: float = default_params[2],
+                      abundances: Union[ArrayLike, Dict[str, float]] = None):
+        if isinstance(abundances, dict):
+            abundance_values = jnp.array([abundances.get(element, 0.) for element in element_names])
+        else:
+            abundance_values = abundances or jnp.array(default_abundances)
+        
+        return jnp.concatenate([jnp.array([Teff, logg, Vturb]), abundance_values])
+    
+    @override
+    @staticmethod
+    def flux_method() -> Callable[..., ArrayLike]:
+        return flux
