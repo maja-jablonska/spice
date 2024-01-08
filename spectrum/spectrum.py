@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 from jax.typing import ArrayLike
-from typing import Callable
+from typing import Callable, List
 from models import MeshModel
 import math
 from functools import partial
@@ -158,3 +158,25 @@ def absolute_bol_luminosity(luminosity: ArrayLike) -> ArrayLike:
         ArrayLike: total luminosity in magnitude
     """
     return -2.5*jnp.log10(luminosity*ERG_S_TO_W)+71.1974
+
+
+class BaseSpectrum:
+    @staticmethod
+    def get_label_names() -> List[str]:
+        return []
+    
+    @staticmethod
+    def is_in_bounds(parameters: ArrayLike) -> bool:
+        return True
+    
+    @staticmethod
+    def get_default_parameters() -> ArrayLike:
+        return jnp.array([])
+    
+    @staticmethod
+    def to_parameters() -> ArrayLike:
+        return jnp.array([])
+    
+    @staticmethod
+    def flux_method() -> Callable[..., ArrayLike]:
+        return lambda x: x
