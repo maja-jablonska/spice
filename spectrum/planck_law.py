@@ -1,3 +1,6 @@
+from typing import Callable, List
+from .spectrum import BaseSpectrum
+from overrides import override
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 
@@ -30,3 +33,25 @@ def blackbody_intensity(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -
     intensity = ((2 * h * c ** 2 / wave_cm ** 5 * 1 / (jnp.exp(h * c / (wave_cm * k * T)) - 1)))*1e-8
 
     return jnp.tile(intensity, (2, 1))
+
+
+class BlackbodySpectrum(BaseSpectrum):
+    @override
+    @staticmethod
+    def get_label_names() -> List[str]:
+        return ['Teff']
+    
+    @override
+    @staticmethod
+    def get_default_parameters() -> ArrayLike:
+        return jnp.array([5000.])
+    
+    @override(check_signature=False)
+    @staticmethod
+    def to_parameters(Teff: float) -> ArrayLike:
+        return jnp.array([Teff])
+    
+    @override
+    @staticmethod
+    def flux_method() -> Callable[..., ArrayLike]:
+        return blackbody_intensity
