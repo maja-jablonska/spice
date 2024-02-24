@@ -1,12 +1,10 @@
-import dataclasses
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .utils import cast_to_los, cast_normalized_to_los, cast_to_normal_plane
 from .mesh_model import MeshModel
 from geometry import clip, polygon_area
-from geometry.utils import get_cast_areas, cast_indexes, polygon_areas, append_value_to_last_nan
-from typing import Any, NamedTuple
+from geometry.utils import get_cast_areas, cast_indexes, append_value_to_last_nan
 from functools import partial
 from jax.tree_util import register_pytree_node_class
 
