@@ -3,10 +3,9 @@ import jax.numpy as jnp
 import jax
 from jax.typing import ArrayLike
 from typing import Tuple
-from functools import partial
 import warnings
 
-from .mesh_generation import icosphere, face_center
+from .mesh_generation import face_center
 from utils import ExperimentalWarning
 
 @jax.jit
