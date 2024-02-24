@@ -1,9 +1,8 @@
 import jax.numpy as jnp
-from scipy.optimize import newton
 from functools import partial
 import jax
 from jax.typing import ArrayLike
-from typing import Dict, NamedTuple, Tuple
+from typing import NamedTuple, Tuple
 from .mesh_model import MeshModel
 from .mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
@@ -34,20 +33,45 @@ class Binary(NamedTuple):
     body2_velocities: ArrayLike
 
     @classmethod
-    def from_bodies(cls, body1: MeshModel, body2: MeshModel):
+    def from_bodies(cls, body1: MeshModel, body2: MeshModel) -> "Binary":
+          """Construct a Binary object from two mesh models.
+
+          Args:
+              body1 (MeshModel):
+              body2 (MeshModel):
+
+          Returns:
+              Binary: a binary consisting of body1 and body2
+          """
           return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers), jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
 
 
 @partial(jax.jit, static_argnums=(7,))
 def add_orbit(binary: Binary, P: float, ecc: float,
-              T: float, i: float, omega: float, Omega: float, orbit_resolution_points: ArrayLike):
-        orbit_resolution_times = jnp.linspace(0, P, orbit_resolution_points)
-        orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass, P,
-                              ecc, T, i, omega, Omega)
-        return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega,
-                               evaluated_times=orbit_resolution_times,
-                               body1_centers=orbit[2, :, :], body2_centers=orbit[4, :, :],
-                               body1_velocities=orbit[3, :, :], body2_velocities=orbit[5, :, :])
+              T: float, i: float, omega: float, Omega: float, orbit_resolution_points: int) -> Binary:
+      """Add orbit information to the binary object
+
+      Args:
+          binary (Binary):
+          P (float): orbit period [years]
+          ecc (float): orbit eccentrity
+          T (float): [defined time units]
+          i (float): inclination [rad]
+          omega (float): []
+          Omega (float): []
+          orbit_resolution_points (int): number of times to resolve the orbit at
+
+      Returns:
+          Binary: object with calculated orbit property values
+      """
+
+      orbit_resolution_times = jnp.linspace(0, P, orbit_resolution_points)
+      orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass, P,
+                        ecc, T, i, omega, Omega)
+      return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega,
+                              evaluated_times=orbit_resolution_times,
+                              body1_centers=orbit[2, :, :], body2_centers=orbit[4, :, :],
+                              body1_velocities=orbit[3, :, :], body2_velocities=orbit[5, :, :])
 
 
 @partial(jax.jit, static_argnums=(2,))
@@ -70,12 +94,30 @@ v_evaluate_orbit = jax.jit(jax.vmap(_evaluate_orbit, in_axes=(None, 0, None)), s
 
 
 def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[MeshModel, MeshModel]:
+      """_summary_
+
+      Args:
+          binary (Binary): a binary object
+          time (ArrayLike): time to resolve the orbit at
+          n_cells (int, optional): number of grid cells to divide the calculation of occlusion to. Defaults to 20.
+
+      Returns:
+          Tuple[MeshModel, MeshModel]: (body1, body2)
+      """
       grid = Grid.construct(binary.body1, binary.body2, n_cells)
-      
       return _evaluate_orbit(binary, time, grid)
 
 
 def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20) -> Tuple[MeshModel, MeshModel]:
-      grid = Grid.construct(binary.body1, binary.body2, n_cells)
+      """_summary_
 
+      Args:
+          binary (Binary): a binary object
+          times (ArrayLike): times to resolve the orbit at
+          n_cells (int, optional): number of grid cells to divide the calculation of occlusion to. Defaults to 20.
+
+      Returns:
+          Tuple[MeshModel, MeshModel]: (body1, body2)
+      """
+      grid = Grid.construct(binary.body1, binary.body2, n_cells)
       return v_evaluate_orbit(binary, times, grid)
