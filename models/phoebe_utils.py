@@ -1,7 +1,5 @@
 import phoebe
 import numpy as np
-from phoebe import u
-import matplotlib.pyplot as plt
 from typing import Optional
 
 from enum import auto, Enum
