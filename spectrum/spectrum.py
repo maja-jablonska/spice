@@ -18,7 +18,7 @@ apply_vrad_log = lambda x, vrad: x+jnp.log10(vrad/C + 1)
 v_apply_vrad = jax.jit(jax.vmap(apply_vrad, in_axes=(None, 0)))
 
 # n_wavelengths, n_vertices
-v_apply_vrad_log = jax.jit(jax.vmap(apply_vrad_log, in_axes=(None, 0), out_axes=1))
+v_apply_vrad_log = jax.jit(jax.vmap(apply_vrad_log, in_axes=(None, 0), out_axes=0))
 
 
 @partial(jax.jit, static_argnums=(0, 6))
@@ -36,8 +36,6 @@ def spectrum_flash_sum(intensity_fn,
     # Just the 1D case for now
     n_areas = areas.shape[0]
     n_parameters = parameters.shape[-1]
-    mus_flattened = mus.flatten()
-    vrads_flattened = vrads.flatten()
 
     v_intensity = jax.jit(jax.vmap(lambda wv, m, p:
                                    jax.vmap(intensity_fn,
@@ -56,20 +54,20 @@ def spectrum_flash_sum(intensity_fn,
                                     (k_chunk_sizes,))
         
         # (CHUNK_SIZE, 1)
-        m_chunk = lax.dynamic_slice(mus_flattened,
+        m_chunk = lax.dynamic_slice(mus,
                                     (chunk_idx,),
                                     (k_chunk_sizes,))
         
         # (CHUNK_SIZE, 1)
-        vrad_chunk = lax.dynamic_slice(vrads_flattened,
+        vrad_chunk = lax.dynamic_slice(vrads,
                                         (chunk_idx,),
                                         (k_chunk_sizes,))
-        # (CHUNK_SIZE, 20)
+        # (CHUNK_SIZE, n_parameters)
         p_chunk = lax.dynamic_slice(parameters,
                                     (chunk_idx, 0),
                                     (k_chunk_sizes, n_parameters))
     
-        # Shape: (CHUNK_SIZE, n_wavelengths)
+        # Shape: (CHUNK_SIZE, log_wavelengths)
         shifted_log_wavelengths = v_apply_vrad_log(log_wavelengths, vrad_chunk)
         
         # atmosphere_mul is the spectrum simulated for the corresponding wavelengths and optionally given parameters of mu, logg, and T.
@@ -79,11 +77,18 @@ def spectrum_flash_sum(intensity_fn,
         # Areas should be rescaled by mus
         # 2 corresponds to the two components: continuum and full spectrum with lines
         # n_wavelengths, n_verices, 2 (continuum+spectrum), 1
+        
+        # shifted_log_wavelengths (CHUNK_SIZE, n_wavelengths)
+        # m_chunk (CHUNK_SIZE)
+        # p_chunk (CHUNK_SIZE, n_parameters)
+        v_in = v_intensity(shifted_log_wavelengths, # (n,)
+                            m_chunk[:, jnp.newaxis],
+                            p_chunk)
+        jax.debug.print("{x}", x=v_in.shape)
         atmosphere_mul = jnp.multiply(
-                m_chunk[jnp.newaxis, :, jnp.newaxis, jnp.newaxis]*a_chunk[jnp.newaxis, :, jnp.newaxis, jnp.newaxis], # Czemy nie 2D? Broadcastowanie?
-                v_intensity(shifted_log_wavelengths, # (n,)
-                            m_chunk,
-                            p_chunk))
+                m_chunk*a_chunk, # Czemy nie 2D? Broadcastowanie?
+                v_in)
+        
         
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=1)#/jnp.sum(a_chunk, axis=0)
         new_chunk_sum = chunk_sum + jnp.sum(m_chunk*a_chunk, axis=0)
@@ -91,12 +96,14 @@ def spectrum_flash_sum(intensity_fn,
         return (chunk_idx + k_chunk_sizes, new_atmo_sum, new_chunk_sum), None
 
     # Return (2, n_vertices) for continuum and spectrum with lines
-    (_, out, areas), lse = lax.scan(
+    #(_, out, areas), lse = lax.scan(
+    return lax.scan(
         chunk_scanner,
         init=(0, jnp.zeros((log_wavelengths.shape[-1], 2, 1)), jnp.zeros(1,)),
         xs=None,
         length=math.ceil(n_areas/chunk_size))
-    return (out/areas).reshape(-1, 2)
+    return carry
+    #return (out/areas).reshape(-1, 2)
 
 
 @partial(jax.jit, static_argnums=(0, 3))
