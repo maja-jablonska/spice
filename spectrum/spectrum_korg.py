@@ -1,18 +1,22 @@
+from .spectrum import BaseSpectrum
+from overrides import override
+from typing import Callable, Dict, List, Union
 from jax import numpy as jnp
+from jax.typing import ArrayLike
 import numpy as np
 from flax import linen as nn
 import os
-import jax
-
 import pickle
+
 
 def read_from_pickle(fn):
     with open(fn, "rb") as f:
         return pickle.load(f)
     
+    
 restored_params = read_from_pickle(os.path.join(os.path.dirname(__file__), "spectrum_korg.pickle"))
 
-labels_names = ['logteff', 'logg', 'mu']
+labels_names = ['Teff', 'logg']
 
 elements_90 = [
     "Li", "Be", "B", "C", "N", "O", "F", "Ne",
@@ -30,7 +34,7 @@ elements_90 = [
 ]
 labels_names += elements_90
 
-min_parameters = np.array([ 3.6020677e+00,  6.7894318e-05,  1.0000000e-03, -3.0967069e+00,
+min_parameters = np.array([ 10**3.6020677e+00,  6.7894318e-05, -3.0967069e+00,
                    -3.0676999e+00, -3.0745316e+00, -3.9427969e+00, -3.0743036e+00,
                    -3.9395518e+00, -3.0945952e+00, -3.9913447e+00, -3.0912573e+00,
                    -3.9436648e+00, -3.0687692e+00, -3.9603372e+00, -3.0501244e+00,
@@ -55,7 +59,7 @@ min_parameters = np.array([ 3.6020677e+00,  6.7894318e-05,  1.0000000e-03, -3.09
                    -3.0878015e+00, -3.0649395e+00, -3.0819504e+00, -3.0861907e+00,
                    -3.0948832e+00], dtype=np.float32)
 
-max_parameters = np.array([3.9030874, 4.9994946, 1.       , 1.5791478, 1.5938333, 1.556247 ,
+max_parameters = np.array([10**3.9030874, 4.9994946, 1.5791478, 1.5938333, 1.556247 ,
                    2.4546688, 1.5835627, 2.3390923, 1.5827703, 2.474998 , 1.5719196,
                    2.4787211, 1.5915307, 2.4861922, 1.5669659, 2.3987606, 1.5724797,
                    2.3464055, 1.5723362, 2.417851 , 1.5701865, 2.4026892, 1.5782307,
@@ -71,6 +75,9 @@ max_parameters = np.array([3.9030874, 4.9994946, 1.       , 1.5791478, 1.5938333
                    1.5803379, 1.573083 , 1.5763483, 1.5877959, 1.563212 , 1.5299966,
                    1.5825379, 1.5524042, 1.5794249, 1.5907439, 1.5698735, 1.5870272,
                    1.5856891, 1.5592823, 1.5569359], dtype=np.float32)
+
+default_params = (min_parameters+max_parameters)/2
+default_abundances = default_params[2:]
 
 
 D_ATT              = 256
@@ -135,7 +142,17 @@ print("Models defined.")
 
 m = MLP_wavelength_att()
 
-def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarray:
+def flux(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
+    """Calculates the flux using the Korg-trained transformer-based model.
+
+    Args:
+        log_wave (ArrayLike): Array of logarithmic wavelengths (log10 of wavelength in Angstroms).
+        mu (float): Cosine of the angle between the line of sight and the surface normal. It ranges from -1 to 1.
+        parameters (ArrayLike): Array of parameters - logteff, logg, "Li", "Be", ... , "U"
+
+    Returns:
+        ArrayLike: Array of intensities in []
+    """
     # parameters: logteff, logg, "Li", "Be", ... , "U"
 
     mu_array = jnp.array([mu])
@@ -149,3 +166,36 @@ def flux(log_wave: jnp.ndarray, mu: float, parameters: jnp.ndarray) -> jnp.ndarr
                    {"logwave":log_wave, "parameters": p},
                    train=False)
     return jnp.power(10, x).T
+
+class KorgSpectrum(BaseSpectrum):
+    @override
+    @staticmethod
+    def get_label_names() -> List[str]:
+        return labels_names
+    
+    @override
+    @staticmethod
+    def is_in_bounds(parameters: ArrayLike) -> bool:
+        return jnp.all(parameters>=min_parameters) and jnp.all(parameters<=max_parameters)
+    
+    @override
+    @staticmethod
+    def get_default_parameters() -> ArrayLike:
+        return default_params
+    
+    @override(check_signature=False)
+    @staticmethod
+    def to_parameters(Teff: float = default_params[0],
+                      logg: float = default_params[1],
+                      abundances: Union[ArrayLike, Dict[str, float]] = None):
+        if isinstance(abundances, dict):
+            abundance_values = jnp.array([abundances.get(element, 0.) for element in elements_90])
+        else:
+            abundance_values = abundances or jnp.array(default_abundances)
+        
+        return jnp.concatenate([jnp.array([Teff, logg]), abundance_values])
+    
+    @override
+    @staticmethod
+    def flux_method() -> Callable[..., ArrayLike]:
+        return flux
