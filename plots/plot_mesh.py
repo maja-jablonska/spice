@@ -1,10 +1,12 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from typing import Optional, Tuple, Union
+from mpl_toolkits.mplot3d import art3d
+from typing import List, Optional, Tuple, Union
 import numpy as np
 from models import MeshModel
 from jax.typing import ArrayLike
 
+PLOT_MODES = ['MESH', 'POINTS']
 COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas']
 DEFAULT_PROPERTY = 'mus'
 
@@ -13,9 +15,11 @@ DEFAULT_PLOT_PROPERTY_LABELS = {
     'los_velocities': 'LOS velocity [km/s]'
 }
 
+
 def _evaluate_to_be_mapped_property(mesh: MeshModel,
                                     property: Union[str, int] = DEFAULT_PROPERTY,
-                                    property_label: Optional[str] = None) -> ArrayLike:
+                                    property_label: Optional[str] = None) -> Tuple[ArrayLike, str]:
+
     if type(property) is str:
         if property not in COLORMAP_PROPERTIES:
             raise ValueError(f'Invalid property {property} - must be one of ({",".join(COLORMAP_PROPERTIES)})')
@@ -38,9 +42,15 @@ def _evaluate_to_be_mapped_property(mesh: MeshModel,
 
 def plot_3D(mesh: MeshModel,
             property: Union[str, int] = DEFAULT_PROPERTY,
-            axes: Optional[Tuple[plt.figure, plt.axes, plt.axes]] = None,
+            axes: Optional[Tuple[plt.figure, plt.axes]] = None,
             cmap: str = 'turbo',
-            property_label: Optional[str] = None):
+            property_label: Optional[str] = None,
+            mode: str = 'MESH'):
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
+    mode = mode.upper()
+    
     to_be_mapped, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
 
     if axes is None:
@@ -48,10 +58,9 @@ def plot_3D(mesh: MeshModel,
         spec = fig.add_gridspec(10, 12)
         plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
         plot_ax.view_init(elev=30, azim=-60)
-        cbar_ax = fig.add_subplot(spec[2:8, 11])
     else:
         try:
-            fig, plot_ax, cbar_ax = axes
+            fig, plot_ax = axes
         except ValueError:
             raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
     axes_lim = 1.5*mesh.radius
@@ -72,14 +81,105 @@ def plot_3D(mesh: MeshModel,
     plot_ax.legend()
 
     norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
-    p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
-                        c=to_be_mapped, cmap=cmap, norm=norm)
-    
-    cbar = fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cbar_ax)
+    if mode == 'MESH':
+        vs2 = mesh.vertices[mesh.faces.astype(int)]
+        face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
+        p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
+        plot_ax.add_collection(p)
+        mappable.set_array([])
+    else:
+        p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
+                            c=to_be_mapped, cmap=cmap, norm=norm)
+        
+    cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
     cbar.set_label(cbar_label, fontsize=12)
 
-    return fig, plot_ax, cbar_ax
+    return fig, plot_ax
+
+
+def plot_3D_sequence(meshes: List[MeshModel],
+                     property: Union[str, int] = DEFAULT_PROPERTY,
+                     timestamps: Optional[ArrayLike] = None,
+                     axes: Optional[Tuple[plt.figure, List[plt.axes], plt.axes]] = None,
+                     cmap: str = 'turbo',
+                     property_label: Optional[str] = None,
+                     timestamp_label: Optional[str] = None,
+                     figsize: Tuple[int, int] = (12, 10),
+                     mode: str = 'MESH'):
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
+    mode = mode.upper()
+
+    timestamp_label = timestamp_label or ''
+    
+    _, cbar_label = _evaluate_to_be_mapped_property(meshes[0], property, property_label)
+    to_be_mapped_arrays = [_evaluate_to_be_mapped_property(mesh, property, property_label)[0] for mesh in meshes]
+    to_be_mapped_arrays_concatenated = np.concatenate(to_be_mapped_arrays)
+
+    axes_lim = 1.5*max([mesh.radius for mesh in meshes])
+    num_plots = len(meshes)
+
+    if axes is None:
+        # Determine the number of rows and columns for the subplots
+        cols = int(num_plots**0.5)
+        rows = num_plots // cols
+        rows += num_plots % cols
+
+        # Create a figure with gridspec
+        fig = plt.figure(figsize=figsize)
+        gs = plt.GridSpec(10*rows, cols + 1, width_ratios=[*([1]*cols), 0.05])
+        plot_axes = [fig.add_subplot(gs[10*(i // cols):10*((i // cols)+1), i % cols], projection='3d') for i in range(num_plots)]
+
+        # Add the colorbar in the last column
+        cax_limit = max(rows, 5)
+        cbar_ax = fig.add_subplot(gs[cax_limit:-cax_limit, -1])
+    else:
+        try:
+            fig, plot_axes, cbar_ax = axes
+        except ValueError:
+            raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
+    
+    for plot_ax in plot_axes:
+        plot_ax.set_xlim3d(-axes_lim, axes_lim)
+        plot_ax.set_ylim3d(-axes_lim, axes_lim)
+        plot_ax.set_zlim3d(-axes_lim, axes_lim)
+        plot_ax.set_xlabel('$X [R_\odot]$', fontsize=10)
+        plot_ax.set_ylabel('$Y [R_\odot]$', fontsize=10)
+        plot_ax.set_zlabel('$Z [R_\odot]$', fontsize=10)
+
+    norm = mpl.colors.Normalize(vmin=to_be_mapped_arrays_concatenated.min(), vmax=to_be_mapped_arrays_concatenated.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
+    for plot_ax, (to_be_mapped, (i, mesh)) in zip(plot_axes, zip(to_be_mapped_arrays, enumerate(meshes))):
+        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+
+        plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+                    color='red', linewidth=3., label='LOS vector')
+        plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                    color='black', linewidth=3., label='Rotation axis')
+
+        if mode == 'MESH':
+            vs2 = mesh.vertices[mesh.faces.astype(int)]
+            face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
+            p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
+            plot_ax.add_collection(p)
+            if timestamps is not None:
+                plot_ax.set_title("Time: {ts:.2f} {timestamp_label}".format(ts=timestamps[i], timestamp_label=timestamp_label), pad=1.0)
+        else:
+            p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
+                                c=to_be_mapped, cmap=cmap, norm=norm)
+            
+    plot_axes[int(cols-1)].legend(loc="upper left", bbox_to_anchor=(1.05, 1.05))
+    mappable.set_array([])
+    cbar = plt.colorbar(mappable, cax=cbar_ax)
+    cbar.set_label(cbar_label, fontsize=12)
+    fig.tight_layout()
+
+    return fig, plot_axes, cbar_ax
 
 
 def plot_2D(mesh: MeshModel,
