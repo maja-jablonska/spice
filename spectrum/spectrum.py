@@ -38,10 +38,7 @@ def spectrum_flash_sum(intensity_fn,
     n_areas = areas.shape[0]
     n_parameters = parameters.shape[-1]
 
-    v_intensity = jax.jit(jax.vmap(lambda wv, m, p:
-                                   jax.vmap(intensity_fn,
-                                            in_axes=(0, 0, 0))(wv, m, p),
-                                    in_axes=(0, None, None)))
+    v_intensity = jax.vmap(intensity_fn, in_axes=(0, 0, 0))
 
     @partial(jax.checkpoint, prevent_cse=False)
     def chunk_scanner(carries, _):
@@ -85,26 +82,23 @@ def spectrum_flash_sum(intensity_fn,
         v_in = v_intensity(shifted_log_wavelengths, # (n,)
                             m_chunk[:, jnp.newaxis],
                             p_chunk)
-        jax.debug.print("{x}", x=v_in.shape)
         atmosphere_mul = jnp.multiply(
-                m_chunk*a_chunk, # Czemy nie 2D? Broadcastowanie?
+                (m_chunk*a_chunk)[:, jnp.newaxis, jnp.newaxis], # Czemy nie 2D? Broadcastowanie?
                 v_in)
         
         
-        new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=1)#/jnp.sum(a_chunk, axis=0)
+        new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)#/jnp.sum(a_chunk, axis=0)
         new_chunk_sum = chunk_sum + jnp.sum(m_chunk*a_chunk, axis=0)
         
         return (chunk_idx + k_chunk_sizes, new_atmo_sum, new_chunk_sum), None
 
     # Return (2, n_vertices) for continuum and spectrum with lines
-    #(_, out, areas), lse = lax.scan(
-    return lax.scan(
+    (_, out, areas), _ = lax.scan(
         chunk_scanner,
-        init=(0, jnp.zeros((log_wavelengths.shape[-1], 2, 1)), jnp.zeros(1,)),
+        init=(0, jnp.zeros((log_wavelengths.shape[-1], 2)), jnp.zeros(1,)),
         xs=None,
         length=math.ceil(n_areas/chunk_size))
-    return carry
-    #return (out/areas).reshape(-1, 2)
+    return (out/areas).reshape(-1, 2)
 
 
 @partial(jax.jit, static_argnums=(0, 3))
