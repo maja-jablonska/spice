@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 from jax.typing import ArrayLike
+from jax.scipy.integrate import trapezoid
 from typing import Callable, List
 from spice.models import MeshModel
 import math
@@ -120,16 +121,15 @@ def luminosity(spectrum: ArrayLike, wavelengths: ArrayLike, mesh: MeshModel) -> 
     """Calculate total luminosity output
 
     Args:
-        spectrum (ArrayLike): spectrum in erg/s/cm^2/A
-        wavelengths (ArrayLike): wavelengths in A
+        spectrum (ArrayLike): spectrum in erg/s/cm^3
+        wavelengths (ArrayLike): wavelengths in cm
         mesh (MeshModel): mesh model
 
     Returns:
         ArrayLike: luminosity in erg/s
     """
     half_surface_area = 2*jnp.pi*jnp.power(mesh.radius, 2)
-    luminosity = jnp.trapz(jnp.nan_to_num(spectrum[:, 0]),
-                           wavelengths)*SPHERE_STERADIAN/2*half_surface_area
+    luminosity = trapezoid(y=spectrum[:, 0], x=wavelengths)*SPHERE_STERADIAN/2*half_surface_area
     return luminosity
 
 
@@ -143,8 +143,7 @@ def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, samp
 def passband_luminosity(spectrum: ArrayLike, filter_responses: ArrayLike,
                         wavelengths: ArrayLike, mesh: MeshModel) -> ArrayLike:
     half_surface_area = 2*jnp.pi*jnp.power(mesh.radius, 2)
-    luminosity = jnp.trapz(jnp.nan_to_num(spectrum[:, 0])*filter_responses,
-                           wavelengths)*SPHERE_STERADIAN/2*half_surface_area
+    luminosity = trapezoid(y=spectrum[:, 0]*filter_responses, x=wavelengths)*SPHERE_STERADIAN/2*half_surface_area
     return luminosity
 
 
