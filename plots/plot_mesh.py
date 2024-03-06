@@ -45,7 +45,8 @@ def plot_3D(mesh: MeshModel,
             axes: Optional[Tuple[plt.figure, plt.axes]] = None,
             cmap: str = 'turbo',
             property_label: Optional[str] = None,
-            mode: str = 'MESH'):
+            mode: str = 'MESH',
+            update_colorbar: bool = True):
     
     if mode.upper() not in PLOT_MODES:
         raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
@@ -93,8 +94,9 @@ def plot_3D(mesh: MeshModel,
         p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
                             c=to_be_mapped, cmap=cmap, norm=norm)
         
-    cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
-    cbar.set_label(cbar_label, fontsize=12)
+    if update_colorbar:
+        cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
+        cbar.set_label(cbar_label, fontsize=12)
 
     return fig, plot_ax
 
@@ -180,6 +182,87 @@ def plot_3D_sequence(meshes: List[MeshModel],
     fig.tight_layout()
 
     return fig, plot_axes, cbar_ax
+
+
+def animate_mesh_and_spectra(meshes: List[MeshModel],
+                             timestamps: ArrayLike,
+                             wavelengths: ArrayLike,
+                             spectra: ArrayLike,
+                             filename: str,
+                             property: Union[str, int] = DEFAULT_PROPERTY,
+                             cmap: str = 'turbo',
+                             property_label: Optional[str] = None,
+                             timestamp_label: Optional[str] = None,
+                             figsize: Tuple[int, int] = (12, 10),
+                             mode: str = 'MESH'):
+    try:
+        from celluloid import Camera
+    except ImportError:
+        raise ImportError("celluloid is not installed. Please install celluloid to use pre-defined animation functions.")
+
+    fig = plt.figure(figsize=(24, 10))
+    spec = fig.add_gridspec(10, 24)
+    plot_ax = fig.add_subplot(spec[:, :10], projection='3d')
+    cax = fig.add_subplot(spec[2:8, 10])
+    spectrum_ax = fig.add_subplot(spec[2:8, 13:])
+    camera = Camera(fig)
+
+    mesh = meshes[0]
+    to_be_mapped, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
+    axes_lim = 1.5*mesh.radius
+    plot_ax.set_xlim3d(-axes_lim, axes_lim)
+    plot_ax.set_ylim3d(-axes_lim, axes_lim)
+    plot_ax.set_zlim3d(-axes_lim, axes_lim)
+    plot_ax.set_xlabel('$X [R_\odot]$', fontsize=14)
+    plot_ax.set_ylabel('$Y [R_\odot]$', fontsize=14)
+    plot_ax.set_zlabel('$Z [R_\odot]$', fontsize=14)
+
+    normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+    normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+
+
+    norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    plt.tight_layout()
+
+
+    for i, (mesh, s) in enumerate(zip(meshes, spectra)):
+        norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+        mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
+        if mode == 'MESH':
+            vs2 = mesh.vertices[mesh.faces.astype(int)]
+            face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
+            p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black", zorder=0)
+            
+            plot_ax.add_collection(p)
+            plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+                    color='red', linewidth=3., label='LOS vector', zorder=2)
+            plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                            color='black', linewidth=3., label='Rotation axis', zorder=2)
+            if i == 0:
+                plot_ax.legend(fontsize=14)
+                
+            if timestamps is not None:
+                spectrum_ax.text(0.4, 1.1, "Time: {ts:.2f} {timestamp_label}".format(ts=timestamps[i], timestamp_label=timestamp_label),
+                                 fontsize=24,
+                                 transform=spectrum_ax.transAxes)
+        else:
+            p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
+                                c=to_be_mapped, cmap=cmap, norm=norm)
+            
+        cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, cax=cax)
+        cbar.set_label(cbar_label, fontsize=12)
+        spectrum_ax.plot(wavelengths, s[:, 0], color='black')
+        spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=14)
+        spectrum_ax.set_xlabel('wavelength [$\AA$]', fontsize=14)
+        
+        camera.snap()
+        
+    animation = camera.animate()
+    animation.save(filename)
+    
+    return animation
 
 
 def plot_2D(mesh: MeshModel,
