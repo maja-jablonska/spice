@@ -1,0 +1,5 @@
+astropy~=5.2.2
+celluloid~=0.2.0
+flax~=0.6.8
+overrides~=7.4.0
+phoebe~=2.4.9
