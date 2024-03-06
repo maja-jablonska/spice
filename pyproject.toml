@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spice"
+version = "0.1"
+readme = "README.md"
+dependencies = [
+    "jax~=0.4.24",
+    "jaxlib~=0.4.24",
+    "numpy~=1.26.4",
+    "flax~=0.8.1",
+    "joblib~=1.3.2"
+]
+
+[project.optional-dependencies]
+huggingface = ["huggingface-hub~=0.21.3"]
+dev = ["pytest~=8.0.0", "pytest-datadir~=1.5.0", "coverage~=7.4.3"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+python_classes = ["Test", "Describe"]
+python_functions = ["test_", "it_", "and_", "but_", "they_"]
+python_files = ["test_*.py",]
+testpaths = ["tests",]
