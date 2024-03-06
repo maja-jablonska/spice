@@ -95,10 +95,10 @@ def spectrum_flash_sum(intensity_fn,
     # Return (2, n_vertices) for continuum and spectrum with lines
     (_, out, areas), _ = lax.scan(
         chunk_scanner,
-        init=(0, jnp.zeros((2, log_wavelengths.shape[-1])), jnp.zeros(1,)),
+        init=(0, jnp.zeros((log_wavelengths.shape[-1], 2)), jnp.zeros(1,)),
         xs=None,
         length=math.ceil(n_areas/chunk_size))
-    return (out/areas).reshape(-1, 2)
+    return (out/areas)
 
 
 @partial(jax.jit, static_argnums=(0, 3))
