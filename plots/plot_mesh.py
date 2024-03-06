@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import art3d
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from models import MeshModel
 from jax.typing import ArrayLike
@@ -68,9 +68,9 @@ def plot_3D(mesh: MeshModel,
     plot_ax.set_xlim3d(-axes_lim, axes_lim)
     plot_ax.set_ylim3d(-axes_lim, axes_lim)
     plot_ax.set_zlim3d(-axes_lim, axes_lim)
-    plot_ax.set_xlabel('$X [R_\odot]$', fontsize=14)
-    plot_ax.set_ylabel('$Y [R_\odot]$', fontsize=14)
-    plot_ax.set_zlabel('$Z [R_\odot]$', fontsize=14)
+    plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
+    plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
+    plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
 
     normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
     normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
@@ -148,9 +148,9 @@ def plot_3D_sequence(meshes: List[MeshModel],
         plot_ax.set_xlim3d(-axes_lim, axes_lim)
         plot_ax.set_ylim3d(-axes_lim, axes_lim)
         plot_ax.set_zlim3d(-axes_lim, axes_lim)
-        plot_ax.set_xlabel('$X [R_\odot]$', fontsize=10)
-        plot_ax.set_ylabel('$Y [R_\odot]$', fontsize=10)
-        plot_ax.set_zlabel('$Z [R_\odot]$', fontsize=10)
+        plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+        plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+        plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
 
     norm = mpl.colors.Normalize(vmin=to_be_mapped_arrays_concatenated.min(), vmax=to_be_mapped_arrays_concatenated.max())
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -213,9 +213,9 @@ def animate_mesh_and_spectra(meshes: List[MeshModel],
     plot_ax.set_xlim3d(-axes_lim, axes_lim)
     plot_ax.set_ylim3d(-axes_lim, axes_lim)
     plot_ax.set_zlim3d(-axes_lim, axes_lim)
-    plot_ax.set_xlabel('$X [R_\odot]$', fontsize=14)
-    plot_ax.set_ylabel('$Y [R_\odot]$', fontsize=14)
-    plot_ax.set_zlabel('$Z [R_\odot]$', fontsize=14)
+    plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
+    plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
+    plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
 
     normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
     normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
@@ -255,7 +255,7 @@ def animate_mesh_and_spectra(meshes: List[MeshModel],
         cbar.set_label(cbar_label, fontsize=12)
         spectrum_ax.plot(wavelengths, s[:, 0], color='black')
         spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=14)
-        spectrum_ax.set_xlabel('wavelength [$\AA$]', fontsize=14)
+        spectrum_ax.set_xlabel('wavelength [$\\AA$]', fontsize=14)
         
         camera.snap()
         
@@ -288,7 +288,7 @@ def plot_2D(mesh: MeshModel,
         except ValueError:
             raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
     
-    xy_labels = ['$X [R_\odot]$', '$Y [R_\odot]$', '$Z [R_\odot]$']
+    xy_labels = ['$X [R_\\odot]$', '$Y [R_\\odot]$', '$Z [R_\\odot]$']
     
     to_be_mapped, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
     positive_mu_mask = mesh.mus>0
@@ -302,3 +302,22 @@ def plot_2D(mesh: MeshModel,
     cbar.set_label(cbar_label, fontsize=12)
 
     return fig, plot_ax, cbar_ax
+
+
+def plot_3D_mesh_and_spectrum(mesh: MeshModel,
+                              wavelengths: ArrayLike,
+                              spectrum: ArrayLike,
+                              mesh_plot_kwargs: Optional[Dict[str, Any]] = None):
+    mesh_plot_kwargs = mesh_plot_kwargs or {}
+    
+    fig = plt.figure(figsize=(24, 10))
+    spec = fig.add_gridspec(10, 24)
+    plot_ax = fig.add_subplot(spec[:, :10], projection='3d')
+    plot_ax.view_init(elev=30, azim=-60)
+
+    spectrum_ax = fig.add_subplot(spec[3:7, 11:-1])
+    spectrum_ax.set_xlabel('wavelength [$\\AA$]', fontsize=13)
+    spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=13)
+
+    spectrum_ax.plot(wavelengths, spectrum, color='black')
+    plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs)
