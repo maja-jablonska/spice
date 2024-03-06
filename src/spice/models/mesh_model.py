@@ -2,7 +2,7 @@ from jax.typing import ArrayLike
 import jax.numpy as jnp
 
 from abc import abstractmethod
-from typing import NamedTuple
+from typing import NamedTuple, Union
 
 from .mesh_generation import icosphere
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane
@@ -84,7 +84,7 @@ class IcosphereModel(MeshModel):
                   radius: float,
                   mass: float,
                   abs_luminosity: float,
-                  parameters: ArrayLike) -> "IcosphereModel": # What to do about parameters?
+                  parameters: Union[float, ArrayLike]) -> "IcosphereModel": # What to do about parameters?
         """Construct an Icosphere.
 
         Args:
@@ -101,6 +101,7 @@ class IcosphereModel(MeshModel):
         sphere_area = 4*jnp.pi*jnp.power(radius, 2)
         log_g = jnp.log(6.6743e-11*mass/jnp.power(radius, 2)/9.80665)
 
+        parameters = jnp.atleast_1d(parameters)
         if len(parameters.shape) == 1:
             parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats = areas.shape[0], axis = 0)
         
