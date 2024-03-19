@@ -43,7 +43,7 @@ def __spectrum_flash_sum(intensity_fn,
 
     @partial(jax.checkpoint, prevent_cse=False)
     def chunk_scanner(carries, _):
-        chunk_idx, atmo_sum, chunk_sum = carries
+        chunk_idx, atmo_sum = carries
         
         k_chunk_sizes = min(chunk_size, n_areas)
 
@@ -87,19 +87,17 @@ def __spectrum_flash_sum(intensity_fn,
                 (m_chunk*a_chunk)[:, jnp.newaxis, jnp.newaxis],
                 v_in)
         
-        
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)
-        new_chunk_sum = chunk_sum + jnp.sum(m_chunk*a_chunk, axis=0)
         
-        return (chunk_idx + k_chunk_sizes, new_atmo_sum, new_chunk_sum), None
+        return (chunk_idx + k_chunk_sizes, new_atmo_sum), None
 
     # Return (2, n_vertices) for continuum and spectrum with lines
-    (_, out, areas), _ = lax.scan(
+    (_, out), _ = lax.scan(
         chunk_scanner,
-        init=(0, jnp.zeros((log_wavelengths.shape[-1], 2)), jnp.zeros(1,)),
+        init=(0, jnp.zeros((log_wavelengths.shape[-1], 2))),
         xs=None,
         length=math.ceil(n_areas/chunk_size))
-    return (out/areas)
+    return out
 
 
 @partial(jax.jit, static_argnums=(0, 3))
