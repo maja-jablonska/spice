@@ -29,7 +29,7 @@ def __spectrum_flash_sum(intensity_fn,
                         mus,
                         vrads,
                         parameters,
-                        chunk_size: int = 256):
+                        chunk_size: int):
     '''
         Each surface element has a vector of parameters (mu, LOS velocity, etc)
         Some of these parameters are the flux model's input
@@ -87,6 +87,7 @@ def __spectrum_flash_sum(intensity_fn,
                 (m_chunk*a_chunk)[:, jnp.newaxis, jnp.newaxis],
                 v_in)
         
+        
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)
         
         return (chunk_idx + k_chunk_sizes, new_atmo_sum), None
@@ -100,17 +101,23 @@ def __spectrum_flash_sum(intensity_fn,
     return out
 
 
+@partial(jax.jit, static_argnums=(1,))
+def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
+    return jnp.concatenate([x, jnp.zeros((chunk_size-x.shape[0]%chunk_size, *x.shape[1:]) )], axis=0)
+
+
 @partial(jax.jit, static_argnums=(0, 3))
 def simulate_spectrum(intensity_fn: Callable[[ArrayLike, float, ArrayLike], ArrayLike],
                       m: MeshModel,
                       log_wavelengths: ArrayLike,
                       chunk_size: int = DEFAULT_CHUNK_SIZE):
+    
     return __spectrum_flash_sum(intensity_fn,
                                 log_wavelengths,
-                                m.areas,
-                                jnp.where(m.mus>0, m.mus, 0.),
-                                m.los_velocities,
-                                m.parameters,
+                                _adjust_dim(m.areas, chunk_size),
+                                _adjust_dim(jnp.where(m.mus>0, m.mus, 0.), chunk_size),
+                                _adjust_dim(m.los_velocities, chunk_size),
+                                _adjust_dim(m.parameters, chunk_size),
                                 chunk_size)
     
 
@@ -120,7 +127,7 @@ def __flux_flash_sum(flux_fn,
                     areas,
                     vrads,
                     parameters,
-                    chunk_size: int = 256):
+                    chunk_size: int):
     '''
         Each surface element has a vector of parameters (mu, LOS velocity, etc)
         Some of these parameters are the flux model's input
@@ -192,9 +199,9 @@ def simulate_total_flux(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
                         chunk_size: int = DEFAULT_CHUNK_SIZE):
     return __flux_flash_sum(flux_fn,
                             log_wavelengths,
-                            m.areas,
-                            m.los_velocities,
-                            m.parameters,
+                            _adjust_dim(m.areas, chunk_size),
+                            _adjust_dim(m.los_velocities, chunk_size),
+                            _adjust_dim(m.parameters, chunk_size),
                             chunk_size)
 
 @partial(jax.jit, static_argnums=(0, 3))
