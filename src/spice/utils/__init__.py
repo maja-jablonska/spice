@@ -1,1 +1,1 @@
-from .warnings import ExperimentalWarning
+from .warnings import ExperimentalWarning, JAXWarning
