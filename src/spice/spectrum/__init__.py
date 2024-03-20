@@ -1,4 +1,4 @@
-from .spectrum import simulate_spectrum, luminosity, passband_luminosity, filter_responses
+from .spectrum import simulate_spectrum, luminosity, AB_passband_luminosity, filter_responses
 # from .planck_law import BlackbodySpectrum
 # from .spectrum_transformer import TransformerSpectrum
 # from .spectrum_korg import KorgSpectrum
