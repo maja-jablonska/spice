@@ -7,7 +7,7 @@ from typing import Callable, List
 from spice.models import MeshModel
 import math
 from functools import partial
-from spice.spectrum.utils import ERG_S_TO_W, SPHERE_STERADIAN, intensity_wavelengths_to_hz, intensity_Jy_to_erg, H_CONST_ERG_S, JY_TO_ERG
+from spice.spectrum.utils import ERG_S_TO_W, intensity_wavelengths_to_hz, H_CONST_ERG_S, JY_TO_ERG
 from spice.spectrum.filter import Filter
 
 
@@ -207,21 +207,22 @@ def simulate_total_flux(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
 
 @partial(jax.jit, static_argnums=(0, 3))
 def luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
-               m: MeshModel,
-               log_wavelengths: ArrayLike,
+               model: MeshModel,
+               wavelengths: ArrayLike,
                chunk_size: int = DEFAULT_CHUNK_SIZE) -> ArrayLike:
-    """Calculate total luminosity output
+    """Calculate the bolometric luminsity of the model.
 
     Args:
-        spectrum (ArrayLike): spectrum in erg/s/cm^3
-        wavelengths (ArrayLike): wavelengths in cm
-        mesh (MeshModel): mesh model
+        flux_fn (Callable[[ArrayLike, ArrayLike], ArrayLike]):
+        model (MeshModel):
+        wavelengths (ArrayLike): wavelengths [Angstrom]
+        chunk_size (int, optional): size of the chunk in the GPU memory. Defaults to 1024.
 
     Returns:
-        ArrayLike: luminosity in erg/s
+        ArrayLike: _description_
     """
-    flux = simulate_total_flux(flux_fn, m, log_wavelengths, chunk_size)
-    return trapezoid(y=flux[:, 0], x=10**(log_wavelengths-8))
+    flux = simulate_total_flux(flux_fn, model, jnp.log10(wavelengths), chunk_size)
+    return trapezoid(y=flux[:, 0], x=wavelengths*1e-8)
 
 
 @jax.jit
@@ -234,6 +235,17 @@ def AB_passband_luminosity(filter: Filter,
                            wavelengths: ArrayLike,
                            intensity: ArrayLike,
                            distance: float = 3.085677581491367e+19) -> ArrayLike:
+    """Return the passband luminosity in a given filter.
+
+    Args:
+        filter (Filter):
+        wavelengths (ArrayLike): wavelengths [Angstrom]
+        intensity (ArrayLike): intensity [erg/s/cm^3]
+        distance (float, optional): distance in cm. Defaults to 3.08e+19 (10 parsecs in cm)
+
+    Returns:
+        ArrayLike: passband luminosity [mag]
+    """
     vws_hz, intensity_hz = intensity_wavelengths_to_hz(wavelengths, intensity)
     transmission_responses = filter.filter_responses_for_frequencies(vws_hz)
     return -2.5*jnp.log10(trapezoid(x=vws_hz, y=intensity_hz*JY_TO_ERG*transmission_responses/jnp.power(distance, 2)/(H_CONST_ERG_S*vws_hz))/
@@ -245,9 +257,9 @@ def absolute_bol_luminosity(luminosity: ArrayLike) -> ArrayLike:
     """Calculate bolometric absolute luminosity
 
     Args:
-        luminosity (ArrayLike): total bolometric luminosity in erg/s
+        luminosity (ArrayLike): total bolometric luminosity [erg/s]
 
     Returns:
-        ArrayLike: total luminosity in magnitude
+        ArrayLike: absolute luminosity [mag]
     """
     return -2.5*jnp.log10(luminosity*ERG_S_TO_W)+71.1974
