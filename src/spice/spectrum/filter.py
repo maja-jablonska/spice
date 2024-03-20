@@ -3,6 +3,9 @@ from typing import Optional
 import re
 import matplotlib.pyplot as plt
 from spice.spectrum.utils import wavelengths_to_frequencies, intensity_wavelengths_to_hz, intensity_Jy_to_erg
+import numpy as np
+from importlib import resources as impresources
+from . import filter_data
 
 try:
     import jax.numpy as jnp
@@ -157,3 +160,21 @@ class BesselI(Filter):
         ])
         super().__init__(transmission_curve, name='Bessel I')
         
+
+
+class GaiaG(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GaiaG.dat')).T
+        super().__init__(transmission_curve, name='Gaia G')
+
+
+class GaiaRP(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GaiaRP.dat')).T
+        super().__init__(transmission_curve, name='Gaia RP')
+
+
+class GaiaBP(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GaiaBP.dat')).T
+        super().__init__(transmission_curve, name='Gaia BP')
