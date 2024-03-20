@@ -1,8 +1,8 @@
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC
 from typing import Optional
 import re
 import matplotlib.pyplot as plt
-from spice.spectrum.utils import wavelengths_to_frequencies, intensity_wavelengths_to_hz, intensity_Jy_to_erg
+from spice.spectrum.utils import wavelengths_to_frequencies
 import numpy as np
 from importlib import resources as impresources
 from . import filter_data
