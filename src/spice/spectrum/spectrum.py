@@ -7,7 +7,8 @@ from typing import Callable, List
 from spice.models import MeshModel
 import math
 from functools import partial
-from .utils import ERG_S_TO_W, SPHERE_STERADIAN
+from spice.spectrum.utils import ERG_S_TO_W, SPHERE_STERADIAN, intensity_wavelengths_to_hz, intensity_Jy_to_erg, H_CONST_ERG_S
+from spice.spectrum.filter import Filter
 
 
 DEFAULT_CHUNK_SIZE: int = 1024
@@ -228,11 +229,14 @@ def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, samp
     return jnp.interp(wavelengths, sample_wavelengths, sample_responses)
 
 
-@jax.jit
-def passband_luminosity(total_flux: ArrayLike,
-                        wavelengths: ArrayLike,
-                        filter_responses: ArrayLike) -> ArrayLike:
-    return trapezoid(y=total_flux[:, 0]*filter_responses, x=wavelengths)
+@partial(jax.jit, static_argnums=(0,))
+def AB_passband_luminosity(filter: Filter,
+                           wavelengths: ArrayLike,
+                           intensity: ArrayLike) -> ArrayLike:
+    vws_hz, intensity_hz = intensity_wavelengths_to_hz(wavelengths, intensity)
+    transmission_responses = filter.filter_responses_for_frequencies(vws_hz)
+    return -2.5*jnp.log10(trapezoid(x=vws_hz, y=intensity_hz*transmission_responses/(H_CONST_ERG_S*vws_hz))/
+                          trapezoid(x=vws_hz, y=filter.ab_zeropoint*transmission_responses/(H_CONST_ERG_S*vws_hz)))
 
 
 @jax.jit
