@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spice"
-version = "0.1"
+version = "0.1-beta"
 readme = "README.md"
 dependencies = [
     "jax~=0.4.24",
@@ -12,7 +12,7 @@ dependencies = [
     "numpy~=1.26.4",
     "flax~=0.8.1",
     "joblib~=1.3.2",
-    "transformer-payne~=0.1"
+    "transformer-payne~=0.5"
 ]
 
 [project.optional-dependencies]
