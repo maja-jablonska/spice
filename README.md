@@ -1,6 +1,9 @@
-# stellar-mesh-integration
+![spice logo](docs/img/spice.svg)
+
+A stellar spectra integration library.
+
+Paper is currently in prep.
 
 ## Dev log
 
-I am checking one by one notebooks in tutorial directory:
-- 
+Notebooks are being updated one by one.
