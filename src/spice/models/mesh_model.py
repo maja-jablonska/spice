@@ -46,6 +46,9 @@ class MeshModel(NamedTuple):
     center_pulsation_offsets: ArrayLike
     area_pulsation_offsets: ArrayLike
     
+    # Per center
+    pulsation_velocities: ArrayLike
+    
     # Rotation
     rotation_axis: ArrayLike
     rotation_matrix: ArrayLike
@@ -92,7 +95,7 @@ class MeshModel(NamedTuple):
 
     @property
     def velocities(self) -> jnp.float64:
-        return self.rotation_velocities + self.orbital_velocity
+        return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
 
 
 class IcosphereModel(MeshModel):
@@ -135,6 +138,7 @@ class IcosphereModel(MeshModel):
                 vertices_pulsation_offsets=jnp.zeros_like(vertices),
                 center_pulsation_offsets=jnp.zeros_like(centers),
                 area_pulsation_offsets=jnp.zeros_like(areas),
+                pulsation_velocities=jnp.zeros_like(areas),
                 rotation_axis=DEFAULT_ROTATION_AXIS,
                 rotation_matrix=NO_ROTATION_MATRIX,
                 rotation_matrix_prim=NO_ROTATION_MATRIX,
