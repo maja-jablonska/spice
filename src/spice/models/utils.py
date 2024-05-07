@@ -43,7 +43,23 @@ def evaluate_fourier_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike
     n = jnp.arange(1, d.shape[0]+1)
     return d0 + jnp.sum(d*jnp.cos(n/P*timestamp-phi))
 
+def evaluate_fourier_prim_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+    """
+    Args:
+        d0 (float): amplitude D_0
+        P (float): period P
+        d (ArrayLike): amplitudes [1, n]
+        phi (ArrayLike): phases [1, n]
+        timestamp (float): timestamps
+
+    Returns:
+        ArrayLike: values
+    """
+    n = jnp.arange(1, d.shape[0]+1)
+    return jnp.sum(-d*n/P*jnp.sin(n/P*timestamp-phi))
+
 evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, 0, None)))
+evaluate_many_fouriers_prim_for_value = jax.jit(jax.vmap(evaluate_fourier_prim_for_value, in_axes=(0, 0, 0, 0, None)))
 
 @jax.jit
 def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:
