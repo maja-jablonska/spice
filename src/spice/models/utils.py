@@ -26,7 +26,7 @@ def spherical_harmonic(m, n, polar_coordinates):
                                       n_array,
                                       polar_coordinates[:, 0],
                                       polar_coordinates[:, 1],
-                                      n_max=10)
+                                      n_max=10).real
     
 def evaluate_fourier_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
     """
