@@ -119,14 +119,14 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
         fourier_series_parameters=jnp.nan*jnp.ones_like(m.fourier_series_parameters)
     )
     
-@jax.jit
+# @jax.jit
 def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, radius: float):
     polar_vertices = mesh_polar_vertices(m.d_vertices)
     vertex_harmonic_mags = spherical_harmonic(harmonic_parameters[0], harmonic_parameters[1], polar_vertices)[:, jnp.newaxis]
     direction_vectors = m.d_vertices/jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
-    vert_offsets = (radius*magnitude*vertex_harmonic_mags*direction_vectors)[:, jnp.newaxis]
-    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(m.d_vertices+vert_offsets, m.faces.astype(jnp.int32))
-    return vert_offsets, new_areas-m.base_areas, new_centers-m.d_centers
+    new_vertices = (radius*magnitude*vertex_harmonic_mags*direction_vectors)
+    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(new_vertices+m.d_vertices, m.faces.astype(jnp.int32))
+    return jnp.nan_to_num(new_vertices), jnp.nan_to_num(new_areas-m.base_areas), jnp.nan_to_num(new_centers-m.d_centers)
 
 def evaluate_pulsations(m: MeshModel, t: ArrayLike):
     fourier_static_params = jnp.nan_to_num(m.fourier_series_static_parameters)
@@ -142,7 +142,7 @@ def evaluate_pulsations(m: MeshModel, t: ArrayLike):
     harmonic_params = create_harmonics_params(m.max_pulsation_mode)
     vert_offsets, area_offsets, center_offsets = jax.vmap(calculate_pulsations, in_axes=(None, 0, 0, None))(m, harmonic_params, pulsation_magnitudes, m.radius)
     return m._replace(
-        vertices_pulsation_offsets=vert_offsets,
-        center_pulsation_offsets=center_offsets,
-        area_pulsation_offsets=area_offsets
+        vertices_pulsation_offsets=jnp.sum(vert_offsets, axis=0),
+        center_pulsation_offsets=jnp.sum(center_offsets, axis=0),
+        area_pulsation_offsets=jnp.sum(area_offsets, axis=0)
     )
