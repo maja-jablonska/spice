@@ -86,15 +86,8 @@ def get_mesh_view(mesh: MeshModel, los_vector: ArrayLike) -> MeshModel:
     Returns:
         MeshModel: mesh with updated los_vector, mus, and los_velocities
     """
-    cast_vertices=cast_to_normal_plane(mesh.vertices, los_vector)
     return mesh._replace(
-        los_vector = los_vector,
-        los_z=cast_to_los(mesh.center+mesh.d_centers, los_vector),
-        cast_vertices = cast_vertices,
-        cast_centers = cast_to_normal_plane(mesh.centers, los_vector),
-        mus = cast_normalized_to_los(mesh.d_centers, los_vector),
-        los_velocities = cast_to_los(mesh.velocities, los_vector),
-        cast_areas=get_cast_areas(cast_vertices[mesh.faces.astype(int)])
+        los_vector = los_vector
     )
 
 @jax.jit
