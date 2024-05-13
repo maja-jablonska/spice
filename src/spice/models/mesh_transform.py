@@ -77,17 +77,10 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     rotated_centers_vel = rotation_velocity_cm*jnp.matmul(mesh.d_centers/mesh.radius, t_rotation_matrix_prim) # cm
 
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
-    cast_vertices = cast_to_normal_plane(mesh.center+rotated_vertices, mesh.los_vector)
     return mesh._replace(d_vertices = rotated_vertices,
                          d_centers = rotated_centers,
                          rotation_velocities = rotated_centers_vel*1e-5, # back to km/s
-                         los_z=cast_to_los(mesh.center+rotated_centers, mesh.los_vector),
-                         cast_vertices=cast_vertices,
-                         cast_centers=cast_to_normal_plane(mesh.center+rotated_centers, mesh.los_vector),
-                         mus = cast_normalized_to_los(rotated_centers, mesh.los_vector),
-                         los_velocities = cast_to_los(rotated_centers_vel, mesh.los_vector)*1e-5,
-                         axis_radii = new_axis_radii,
-                         cast_areas=get_cast_areas(cast_vertices[mesh.faces.astype(int)]))
+                         axis_radii = new_axis_radii)
 
 
 def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
