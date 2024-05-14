@@ -88,7 +88,7 @@ class MeshModel(NamedTuple):
 
     @property
     def velocities(self) -> jnp.float64:
-        return self.rotation_velocities + self.orbital_velocity
+        return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
     
     @property
     def mus(self) -> ArrayLike:
@@ -113,11 +113,6 @@ class MeshModel(NamedTuple):
     @property
     def cast_areas(self) -> ArrayLike:
         return get_cast_areas(self.cast_vertices[self.faces.astype(int)])        
-
-    @abstractmethod
-    def pulsation_modes(self) -> int:
-        raise NotImplementedError()
-        return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
 
 
 class IcosphereModel(MeshModel):
