@@ -2,13 +2,20 @@
 
 A stellar spectra integration library.
 
-I am going to publish the package on PyPI very soon, for the time being it can be installed from GitHub:
+The package can be installed using PyPI:
 
 ```bash
-pip install git+https://github.com/maja-jablonska/spice
+pip install stellar-spice
 ```
 
 Paper is currently in prep.
+
+# Features implemented
+
+- [x] Rotation
+- [x] Spots
+- [ ] Pulsations
+- [ ] PHOEBE integration
 
 ## Dev log
 
