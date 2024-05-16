@@ -10,6 +10,13 @@ pip install git+https://github.com/maja-jablonska/spice
 
 Paper is currently in prep.
 
+# Features implemented
+
+- [x] Rotation
+- [x] Spots
+- [ ] Pulsations
+- [ ] PHOEBE integration
+
 ## Dev log
 
 Notebooks are being updated one by one.
