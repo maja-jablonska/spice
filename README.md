@@ -1,4 +1,4 @@
-![spice logo](docs/img/spice.svg)
+![spice logo](https://raw.githubusercontent.com/maja-jablonska/spice/main/docs/img/spice.svg)
 
 A stellar spectra integration library.
 
@@ -9,6 +9,10 @@ pip install stellar-spice
 ```
 
 Paper is currently in prep.
+
+# Documentation
+
+Read the [docs](https://spice.readthedocs.io) here.
 
 # Features implemented
 
