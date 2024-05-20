@@ -1,8 +1,12 @@
 import phoebe
 import numpy as np
-from typing import Optional
+from typing import List, Optional
 
 from enum import auto, Enum
+
+
+R_SOL_CM = 69570000000.0
+
 
 def unit_vector(vector):
     """ Returns the unit vector of the vector.  """
@@ -45,6 +49,8 @@ class PhoebeConfig:
     
     def get_parameter(self, time: float, qualifier: str, component: Optional[Component] = None) -> np.array:
         if component is not None:
+            if str(component) not in self.b.components:
+                raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
             return self.b.get_parameter(qualifier=qualifier,
                                         component=str(component),
                                         dataset=self.dataset_name,
@@ -55,10 +61,22 @@ class PhoebeConfig:
                             dataset=self.dataset_name,
                             kind='mesh',
                             time=time).value
+            
+    def list_quantities(self) -> List[str]:
+        return [param._qualifier for param in self.b._params]
+            
+    def get_quantity(self, qualifier: str) -> float:
+        return self.b.get_quantity(qualifier=qualifier).value
     
-    def get_mesh_coordinates(self, time: float, component: Optional[Component] = None) -> np.array:
+    def get_mesh_projected_centers(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'us', component).reshape((-1, 1)),
-                               self.get_parameter(time, 'vs', component).reshape((-1, 1))], axis=1)
+                               self.get_parameter(time, 'vs', component).reshape((-1, 1)),
+                               self.get_parameter(time, 'ws', component).reshape((-1, 1))], axis=1)*R_SOL_CM
+        
+    def get_mesh_centers(self, time: float, component: Optional[Component] = None) -> np.array:
+        return np.concatenate([self.get_parameter(time, 'xs', component).reshape((-1, 1)),
+                               self.get_parameter(time, 'ys', component).reshape((-1, 1)),
+                               self.get_parameter(time, 'zs', component).reshape((-1, 1))], axis=1)*R_SOL_CM
     
     def get_mesh_normals(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'uvw_normals', component)
