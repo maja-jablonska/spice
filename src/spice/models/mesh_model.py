@@ -3,8 +3,10 @@ import jax.numpy as jnp
 
 from abc import abstractmethod
 from typing import NamedTuple, Union
+from collections import namedtuple
 
 from .mesh_generation import icosphere
+from .model import Model
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
@@ -14,7 +16,9 @@ DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.]) # from the Y direc
 
 NO_ROTATION_MATRIX = jnp.zeros((3, 3))
 
-class MeshModel(NamedTuple):
+MeshModelNamedTuple = namedtuple("MeshModel", ["center", "radius", "mass", "abs_luminosity", "log_g", "d_vertices", "faces", "d_centers", "areas", "parameters", "rotation_velocities", "rotation_axis", "rotation_matrix", "rotation_matrix_prim", "axis_radii", "rotation_velocity", "orbital_velocity", "los_vector"])
+
+class MeshModel(Model, MeshModelNamedTuple):
     # Stellar properties
     center: ArrayLike
     radius: float
@@ -61,7 +65,7 @@ class MeshModel(NamedTuple):
             return self.d_centers + self.center.reshape((self.d_centers.shape[0], *([1]*(len(self.d_centers.shape)-2)), self.d_centers.shape[-1]))
 
     @property
-    def velocities(self) -> jnp.float64:
+    def velocities(self) -> ArrayLike:
         return self.rotation_velocities + self.orbital_velocity
     
     @property
