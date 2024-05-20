@@ -3,11 +3,18 @@ from .mesh_model import Model
 from .phoebe_utils import Component, PhoebeConfig
 from typing import Optional
 from collections import namedtuple
+import numpy as np
 
+
+## PITCH, YAW,. ETC TO ROTATION AXIS
+# xzLen = cos(pitch)
+# x = xzLen * cos(yaw)
+# y = sin(pitch)
+# z = xzLen * sin(-yaw)
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
                                     ["time", "mass", "radius", "d_centers", "d_cast_centers", "d_mus",
-                                     "d_cast_areas"])):
+                                     "d_cast_areas", "pitch", "yaw"])):
     time: float
     mass: float
     radius: float
@@ -15,6 +22,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     d_cast_centers: ArrayLike
     d_mus: ArrayLike
     d_cast_areas: ArrayLike
+    pitch: float
+    yaw: float
     
     @property
     def vertices(self) -> ArrayLike:
@@ -56,6 +65,11 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     def cast_areas(self) -> ArrayLike:
         raise self.d_cast_areas
     
+    @property
+    def rotation_axis(self) -> ArrayLike:
+        return np.array([np.cos(self.pitch)*np.cos(self.yaw), np.sin(self.pitch), np.cos(self.pitch)*np.sin(-self.yaw)])
+
+    
     @classmethod
     def construct(cls,
                   phoebe_config: PhoebeConfig,
@@ -68,5 +82,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             d_centers=phoebe_config.get_mesh_centers(time, component),
             d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_mus=phoebe_config.get_mus(time, component),
-            d_cast_areas=phoebe_config.get_projected_areas(time, component)
+            d_cast_areas=phoebe_config.get_projected_areas(time, component),
+            pitch=phoebe_config.get_quantity('pitch'),
+            yaw=phoebe_config.get_quantity('yaw')
         )
