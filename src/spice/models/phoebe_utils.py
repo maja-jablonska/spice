@@ -77,6 +77,11 @@ class PhoebeConfig:
         return np.concatenate([self.get_parameter(time, 'xs', component).reshape((-1, 1)),
                                self.get_parameter(time, 'ys', component).reshape((-1, 1)),
                                self.get_parameter(time, 'zs', component).reshape((-1, 1))], axis=1)*R_SOL_CM
+        
+    def get_center_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
+        return np.concatenate([self.get_parameter(time, 'vxs', component).reshape((-1, 1)),
+                               self.get_parameter(time, 'vys', component).reshape((-1, 1)),
+                               self.get_parameter(time, 'vzs', component).reshape((-1, 1))], axis=1)
     
     def get_mesh_normals(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'uvw_normals', component)
