@@ -13,8 +13,11 @@ import numpy as np
 # z = xzLen * sin(-yaw)
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
-                                    ["time", "mass", "radius", "d_centers", "d_cast_centers", "d_mus",
-                                     "d_cast_areas", "pitch", "yaw"])):
+                                    ["time", "mass", "radius", "d_centers",
+                                     "d_cast_centers", "d_mus",
+                                     "d_cast_areas",
+                                     "inclination"
+                                     ])):
     time: float
     mass: float
     radius: float
@@ -22,8 +25,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     d_cast_centers: ArrayLike
     d_mus: ArrayLike
     d_cast_areas: ArrayLike
-    pitch: float
-    yaw: float
+    center_velocities: ArrayLike
+    inclination: float
     
     @property
     def vertices(self) -> ArrayLike:
@@ -67,7 +70,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     
     @property
     def rotation_axis(self) -> ArrayLike:
-        return np.array([np.cos(self.pitch)*np.cos(self.yaw), np.sin(self.pitch), np.cos(self.pitch)*np.sin(-self.yaw)])
+        return np.array([0., np.sin(self.inclination), np.cos(self.inclination)])
 
     
     @classmethod
@@ -83,6 +86,5 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_mus=phoebe_config.get_mus(time, component),
             d_cast_areas=phoebe_config.get_projected_areas(time, component),
-            pitch=phoebe_config.get_quantity('pitch'),
-            yaw=phoebe_config.get_quantity('yaw')
+            inclination=phoebe_config.get_quantity('inclination')
         )
