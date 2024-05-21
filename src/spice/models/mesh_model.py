@@ -16,7 +16,12 @@ DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.]) # from the Y direc
 
 NO_ROTATION_MATRIX = jnp.zeros((3, 3))
 
-MeshModelNamedTuple = namedtuple("MeshModel", ["center", "radius", "mass", "abs_luminosity", "log_g", "d_vertices", "faces", "d_centers", "areas", "parameters", "rotation_velocities", "rotation_axis", "rotation_matrix", "rotation_matrix_prim", "axis_radii", "rotation_velocity", "orbital_velocity", "los_vector"])
+MeshModelNamedTuple = namedtuple("MeshModel",
+                                 ["center", "radius", "mass", "abs_luminosity",
+                                  "log_g", "d_vertices", "faces", "d_centers",
+                                  "areas", "parameters", "rotation_velocities",
+                                  "rotation_axis", "rotation_matrix", "rotation_matrix_prim",
+                                  "axis_radii", "rotation_velocity", "orbital_velocity", "los_vector"])
 
 class MeshModel(Model, MeshModelNamedTuple):
     # Stellar properties
