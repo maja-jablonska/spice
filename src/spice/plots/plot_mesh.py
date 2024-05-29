@@ -85,7 +85,7 @@ def plot_3D(mesh: MeshModel,
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
     if mode == 'MESH':
-        vs2 = mesh.vertices[mesh.faces.astype(int)]
+        vs2 = mesh.vertices
         face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
         p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
         plot_ax.add_collection(p)
