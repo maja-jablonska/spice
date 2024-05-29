@@ -65,8 +65,13 @@ class PhoebeConfig:
     def list_quantities(self) -> List[str]:
         return [param._qualifier for param in self.b._params]
             
-    def get_quantity(self, qualifier: str) -> float:
-        return self.b.get_quantity(qualifier=qualifier).value
+    def get_quantity(self, qualifier: str, component: Optional[Component] = None) -> float:
+        if component is not None:
+            if str(component) not in self.b.components:
+                raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
+            return self.b.get_quantity(qualifier=qualifier, component=component, context='component')
+        else:
+            return self.b.get_quantity(qualifier=qualifier).value
     
     def get_mesh_projected_centers(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'us', component).reshape((-1, 1)),
