@@ -6,6 +6,7 @@ from enum import auto, Enum
 
 
 R_SOL_CM = 69570000000.0
+R_SURFACE_AREA = 6.082104402130212e+22
 
 
 def unit_vector(vector):
@@ -94,7 +95,7 @@ class PhoebeConfig:
     def get_projected_areas(self, time: float, component: Optional[Component] = None) -> np.array:
         mesh_normals = self.get_mesh_normals(time, component)
         areas = self.get_parameter(time, 'areas', component)
-        return areas*np.array([cos_angle_between(mn, LOS) for mn in mesh_normals])
+        return areas*np.array([cos_angle_between(mn, LOS) for mn in mesh_normals])*R_SURFACE_AREA
     
     def get_radial_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'vws', component)
