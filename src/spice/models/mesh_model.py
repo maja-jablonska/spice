@@ -58,9 +58,9 @@ class MeshModel(Model, MeshModelNamedTuple):
     @property
     def vertices(self) -> ArrayLike:
         if len(self.d_vertices.shape)==2:
-            return self.d_vertices + self.center
+            return self.d_vertices[self.faces.astype(int)] + self.center
         else:
-            return self.d_vertices + self.center.reshape((self.d_vertices.shape[0], *([1]*(len(self.d_vertices.shape)-2)), self.d_vertices.shape[-1]))
+            return (self.d_vertices + self.center.reshape((self.d_vertices.shape[0], *([1]*(len(self.d_vertices.shape)-2)), self.d_vertices.shape[-1])))[self.faces.astype(int)]
     
     @property
     def centers(self) -> ArrayLike:

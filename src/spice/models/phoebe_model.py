@@ -13,15 +13,19 @@ DAY_TO_S = 86400.0
 PHOEBE_PARAMETERS = ['teffs', 'loggs']
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
-                                    ["time", "mass", "radius", "d_centers",
+                                    ["time", "mass", "radius",
+                                     "d_vertices", "d_cast_vertices",
+                                     "d_centers",
                                      "d_cast_centers", "d_mus",
                                      "d_cast_areas", "center_velocities",
                                      "rotation_velocity", "rotation_axis",
-                                     "parameters"
+                                     "parameters", "los_vector"
                                      ])):
     time: float
     mass: float
     radius: float
+    d_vertices: ArrayLike
+    d_cast_vertices: ArrayLike
     d_centers: ArrayLike
     d_cast_centers: ArrayLike
     d_mus: ArrayLike
@@ -30,10 +34,11 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     rotation_velocity: float
     rotation_axis: ArrayLike
     parameters: ArrayLike
+    los_vector: ArrayLike
     
     @property
     def vertices(self) -> ArrayLike:
-        raise NotImplementedError
+        return self.d_vertices
     
     @property
     def centers(self) -> ArrayLike:
@@ -56,12 +61,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         raise NotImplementedError
     
     @property
-    def los_z(self) -> ArrayLike:
-        raise NotImplementedError
-    
-    @property
     def cast_vertices(self) -> ArrayLike:
-        raise NotImplementedError
+        return self.d_cast_vertices
     
     @property
     def cast_centers(self) -> ArrayLike:
@@ -99,6 +100,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             time=time,
             mass=phoebe_config.get_quantity('mass', component=component),
             radius=radius,
+            d_vertices=phoebe_config.get_mesh_vertices(time, component),
+            d_cast_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
             d_centers=phoebe_config.get_mesh_centers(time, component),
             d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_mus=mus,
@@ -106,5 +109,6 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             rotation_velocity=lin_velocity,
             center_velocities=phoebe_config.get_center_velocities(time, component),
             rotation_axis=rotation_axis,
-            parameters=np.array(params).reshape((mus.shape[0], -1))
+            parameters=np.array(params).reshape((mus.shape[0], -1)),
+            los_vector=np.array([0., 1., 0.])
         )
