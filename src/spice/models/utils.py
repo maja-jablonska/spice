@@ -8,27 +8,6 @@ import warnings
 from .mesh_generation import face_center
 from spice.utils import ExperimentalWarning
 
-@jax.jit
-def apply_pulsation(verts: ArrayLike,
-                    faces: ArrayLike,
-                    magnitude: float) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
-    """Apply the pulsation 
-
-    Args:
-        verts (ArrayLike): _description_
-        faces (ArrayLike): _description_
-        magnitude (float): _description_
-
-    Returns:
-        Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: _description_
-    """
-    warnings.warn("This feature is experimental - use with caution.", ExperimentalWarning)
-    direction_vectors = verts/jnp.linalg.norm(verts, axis=1).reshape((-1, 1))
-    verts = verts + magnitude*direction_vectors
-    areas, centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts, faces.astype(jnp.int32))
-    mus = jnp.dot(centers/jnp.linalg.norm(centers, axis=1).reshape((-1, 1)), jnp.array([0, 0, 1]))
-    return verts, faces, areas, centers, mus
-
 def vertex_to_polar(v: ArrayLike) -> ArrayLike:
     v += 1e-5
     r = jnp.sqrt(v[0]**2+v[1]**2+v[2]**2)+1e-5
@@ -38,6 +17,49 @@ def vertex_to_polar(v: ArrayLike) -> ArrayLike:
             jnp.arctan2(v[1], v[0])
         ])
     )
+    
+@jax.jit
+def spherical_harmonic(m, n, polar_coordinates):
+    m_array = (m*jnp.ones_like(polar_coordinates[:, 0])).astype(int)
+    n_array = (n*jnp.ones_like(polar_coordinates[:, 1])).astype(int)
+    return jax.scipy.special.sph_harm(m_array,
+                                      n_array,
+                                      polar_coordinates[:, 0],
+                                      polar_coordinates[:, 1],
+                                      n_max=10).real
+    
+def evaluate_fourier_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+    """
+    Args:
+        d0 (float): amplitude D_0
+        P (float): period P
+        d (ArrayLike): amplitudes [1, n]
+        phi (ArrayLike): phases [1, n]
+        timestamp (float): timestamps
+
+    Returns:
+        ArrayLike: values
+    """
+    n = jnp.arange(1, d.shape[0]+1)
+    return d0 + jnp.sum(d*jnp.cos(n/P*timestamp-phi))
+
+def evaluate_fourier_prim_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+    """
+    Args:
+        d0 (float): amplitude D_0
+        P (float): period P
+        d (ArrayLike): amplitudes [1, n]
+        phi (ArrayLike): phases [1, n]
+        timestamp (float): timestamps
+
+    Returns:
+        ArrayLike: values
+    """
+    n = jnp.arange(1, d.shape[0]+1)
+    return jnp.sum(-d*n/P*jnp.sin(n/P*timestamp-phi))
+
+evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, 0, None)))
+evaluate_many_fouriers_prim_for_value = jax.jit(jax.vmap(evaluate_fourier_prim_for_value, in_axes=(0, 0, 0, 0, None)))
 
 @jax.jit
 def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:

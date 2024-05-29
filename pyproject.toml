@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stellar-spice"
-version = "0.2-beta"
+version = "0.4"
 readme = "README.md"
 dependencies = [
+    "celluloid~=0.2.0",
     "jax~=0.4.24",
     "jaxlib~=0.4.24",
     "numpy~=1.26.4",
