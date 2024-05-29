@@ -73,6 +73,12 @@ class PhoebeConfig:
             return self.b.get_quantity(qualifier=qualifier, component=component, context='component')
         else:
             return self.b.get_quantity(qualifier=qualifier).value
+        
+    def get_mesh_vertices(self, time: float, component: Optional[Component] = None) -> np.array:
+        return self.get_parameter(time, 'xyz_elements', component)*R_SOL_CM
+    
+    def get_mesh_projected_vertices(self, time: float, component: Optional[Component] = None) -> np.array:
+        return self.get_parameter(time, 'uvw_elements', component)*R_SOL_CM
     
     def get_mesh_projected_centers(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'us', component).reshape((-1, 1)),
@@ -88,6 +94,7 @@ class PhoebeConfig:
         return np.concatenate([self.get_parameter(time, 'vxs', component).reshape((-1, 1)),
                                self.get_parameter(time, 'vys', component).reshape((-1, 1)),
                                self.get_parameter(time, 'vzs', component).reshape((-1, 1))], axis=1)
+        
     
     def get_mesh_normals(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'uvw_normals', component)
