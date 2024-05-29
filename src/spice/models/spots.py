@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .mesh_model import MeshModel
-from .utils import vertex_to_polar
+from .utils import mesh_polar_vertices, spherical_harmonic, vertex_to_polar
 
 
 def __cos_law(lat1, lon1, lat2, lon2):
@@ -57,6 +57,29 @@ def add_spot(mesh: MeshModel,
     spot_parameters = v_spot(theta, phi, param_delta, 0., radius, radius_factor, mesh.centers)
     return mesh._replace(parameters = mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index]+spot_parameters))
+    
+    
+@jax.jit
+def add_spherical_harmonic_spot(mesh: MeshModel,
+                                m: int, n: int,
+                                param_delta: float,
+                                param_index: int) -> MeshModel:
+    """Add a spot/parameter variation as a spherical harmonic to the mesh model.
+
+    Args:
+        mesh (MeshModel): mesh model
+        m (int): m index of the spherical harmonic
+        n (int): n index of the spherical harmonic
+        param_delta (float): difference in the parameter value between the spot and the background
+        param_index (int): index of the parameter in the parameters array
+
+    Returns:
+        MeshModel: mesh with the spot added
+    """
+    center_polar_coords = mesh_polar_vertices(mesh.centers)
+    spot_parameters = spherical_harmonic(m, n, center_polar_coords) * param_delta
+    return mesh._replace(parameters = mesh.parameters.at[:, param_index].set(
+        mesh.parameters[:, param_index]+spot_parameters[:, jnp.newaxis]))
 
 
 def add_spots(mesh: MeshModel,
@@ -84,4 +107,30 @@ def add_spots(mesh: MeshModel,
         return add_spot(carry, *params[:-1], params[-1].astype(int)), params
     
     updated_mesh, _ = jax.lax.scan(scan, mesh, jnp.vstack([thetas, phis, param_deltas, radii, radius_factors, param_indices]).T)
+    return updated_mesh
+
+
+@jax.jit
+def add_spherical_harmonic_spots(mesh: MeshModel,
+                                 m: ArrayLike, n: ArrayLike,
+                                 param_deltas: ArrayLike,
+                                 param_indices: ArrayLike) -> MeshModel:
+    """Add a spot/parameter variation as a spherical harmonic to the mesh model.
+
+    Args:
+        mesh (MeshModel): mesh model
+        m (ArrayLike): m indices of the spherical harmonic
+        n (ArrayLike): n indices of the spherical harmonic
+        param_deltas (ArrayLike): difference in the parameter values between the spot and the background
+        param_indices (ArrayLike): indices of the parameter in the parameters array
+
+    Returns:
+        MeshModel: mesh with the spots added
+    """
+    def scan(carry, params):
+        return add_spherical_harmonic_spot(
+            carry, params[0].astype(int), params[1].astype(int), params[2], params[3].astype(int)
+            ), params
+        
+    updated_mesh, _ = jax.lax.scan(scan, mesh, jnp.vstack([m, n, param_deltas, param_indices]).T)
     return updated_mesh
