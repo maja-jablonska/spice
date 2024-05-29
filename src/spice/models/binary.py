@@ -46,6 +46,7 @@ class Binary(NamedTuple):
           return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers), jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
 
 
+
 @partial(jax.jit, static_argnums=(7,))
 def add_orbit(binary: Binary, P: float, ecc: float,
               T: float, i: float, omega: float, Omega: float, orbit_resolution_points: int) -> Binary:
