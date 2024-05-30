@@ -30,19 +30,35 @@ class Component(Enum):
 class PhoebeConfig:
     def __init__(self,
                  bundle: phoebe.frontend.bundle.Bundle,
-                 mesh_dataset_name: str):
+                 mesh_dataset_name: str = 'mesh01',
+                 orbit_dataset_name: Optional[str] = None):
         self.__b: phoebe.frontend.bundle.Bundle = bundle
-        self.__times: np.array = np.array(self.__b.times)
+        self.__times: np.array = np.array(self.__b.times).astype(np.float64)
 
-        self.__dataset_name: str = mesh_dataset_name
+        if mesh_dataset_name is not None and mesh_dataset_name not in self.__b.datasets:
+            raise ValueError("No dataset with name {} in the bundle. Bundle datasets: {}".format(mesh_dataset_name, ",".join(self.__b.datasets)))
+        
+        self.__mesh_dataset_name: str = mesh_dataset_name
+        
+        if orbit_dataset_name is not None and orbit_dataset_name not in self.__b.datasets:
+            raise ValueError("No dataset with name {} in the bundle. Bundle datasets: {}".format(orbit_dataset_name, ",".join(self.__b.datasets)))
+        
+        if orbit_dataset_name is None and 'orb01' in self.__b.datasets:
+            orbit_dataset_name = 'orb01'
+        
+        self.__orbit_dataset_name: str = orbit_dataset_name
             
     @property
     def times(self) -> np.array:
         return self.__times
         
     @property
-    def dataset_name(self) -> str:
-        return self.__dataset_name
+    def mesh_dataset_name(self) -> str:
+        return self.__mesh_dataset_name
+    
+    @property
+    def orbit_dataset_name(self) -> str:
+        return self.__orbit_dataset_name
     
     @property
     def b(self) -> str:
@@ -54,12 +70,12 @@ class PhoebeConfig:
                 raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
             return self.b.get_parameter(qualifier=qualifier,
                                         component=str(component),
-                                        dataset=self.dataset_name,
+                                        dataset=self.mesh_dataset_name,
                                         kind='mesh',
                                         time=time).value
         else:
             return self.b.get_parameter(qualifier=qualifier,
-                            dataset=self.dataset_name,
+                            dataset=self.mesh_dataset_name,
                             kind='mesh',
                             time=time).value
             
@@ -70,7 +86,7 @@ class PhoebeConfig:
         if component is not None:
             if str(component) not in self.b.components:
                 raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
-            return self.b.get_quantity(qualifier=qualifier, component=component, context='component')
+            return self.b.get_quantity(qualifier=qualifier, component=component, context='component').value
         else:
             return self.b.get_quantity(qualifier=qualifier).value
         
@@ -115,3 +131,16 @@ class PhoebeConfig:
 
     def get_mus(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'mus', component)
+    
+    def get_orbit_centers(self, time: float, component: Component) -> np.array:
+        if self.orbit_dataset_name is None:
+            raise ValueError("No orbit dataset name provided in the constructor.")
+        
+        time_ind = np.argmin(np.abs(self.times - time))
+        
+        return np.concatenate([self.b.get_parameter(qualifier='us', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value[time_ind].reshape((-1, 1)),
+                               self.b.get_parameter(qualifier='vs', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value[time_ind].reshape((-1, 1)),
+                               self.b.get_parameter(qualifier='ws', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value[time_ind].reshape((-1, 1))], axis=1)*R_SOL_CM
