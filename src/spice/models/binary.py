@@ -3,7 +3,7 @@ from functools import partial
 import jax
 from jax.typing import ArrayLike
 from typing import NamedTuple, Tuple
-from .mesh_model import MeshModel
+from .model import Model
 from .mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
 from .orbit_utils import get_orbit_jax
@@ -14,8 +14,8 @@ YEAR_TO_SECONDS = (u.year).to(u.s)
 
 
 class Binary(NamedTuple):
-    body1: MeshModel
-    body2: MeshModel
+    body1: Model
+    body2: Model
 
     # Orbital elements
     P: float
@@ -33,17 +33,19 @@ class Binary(NamedTuple):
     body2_velocities: ArrayLike
 
     @classmethod
-    def from_bodies(cls, body1: MeshModel, body2: MeshModel) -> "Binary":
+    def from_bodies(cls, body1: Model, body2: Model) -> "Binary":
           """Construct a Binary object from two mesh models.
 
           Args:
-              body1 (MeshModel):
-              body2 (MeshModel):
+              body1 (Model):
+              body2 (Model):
 
           Returns:
               Binary: a binary consisting of body1 and body2
           """
-          return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers), jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
+          return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0.,
+                     jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
+                     jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
 
 
 
@@ -76,7 +78,7 @@ def add_orbit(binary: Binary, P: float, ecc: float,
 
 
 @partial(jax.jit, static_argnums=(2,))
-def _evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[MeshModel, MeshModel]:
+def _evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[Model, Model]:
       interpolate_orbit = jax.jit(jax.vmap(lambda x: jnp.interp(time, binary.evaluated_times, x, period=binary.P), in_axes=(0,)))
       body1_center = interpolate_orbit(binary.body1_centers)
       body2_center = interpolate_orbit(binary.body2_centers)
@@ -94,7 +96,7 @@ def _evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[MeshMo
 v_evaluate_orbit = jax.jit(jax.vmap(_evaluate_orbit, in_axes=(None, 0, None)), static_argnums=(2,))
 
 
-def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[MeshModel, MeshModel]:
+def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[Model, Model]:
       """_summary_
 
       Args:
@@ -109,7 +111,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[
       return _evaluate_orbit(binary, time, grid)
 
 
-def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20) -> Tuple[MeshModel, MeshModel]:
+def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20) -> Tuple[Model, Model]:
       """_summary_
 
       Args:
