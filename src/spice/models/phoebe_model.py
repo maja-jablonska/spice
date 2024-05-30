@@ -13,7 +13,7 @@ DAY_TO_S = 86400.0
 PHOEBE_PARAMETERS = ['teffs', 'loggs']
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
-                                    ["time", "mass", "radius",
+                                    ["time", "mass", "radius", "center",
                                      "d_vertices", "d_cast_vertices",
                                      "d_centers",
                                      "d_cast_centers", "d_mus",
@@ -24,6 +24,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     time: float
     mass: float
     radius: float
+    center: ArrayLike
     d_vertices: ArrayLike
     d_cast_vertices: ArrayLike
     d_centers: ArrayLike
@@ -38,15 +39,15 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     
     @property
     def vertices(self) -> ArrayLike:
-        return self.d_vertices
+        return self.center + self.d_vertices
     
     @property
     def centers(self) -> ArrayLike:
-        return self.d_centers
+        return self.center + self.d_centers
         
     @property
     def velocities(self) -> ArrayLike:
-        return self.center_velocities
+        return self.center + self.center_velocities
     
     @property
     def mus(self) -> ArrayLike:
@@ -62,15 +63,15 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     
     @property
     def cast_vertices(self) -> ArrayLike:
-        return self.d_cast_vertices
+        return self.center + self.d_cast_vertices
     
     @property
     def cast_centers(self) -> ArrayLike:
-        return self.d_cast_centers
+        return self.center + self.d_cast_centers
 
     @property
     def cast_areas(self) -> ArrayLike:
-        return self.d_cast_areas
+        return self.center + self.d_cast_areas
     
     @classmethod
     def construct(cls,
@@ -84,7 +85,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         los_vector = np.array([0., -np.sin(inclination), np.cos(inclination)])
         mus=phoebe_config.get_mus(time, component)
         
-        lin_velocity = 2*np.pi*radius/period
+        lin_velocity = 2*np.pi*radius/period/1e5 # km/s
         
         params = []
         if parameter_labels:
@@ -95,11 +96,16 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                     params.append(phoebe_config.get_parameter(time, pl, component=component))
         if len(params)==0:
             params = phoebe_config.get_parameter(time, 'teffs', component=component)
+            
+        # If binary, retrieve orbit centers
+        if phoebe_config.orbit_dataset_name:
+            center = phoebe_config.get_orbit_centers(time, component=component)
         
         return PhoebeModel.__new__(cls,
             time=time,
             mass=phoebe_config.get_quantity('mass', component=component),
             radius=radius,
+            center=center,
             d_vertices=phoebe_config.get_mesh_vertices(time, component),
             d_cast_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
             d_centers=phoebe_config.get_mesh_centers(time, component),
