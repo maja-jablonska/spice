@@ -58,7 +58,7 @@ def plot_3D(mesh: MeshModel,
         fig = plt.figure(figsize=(10, 12))
         spec = fig.add_gridspec(10, 12)
         plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
-        plot_ax.view_init(elev=30, azim=-60)
+        plot_ax.view_init(elev=30, azim=60)
     else:
         try:
             fig, plot_ax = axes
