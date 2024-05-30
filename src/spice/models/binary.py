@@ -2,7 +2,10 @@ import jax.numpy as jnp
 from functools import partial
 import jax
 from jax.typing import ArrayLike
-from typing import NamedTuple, Tuple
+from typing import List, NamedTuple, Tuple
+
+from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
+from spice.models.phoebe_utils import Component, PhoebeConfig
 from .model import Model
 from .mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
@@ -11,6 +14,7 @@ from .mesh_view import resolve_occlusion, Grid
 
 
 YEAR_TO_SECONDS = (u.year).to(u.s)
+DAY_TO_YEAR = 0.0027378507871321013
 
 
 class Binary(NamedTuple):
@@ -46,6 +50,34 @@ class Binary(NamedTuple):
           return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0.,
                      jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
                      jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
+          
+          
+
+class PhoebeBinary(Binary):
+    @classmethod
+    def construct(cls, phoebe_config: PhoebeConfig, time: float, parameter_labels: List[str] = None) -> "PhoebeBinary":
+            """Construct a PhoebeBinary object from a PhoebeConfig object.
+    
+            Args:
+                phoebe_config (PhoebeConfig):
+    
+            Returns:
+                PhoebeBinary: a binary consisting of body1 and body2
+            """
+            body1 = PhoebeModel.construct(phoebe_config, time, parameter_labels, str(Component.PRIMARY))
+            body2 = PhoebeModel.construct(phoebe_config, time, parameter_labels, str(Component.SECONDARY))
+            return cls(body1, body2, evaluated_times = phoebe_config.times,
+                       P = phoebe_config.get_quantity('period', component='binary')*DAY_TO_YEAR,
+                       ecc = phoebe_config.get_quantity('ecc', component='binary'),
+                       T = phoebe_config.get_quantity('t0_ref', component='binary')*DAY_TO_YEAR,
+                       i = phoebe_config.get_quantity('incl', component='binary'),
+                       omega = phoebe_config.get_quantity('per0', component='binary'),
+                       Omega = phoebe_config.get_quantity('long_an', component='binary'),
+                       body1_centers = body1.centers,
+                       body2_centers = body2.centers,
+                       body1_velocities = body1.velocities,
+                       body2_velocities = body2.velocities,
+            )
 
 
 
