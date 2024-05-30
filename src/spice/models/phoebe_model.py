@@ -81,7 +81,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         radius = phoebe_config.get_quantity('requiv', component=component)*R_SOL_CM
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component)*DAY_TO_S
-        rotation_axis = np.array([0., np.sin(inclination), np.cos(inclination)])
+        los_vector = np.array([0., -np.sin(inclination), np.cos(inclination)])
         mus=phoebe_config.get_mus(time, component)
         
         lin_velocity = 2*np.pi*radius/period
@@ -108,7 +108,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             d_cast_areas=phoebe_config.get_projected_areas(time, component),
             rotation_velocity=lin_velocity,
             center_velocities=phoebe_config.get_center_velocities(time, component),
-            rotation_axis=rotation_axis,
+            rotation_axis=los_vector,
             parameters=np.array(params).reshape((mus.shape[0], -1)),
-            los_vector=np.array([0., 0., -1.])
+            los_vector=-np.array([0., 0., 1.])
         )
