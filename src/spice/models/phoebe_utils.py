@@ -64,7 +64,7 @@ class PhoebeConfig:
     def b(self) -> str:
         return self.__b
     
-    def get_parameter(self, time: float, qualifier: str, component: Optional[Component] = None) -> np.array:
+    def get_parameter(self, time: float, qualifier: str, component: Optional[Component] = None, **kwargs) -> np.array:
         if component is not None:
             if str(component) not in self.b.components:
                 raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
@@ -72,23 +72,25 @@ class PhoebeConfig:
                                         component=str(component),
                                         dataset=self.mesh_dataset_name,
                                         kind='mesh',
-                                        time=time).value
+                                        time=time,
+                                        **kwargs).value
         else:
             return self.b.get_parameter(qualifier=qualifier,
                             dataset=self.mesh_dataset_name,
                             kind='mesh',
-                            time=time).value
+                            time=time,
+                            **kwargs).value
             
     def list_quantities(self) -> List[str]:
         return [param._qualifier for param in self.b._params]
             
-    def get_quantity(self, qualifier: str, component: Optional[Component] = None) -> float:
+    def get_quantity(self, qualifier: str, component: Optional[Component] = None, **kwargs) -> float:
         if component is not None:
             if str(component) not in self.b.components:
                 raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
-            return self.b.get_quantity(qualifier=qualifier, component=component, context='component').value
+            return self.b.get_quantity(qualifier=qualifier, component=component, context='component', **kwargs).value
         else:
-            return self.b.get_quantity(qualifier=qualifier).value
+            return self.b.get_quantity(qualifier=qualifier, **kwargs).value
         
     def get_mesh_vertices(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'xyz_elements', component)*R_SOL_CM
