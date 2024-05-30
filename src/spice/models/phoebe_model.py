@@ -54,7 +54,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     
     @property
     def los_velocities(self) -> ArrayLike:
-        return cast_to_los(self.velocities, np.array([0., 0., 1.]))
+        return cast_to_los(self.velocities, self.los_vector)
     
     @property
     def los_z(self) -> ArrayLike:
@@ -79,7 +79,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                   parameter_labels: List[str] = None,
                   component: Optional[Component] = None) -> "PhoebeModel":
         radius = phoebe_config.get_quantity('requiv', component=component)*R_SOL_CM
-        inclination = phoebe_config.get_quantity('incl', component=component)
+        inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component)*DAY_TO_S
         rotation_axis = np.array([0., np.sin(inclination), np.cos(inclination)])
         mus=phoebe_config.get_mus(time, component)
@@ -110,5 +110,5 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             center_velocities=phoebe_config.get_center_velocities(time, component),
             rotation_axis=rotation_axis,
             parameters=np.array(params).reshape((mus.shape[0], -1)),
-            los_vector=np.array([0., 1., 0.])
+            los_vector=np.array([0., 0., -1.])
         )
