@@ -73,10 +73,10 @@ class PhoebeBinary(Binary):
                        i = phoebe_config.get_quantity('incl', component='binary'),
                        omega = phoebe_config.get_quantity('per0', component='binary'),
                        Omega = phoebe_config.get_quantity('long_an', component='binary'),
-                       body1_centers = body1.centers,
-                       body2_centers = body2.centers,
-                       body1_velocities = body1.velocities,
-                       body2_velocities = body2.velocities,
+                       body1_centers = phoebe_config.get_all_orbit_centers(str(Component.PRIMARY)),
+                       body2_centers = phoebe_config.get_all_orbit_centers(str(Component.SECONDARY)),
+                       body1_velocities = phoebe_config.get_all_orbit_velocities(str(Component.PRIMARY)),
+                       body2_velocities = phoebe_config.get_all_orbit_velocities(str(Component.SECONDARY)),
             )
 
 
