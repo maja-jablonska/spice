@@ -19,7 +19,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                                      "d_cast_centers", "d_mus",
                                      "d_cast_areas", "center_velocities",
                                      "rotation_velocity", "rotation_axis",
-                                     "parameters", "los_vector"
+                                     "parameters", "los_vector", "orbital_velocity"
                                      ])):
     time: float
     mass: float
@@ -36,6 +36,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     rotation_axis: ArrayLike
     parameters: ArrayLike
     los_vector: ArrayLike
+    orbital_velocity: ArrayLike
     
     @property
     def vertices(self) -> ArrayLike:
@@ -100,6 +101,10 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         # If binary, retrieve orbit centers
         if phoebe_config.orbit_dataset_name:
             center = phoebe_config.get_orbit_centers(time, component=component)
+            orbital_velocity = phoebe_config.get_orbit_velocities(time, component=component)
+        else:
+            center = np.zeros(3)
+            orbital_velocity = np.zeros(3)
         
         return PhoebeModel.__new__(cls,
             time=time,
@@ -116,5 +121,6 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             center_velocities=phoebe_config.get_center_velocities(time, component),
             rotation_axis=los_vector,
             parameters=np.array(params).reshape((mus.shape[0], -1)),
-            los_vector=-np.array([0., 0., 1.])
+            los_vector=-np.array([0., 0., 1.]),
+            orbital_velocity=orbital_velocity
         )

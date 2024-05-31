@@ -134,15 +134,40 @@ class PhoebeConfig:
     def get_mus(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'mus', component)
     
+    def get_all_orbit_centers(self, component: Component) -> np.array:
+        if self.orbit_dataset_name is None:
+            raise ValueError("No orbit dataset name provided in the constructor.")
+        
+        return np.concatenate([self.b.get_parameter(qualifier='us', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1)),
+                               self.b.get_parameter(qualifier='vs', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1)),
+                               self.b.get_parameter(qualifier='ws', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1))], axis=1)*R_SOL_CM
+        
+    def get_all_orbit_velocities(self, component: Component) -> np.array:
+        if self.orbit_dataset_name is None:
+            raise ValueError("No orbit dataset name provided in the constructor.")
+        
+        return np.concatenate([self.b.get_parameter(qualifier='vus', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1)),
+                               self.b.get_parameter(qualifier='vvs', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1)),
+                               self.b.get_parameter(qualifier='vws', component=str(component),
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1))], axis=1)*R_SOL_CM
+        
     def get_orbit_centers(self, time: float, component: Component) -> np.array:
         if self.orbit_dataset_name is None:
             raise ValueError("No orbit dataset name provided in the constructor.")
         
         time_ind = np.argmin(np.abs(self.times - time))
         
-        return np.concatenate([self.b.get_parameter(qualifier='us', component=str(component),
-                                                    dataset=self.orbit_dataset_name, kind='orb').value[time_ind].reshape((-1, 1)),
-                               self.b.get_parameter(qualifier='vs', component=str(component),
-                                                    dataset=self.orbit_dataset_name, kind='orb').value[time_ind].reshape((-1, 1)),
-                               self.b.get_parameter(qualifier='ws', component=str(component),
-                                                    dataset=self.orbit_dataset_name, kind='orb').value[time_ind].reshape((-1, 1))], axis=1)*R_SOL_CM
+        return self.get_all_orbit_centers(component)[time_ind]
+
+    def get_orbit_velocities(self, time: float, component: Component) -> np.array:
+        if self.orbit_dataset_name is None:
+            raise ValueError("No orbit dataset name provided in the constructor.")
+        
+        time_ind = np.argmin(np.abs(self.times - time))
+        
+        return self.get_all_orbit_velocities(component)[time_ind]
