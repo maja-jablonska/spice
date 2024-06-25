@@ -121,6 +121,6 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             center_velocities=phoebe_config.get_center_velocities(time, component),
             rotation_axis=rotation_axis,
             parameters=np.array(params).reshape((mus.shape[0], -1)),
-            los_vector=np.array([0., 0., 1.]),
+            los_vector=np.array([0., 0., -1.]),
             orbital_velocity=orbital_velocity
         )
