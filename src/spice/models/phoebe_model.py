@@ -39,7 +39,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     orbital_velocity: ArrayLike
     
     @property
-    def vertices(self) -> ArrayLike:
+    def mesh_elements(self) -> ArrayLike:
         return self.center + self.d_vertices
     
     @property

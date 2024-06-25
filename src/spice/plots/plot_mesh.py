@@ -85,7 +85,7 @@ def plot_3D(mesh: MeshModel,
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
     if mode == 'MESH':
-        vs2 = mesh.vertices
+        vs2 = mesh.mesh_elements
         face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
         p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
         plot_ax.add_collection(p)
@@ -320,4 +320,4 @@ def plot_3D_mesh_and_spectrum(mesh: MeshModel,
     spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=13)
 
     spectrum_ax.plot(wavelengths, spectrum, color='black')
-    plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs)
+    return *plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs), spectrum_ax
