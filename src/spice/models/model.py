@@ -11,6 +11,10 @@ class Model:
         raise NotImplementedError
     
     @property
+    def mesh_elements(self) -> T:
+        raise NotImplementedError
+    
+    @property
     def centers(self) -> T:
         raise NotImplementedError
         
