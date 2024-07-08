@@ -48,7 +48,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         
     @property
     def velocities(self) -> ArrayLike:
-        return self.center + self.center_velocities
+        return self.orbital_velocity + self.center_velocities
     
     @property
     def mus(self) -> ArrayLike:

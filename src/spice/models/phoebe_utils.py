@@ -120,7 +120,8 @@ class PhoebeConfig:
     def get_projected_areas(self, time: float, component: Optional[Component] = None) -> np.array:
         mesh_normals = self.get_mesh_normals(time, component)
         areas = self.get_parameter(time, 'areas', component)
-        return areas*np.array([cos_angle_between(mn, LOS) for mn in mesh_normals])*R_SURFACE_AREA
+        visibilities = self.get_parameter(time, 'visibilities', component)
+        return areas*np.array([cos_angle_between(mn, LOS) for mn in mesh_normals])*R_SURFACE_AREA*visibilities
     
     def get_radial_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'vws', component)
@@ -154,7 +155,7 @@ class PhoebeConfig:
                                self.b.get_parameter(qualifier='vvs', component=str(component),
                                                     dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1)),
                                self.b.get_parameter(qualifier='vws', component=str(component),
-                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1))], axis=1)*R_SOL_CM
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1))], axis=1)
         
     def get_orbit_centers(self, time: float, component: Component) -> np.array:
         if self.orbit_dataset_name is None:
