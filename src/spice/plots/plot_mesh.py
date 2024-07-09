@@ -101,6 +101,84 @@ def plot_3D(mesh: MeshModel,
     return fig, plot_ax
 
 
+def plot_3D_binary(mesh1: MeshModel,
+                   mesh2: MeshModel,
+                   property: Union[str, int] = DEFAULT_PROPERTY,
+                   axes: Optional[Tuple[plt.figure, plt.axes]] = None,
+                   cmap: str = 'turbo',
+                   property_label: Optional[str] = None,
+                   mode: str = 'MESH',
+                   update_colorbar: bool = True,
+                   scale_radius: float = 1.0):
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    to_be_mapped1, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+    to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+    to_be_mapped = np.concatenate([to_be_mapped1, to_be_mapped2])
+
+    if axes is None:
+        fig = plt.figure(figsize=(10, 12))
+        spec = fig.add_gridspec(10, 12)
+        plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
+        plot_ax.view_init(elev=30, azim=60)
+    else:
+        try:
+            fig, plot_ax = axes
+        except ValueError:
+            raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
+    axes_lim = np.max(np.abs(mesh1.centers-mesh2.centers))
+    plot_ax.set_xlim3d(-axes_lim, axes_lim)
+    plot_ax.set_ylim3d(-axes_lim, axes_lim)
+    plot_ax.set_zlim3d(-axes_lim, axes_lim)
+    plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
+    plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
+    plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+
+    normalized_los_vector = mesh1.los_vector/np.linalg.norm(mesh1.los_vector)
+    normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
+    normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
+    
+    plot_ax.quiver(*(-axes_lim*normalized_los_vector), *(mesh1.radius*normalized_los_vector),
+                   color='red', linewidth=3., label='LOS vector')
+    plot_ax.quiver(*(mesh1.center), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
+                   color='black', linewidth=3., label='Rotation axis')
+    plot_ax.quiver(*(mesh2.center), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+                   color='black', linewidth=3., label='Rotation axis')
+    plot_ax.legend()
+
+    norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
+    if mode == 'MESH':
+        vs2_1 = mesh1.center+(mesh1.mesh_elements-mesh1.center)*scale_radius
+        face_colors1 = mpl.colormaps[cmap](norm(to_be_mapped1))
+        p1 = art3d.Poly3DCollection(vs2_1, facecolors=face_colors1, edgecolor="black", linewidths=0.01)
+        
+        vs2_2 = mesh2.center+(mesh2.mesh_elements-mesh2.center)*scale_radius
+        face_colors2 = mpl.colormaps[cmap](norm(to_be_mapped2))
+        p2 = art3d.Poly3DCollection(vs2_2, facecolors=face_colors2, edgecolor="black", linewidths=0.01)
+        
+        plot_ax.add_collection(p1)
+        plot_ax.add_collection(p2)
+        mappable.set_array([])
+    else:
+        centers1 = mesh1.center+(mesh1.centers-mesh1.center)*scale_radius
+        p1 = plot_ax.scatter(centers1[:, 0], centers1[:, 1], centers1[:, 2],
+                             c=to_be_mapped1, cmap=cmap, norm=norm)
+        centers2 = mesh2.center+(mesh2.centers-mesh2.center)*scale_radius
+        p2 = plot_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
+                             c=to_be_mapped2, cmap=cmap, norm=norm)
+        
+    if update_colorbar:
+        cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
+        cbar.set_label(cbar_label, fontsize=12)
+
+    return fig, plot_ax
+
+
 def plot_3D_sequence(meshes: List[MeshModel],
                      property: Union[str, int] = DEFAULT_PROPERTY,
                      timestamps: Optional[ArrayLike] = None,
