@@ -40,7 +40,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     
     @property
     def mesh_elements(self) -> ArrayLike:
-        return self.center + self.d_vertices
+        return self.d_vertices
     
     @property
     def centers(self) -> ArrayLike:
@@ -84,6 +84,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component)*DAY_TO_S
         rotation_axis = np.array([0., np.sin(inclination), np.cos(inclination)])
+        los_vector = np.array([0., 0., -1.])
+        
         mus=phoebe_config.get_mus(time, component)
         
         lin_velocity = 2*np.pi*radius/period/1e5 # km/s
@@ -111,9 +113,9 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             mass=phoebe_config.get_quantity('mass', component=component),
             radius=radius,
             center=center,
-            d_vertices=phoebe_config.get_mesh_vertices(time, component),
+            d_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
             d_cast_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
-            d_centers=phoebe_config.get_mesh_centers(time, component),
+            d_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_mus=mus,
             d_cast_areas=phoebe_config.get_projected_areas(time, component),
@@ -121,6 +123,6 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             center_velocities=phoebe_config.get_center_velocities(time, component),
             rotation_axis=rotation_axis,
             parameters=np.array(params).reshape((mus.shape[0], -1)),
-            los_vector=np.array([0., 0., -1.]),
+            los_vector=los_vector,
             orbital_velocity=orbital_velocity
         )
