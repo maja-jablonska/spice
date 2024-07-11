@@ -1,5 +1,6 @@
 import phoebe
 import numpy as np
+from numpy.typing import ArrayLike
 from typing import List, Optional
 
 from enum import auto, Enum
@@ -17,8 +18,6 @@ def cos_angle_between(v1, v2):
     v1_u = unit_vector(v1)
     v2_u = unit_vector(v2)
     return np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)
-
-LOS = np.array([0, 0, 1])
 
 class Component(Enum):
     PRIMARY = auto()
@@ -118,10 +117,9 @@ class PhoebeConfig:
         return self.get_parameter(time, 'uvw_normals', component)
     
     def get_projected_areas(self, time: float, component: Optional[Component] = None) -> np.array:
-        mesh_normals = self.get_mesh_normals(time, component)
         areas = self.get_parameter(time, 'areas', component)
         visibilities = self.get_parameter(time, 'visibilities', component)
-        return areas*np.array([cos_angle_between(mn, LOS) for mn in mesh_normals])*R_SURFACE_AREA*visibilities
+        return areas*self.get_mus(time, component)*R_SURFACE_AREA*visibilities
     
     def get_radial_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'vws', component)
