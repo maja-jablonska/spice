@@ -46,7 +46,9 @@ def plot_3D(mesh: MeshModel,
             cmap: str = 'turbo',
             property_label: Optional[str] = None,
             mode: str = 'MESH',
-            update_colorbar: bool = True):
+            update_colorbar: bool = True,
+            draw_los_vector: bool = True,
+            draw_rotation_axis: bool = True):
     
     if mode.upper() not in PLOT_MODES:
         raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
@@ -72,14 +74,18 @@ def plot_3D(mesh: MeshModel,
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
 
-    normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
-    normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
-
-    plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+    if draw_los_vector:
+        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+        plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
                    color='red', linewidth=3., label='LOS vector')
-    plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
-                   color='black', linewidth=3., label='Rotation axis')
-    plot_ax.legend()
+    
+    if draw_rotation_axis:
+        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+        plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                    color='black', linewidth=3., label='Rotation axis')
+        
+    if draw_los_vector or draw_rotation_axis:
+        plot_ax.legend()
 
     norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
@@ -109,7 +115,9 @@ def plot_3D_binary(mesh1: MeshModel,
                    property_label: Optional[str] = None,
                    mode: str = 'MESH',
                    update_colorbar: bool = True,
-                   scale_radius: float = 1.0):
+                   scale_radius: float = 1.0,
+                   draw_los_vector: bool = True,
+                   draw_rotation_axes: bool = True):
     
     if mode.upper() not in PLOT_MODES:
         raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
@@ -129,7 +137,8 @@ def plot_3D_binary(mesh1: MeshModel,
             fig, plot_ax = axes
         except ValueError:
             raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
-    axes_lim = np.max(np.abs(mesh1.center-mesh2.center))
+    
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh1.radius)))
     plot_ax.set_xlim3d(-axes_lim, axes_lim)
     plot_ax.set_ylim3d(-axes_lim, axes_lim)
     plot_ax.set_zlim3d(-axes_lim, axes_lim)
@@ -137,17 +146,21 @@ def plot_3D_binary(mesh1: MeshModel,
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
 
-    normalized_los_vector = mesh1.los_vector/np.linalg.norm(mesh1.los_vector)
-    normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
-    normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
-    
-    plot_ax.quiver(*(-axes_lim*normalized_los_vector), *(mesh1.radius*normalized_los_vector),
-                   color='red', linewidth=3., label='LOS vector')
-    plot_ax.quiver(*(mesh1.center), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
-                   color='black', linewidth=3., label='Rotation axis')
-    plot_ax.quiver(*(mesh2.center), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
-                   color='black', linewidth=3., label='Rotation axis')
-    plot_ax.legend()
+    if draw_los_vector:
+        normalized_los_vector = mesh1.los_vector/np.linalg.norm(mesh1.los_vector)
+        plot_ax.quiver(*(-1.5*axes_lim*normalized_los_vector), *((axes_lim*normalized_los_vector)/2),
+                color='red', linewidth=3., label='LOS vector')
+        
+    if draw_rotation_axes:
+        normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
+        normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
+        
+        plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
+                    color='black', linewidth=3., label='Rotation axis of mesh1')
+        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis1*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+                    color='blue', linewidth=3., label='Rotation axis of mesh2')
+    if draw_los_vector or draw_rotation_axes:
+        plot_ax.legend()
 
     norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
