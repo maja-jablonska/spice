@@ -138,7 +138,7 @@ def plot_3D_binary(mesh1: MeshModel,
         except ValueError:
             raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
     
-    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh1.radius)))
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius)))
     plot_ax.set_xlim3d(-axes_lim, axes_lim)
     plot_ax.set_ylim3d(-axes_lim, axes_lim)
     plot_ax.set_zlim3d(-axes_lim, axes_lim)
@@ -157,7 +157,7 @@ def plot_3D_binary(mesh1: MeshModel,
         
         plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
                     color='black', linewidth=3., label='Rotation axis of mesh1')
-        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis1*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
                     color='blue', linewidth=3., label='Rotation axis of mesh2')
     if draw_los_vector or draw_rotation_axes:
         plot_ax.legend()
@@ -419,7 +419,7 @@ def animate_binary(meshes1: MeshModel,
                 
                 plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
                             color='black', linewidth=3., label='Rotation axis of mesh1')
-                plot_ax.quiver(*(mesh2.center+normalized_rotation_axis1*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+                plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
                             color='blue', linewidth=3., label='Rotation axis of mesh2')
             if i==0 and (draw_los_vector or draw_rotation_axes):
                 plot_ax.legend()

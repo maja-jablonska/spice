@@ -84,6 +84,27 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component)*DAY_TO_S
         rotation_axis = np.array([0., np.sin(inclination), np.cos(inclination)])
+        
+        try:
+            yaw = np.deg2rad(phoebe_config.b.get_parameter('yaw', component=str(component)).value)
+            rotation_axis = np.matmul(rotation_axis,
+                                      np.array([[np.cos(yaw), -np.sin(yaw), 0.],
+                                                [np.sin(yaw), np.cos(yaw), 0.],
+                                                [0., 0., 1.]])
+                                      )
+        except ValueError:
+            pass
+
+        try:
+            pitch = np.deg2rad(phoebe_config.b.get_parameter('pitch', component=str(component)).value)
+            rotation_axis = np.matmul(rotation_axis,
+                                      np.array([[np.cos(pitch), 0., np.sin(pitch)],
+                                                [0., 1., 0.],
+                                                [-np.sin(pitch), 0., np.cos(pitch)]])
+                                      )
+        except ValueError:
+            pass
+        
         los_vector = np.array([0., 0., -1.])
         
         mus=phoebe_config.get_mus(time, component)
