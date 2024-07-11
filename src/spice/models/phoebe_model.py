@@ -96,7 +96,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             pass
 
         try:
-            pitch = np.deg2rad(phoebe_config.b.get_parameter('pitch', component=str(component)).value)
+            pitch = np.deg2rad(phoebe_config.b.get_parameter('pitch', component=str(component)).value)-inclination
             rotation_axis = np.matmul(rotation_axis,
                                       np.array([[np.cos(pitch), 0., np.sin(pitch)],
                                                 [0., 1., 0.],
