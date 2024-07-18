@@ -4,7 +4,7 @@ from jax.typing import ArrayLike
 from .mesh_generation import face_center
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
 from spice.models.phoebe_model import PhoebeModel
-from .utils import (cast_to_los, cast_normalized_to_los,
+from .utils import (cast_to_los,
                     cast_to_normal_plane, mesh_polar_vertices,
                     rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
