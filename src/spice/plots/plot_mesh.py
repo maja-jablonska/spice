@@ -7,12 +7,14 @@ from spice.models import MeshModel
 from jax.typing import ArrayLike
 
 PLOT_MODES = ['MESH', 'POINTS']
-COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas']
+COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas', 'log_gs']
 DEFAULT_PROPERTY = 'mus'
 
 DEFAULT_PLOT_PROPERTY_LABELS = {
     'mus': r'$\mu$',
-    'los_velocities': 'LOS velocity [km/s]'
+    'los_velocities': 'LOS velocity [km/s]',
+    'cast_areas': 'cast area [km$^2$]',
+    'log_gs': 'log g'
 }
 
 
