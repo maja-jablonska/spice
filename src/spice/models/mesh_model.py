@@ -12,7 +12,7 @@ from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast
 from spice.geometry.utils import get_cast_areas
 
 
-LOG_G_NAME: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
+LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                          'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 
 DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.]) # from the Y direction
@@ -175,13 +175,13 @@ class IcosphereModel(MeshModel):
         if len(parameters.shape) == 1:
             parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats = areas.shape[0], axis = 0)
         if override_log_g:
-            if any([pn in parameter_names for pn in LOG_G_NAME]):
-                log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAME][0]
+            if any([pn in parameter_names for pn in LOG_G_NAMES]):
+                log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES][0]
                 parameters[log_g_index] = calculate_log_gs(mass, centers*radius)
             elif log_g_index and isinstance(log_g_index, int):
                 parameters[log_g_index] = calculate_log_gs(mass, centers*radius)
             else:
-                warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(LOG_G_NAME) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
+                warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(LOG_G_NAMES) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
         
         harmonics_params = create_harmonics_params(max_pulsation_mode)
 
