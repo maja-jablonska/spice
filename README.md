@@ -18,8 +18,8 @@ Read the [docs](https://spice.readthedocs.io) here.
 
 - [x] Rotation
 - [x] Spots
-- [ ] Pulsations
-- [ ] PHOEBE integration
+- [x] Pulsations
+- [x] PHOEBE integration
 
 ## Dev log
 
