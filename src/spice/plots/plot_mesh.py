@@ -46,7 +46,9 @@ def plot_3D(mesh: MeshModel,
             cmap: str = 'turbo',
             property_label: Optional[str] = None,
             mode: str = 'MESH',
-            update_colorbar: bool = True):
+            update_colorbar: bool = True,
+            draw_los_vector: bool = True,
+            draw_rotation_axis: bool = True):
     
     if mode.upper() not in PLOT_MODES:
         raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
@@ -58,7 +60,7 @@ def plot_3D(mesh: MeshModel,
         fig = plt.figure(figsize=(10, 12))
         spec = fig.add_gridspec(10, 12)
         plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
-        plot_ax.view_init(elev=30, azim=-60)
+        plot_ax.view_init(elev=30, azim=60)
     else:
         try:
             fig, plot_ax = axes
@@ -72,20 +74,24 @@ def plot_3D(mesh: MeshModel,
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
 
-    normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
-    normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
-
-    plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+    if draw_los_vector:
+        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+        plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
                    color='red', linewidth=3., label='LOS vector')
-    plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
-                   color='black', linewidth=3., label='Rotation axis')
-    plot_ax.legend()
+    
+    if draw_rotation_axis:
+        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+        plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                    color='black', linewidth=3., label='Rotation axis')
+        
+    if draw_los_vector or draw_rotation_axis:
+        plot_ax.legend()
 
     norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
     if mode == 'MESH':
-        vs2 = mesh.vertices[mesh.faces.astype(int)]
+        vs2 = mesh.mesh_elements
         face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
         p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
         plot_ax.add_collection(p)
@@ -93,6 +99,91 @@ def plot_3D(mesh: MeshModel,
     else:
         p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
                             c=to_be_mapped, cmap=cmap, norm=norm)
+        
+    if update_colorbar:
+        cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
+        cbar.set_label(cbar_label, fontsize=12)
+
+    return fig, plot_ax
+
+
+def plot_3D_binary(mesh1: MeshModel,
+                   mesh2: MeshModel,
+                   property: Union[str, int] = DEFAULT_PROPERTY,
+                   axes: Optional[Tuple[plt.figure, plt.axes]] = None,
+                   cmap: str = 'turbo',
+                   property_label: Optional[str] = None,
+                   mode: str = 'MESH',
+                   update_colorbar: bool = True,
+                   scale_radius: float = 1.0,
+                   draw_los_vector: bool = True,
+                   draw_rotation_axes: bool = True):
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    to_be_mapped1, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+    to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+    to_be_mapped = np.concatenate([to_be_mapped1, to_be_mapped2])
+
+    if axes is None:
+        fig = plt.figure(figsize=(10, 12))
+        spec = fig.add_gridspec(10, 12)
+        plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
+        plot_ax.view_init(elev=30, azim=60)
+    else:
+        try:
+            fig, plot_ax = axes
+        except ValueError:
+            raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
+    
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius)))
+    plot_ax.set_xlim3d(-axes_lim, axes_lim)
+    plot_ax.set_ylim3d(-axes_lim, axes_lim)
+    plot_ax.set_zlim3d(-axes_lim, axes_lim)
+    plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
+    plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
+    plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+
+    if draw_los_vector:
+        normalized_los_vector = mesh1.los_vector/np.linalg.norm(mesh1.los_vector)
+        plot_ax.quiver(*(-1.5*axes_lim*normalized_los_vector), *((axes_lim*normalized_los_vector)/2),
+                color='red', linewidth=3., label='LOS vector')
+        
+    if draw_rotation_axes:
+        normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
+        normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
+        
+        plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
+                    color='black', linewidth=3., label='Rotation axis of mesh1')
+        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+                    color='blue', linewidth=3., label='Rotation axis of mesh2')
+    if draw_los_vector or draw_rotation_axes:
+        plot_ax.legend()
+
+    norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
+    if mode == 'MESH':
+        vs2_1 = mesh1.center+(mesh1.mesh_elements-mesh1.center)*scale_radius
+        face_colors1 = mpl.colormaps[cmap](norm(to_be_mapped1))
+        p1 = art3d.Poly3DCollection(vs2_1, facecolors=face_colors1, edgecolor="black", linewidths=0.01)
+        
+        vs2_2 = mesh2.center+(mesh2.mesh_elements-mesh2.center)*scale_radius
+        face_colors2 = mpl.colormaps[cmap](norm(to_be_mapped2))
+        p2 = art3d.Poly3DCollection(vs2_2, facecolors=face_colors2, edgecolor="black", linewidths=0.01)
+        
+        plot_ax.add_collection(p1)
+        plot_ax.add_collection(p2)
+        mappable.set_array([])
+    else:
+        centers1 = mesh1.center+(mesh1.centers-mesh1.center)*scale_radius
+        p1 = plot_ax.scatter(centers1[:, 0], centers1[:, 1], centers1[:, 2],
+                             c=to_be_mapped1, cmap=cmap, norm=norm)
+        centers2 = mesh2.center+(mesh2.centers-mesh2.center)*scale_radius
+        p2 = plot_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
+                             c=to_be_mapped2, cmap=cmap, norm=norm)
         
     if update_colorbar:
         cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
@@ -265,6 +356,105 @@ def animate_mesh_and_spectra(meshes: List[MeshModel],
     return animation
 
 
+def animate_binary(meshes1: MeshModel,
+                   meshes2: MeshModel,
+                   filename: str,
+                   property: Union[str, int] = DEFAULT_PROPERTY,
+                   cmap: str = 'turbo',
+                   property_label: Optional[str] = None,
+                   mode: str = 'MESH',
+                   scale_radius: float = 1.0,
+                   draw_los_vector: bool = True,
+                   draw_rotation_axes: bool = True):
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of ["MESH", "POINTS"]. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    try:
+        from celluloid import Camera
+    except ImportError:
+        raise ImportError("celluloid is not installed. Please install celluloid to use pre-defined animation functions.")
+    
+    mesh1 = meshes1[0]
+    _, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+    to_be_mapped1s = np.concatenate([_evaluate_to_be_mapped_property(mesh1, property, property_label)[0] for mesh1 in meshes1])
+    to_be_mapped2s = np.concatenate([_evaluate_to_be_mapped_property(mesh2, property, property_label)[0] for mesh2 in meshes2])
+    
+    to_be_mapped = np.concatenate([to_be_mapped1s, to_be_mapped2s])
+
+    fig = plt.figure(figsize=(10, 12))
+    spec = fig.add_gridspec(10, 12)
+    plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
+    cax = fig.add_subplot(spec[2:8, 11])
+    plot_ax.view_init(elev=30, azim=60)
+    camera = Camera(fig)
+    
+    center_differences = [np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh1.radius)) for mesh1, mesh2 in zip(meshes1, meshes2)]
+    
+    axes_lim = 1.05*np.max(center_differences)
+    plot_ax.set_xlim3d(-axes_lim, axes_lim)
+    plot_ax.set_ylim3d(-axes_lim, axes_lim)
+    plot_ax.set_zlim3d(-axes_lim, axes_lim)
+    plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
+    plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
+    plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+
+    norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
+    for i, (mesh1, mesh2) in enumerate(zip(meshes1, meshes2)):
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        if mode == 'MESH':
+            
+            if draw_los_vector:
+                normalized_los_vector = mesh1.los_vector/np.linalg.norm(mesh1.los_vector)
+                plot_ax.quiver(*(-1.5*axes_lim*normalized_los_vector), *((axes_lim*normalized_los_vector)/2),
+                        color='red', linewidth=3., label='LOS vector')
+                
+            if draw_rotation_axes:
+                normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
+                normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
+                
+                plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
+                            color='black', linewidth=3., label='Rotation axis of mesh1')
+                plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+                            color='blue', linewidth=3., label='Rotation axis of mesh2')
+            if i==0 and (draw_los_vector or draw_rotation_axes):
+                plot_ax.legend()
+            
+            vs2_1 = mesh1.center+(mesh1.mesh_elements-mesh1.center)*scale_radius
+            face_colors1 = mpl.colormaps[cmap](norm(to_be_mapped1))
+            p1 = art3d.Poly3DCollection(vs2_1, facecolors=face_colors1, edgecolor="black", linewidths=0.01)
+            
+            vs2_2 = mesh2.center+(mesh2.mesh_elements-mesh2.center)*scale_radius
+            face_colors2 = mpl.colormaps[cmap](norm(to_be_mapped2))
+            p2 = art3d.Poly3DCollection(vs2_2, facecolors=face_colors2, edgecolor="black", linewidths=0.01)
+            
+            plot_ax.add_collection(p1)
+            plot_ax.add_collection(p2)
+            mappable.set_array([])
+        else:
+            centers1 = mesh1.center+(mesh1.centers-mesh1.center)*scale_radius
+            p1 = plot_ax.scatter(centers1[:, 0], centers1[:, 1], centers1[:, 2],
+                                c=to_be_mapped1, cmap=cmap, norm=norm)
+            centers2 = mesh2.center+(mesh2.centers-mesh2.center)*scale_radius
+            p2 = plot_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
+                                c=to_be_mapped2, cmap=cmap, norm=norm)
+            
+        cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, cax=cax)
+        cbar.set_label(cbar_label, fontsize=12)
+            
+        camera.snap()
+        
+    animation = camera.animate()
+    animation.save(filename)
+
+    return animation
+
+
+
 def plot_2D(mesh: MeshModel,
             property: Union[str, int] = DEFAULT_PROPERTY,
             axes: Optional[Tuple[plt.figure, plt.axes, plt.axes]] = None,
@@ -320,4 +510,4 @@ def plot_3D_mesh_and_spectrum(mesh: MeshModel,
     spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=13)
 
     spectrum_ax.plot(wavelengths, spectrum, color='black')
-    plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs)
+    return *plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs), spectrum_ax
