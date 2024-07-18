@@ -1,13 +1,17 @@
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
+from .mesh_generation import face_center
+from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
 from spice.models.phoebe_model import PhoebeModel
-from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS
 from .utils import (cast_to_los, cast_normalized_to_los,
-                    cast_to_normal_plane,
+                    cast_to_normal_plane, mesh_polar_vertices,
                     rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
-                    calculate_axis_radii)
+                    calculate_axis_radii,
+                    evaluate_many_fouriers_for_value,
+                    evaluate_many_fouriers_prim_for_value,
+                    spherical_harmonic)
 from spice.geometry.utils import get_cast_areas
 
 
@@ -130,3 +134,62 @@ def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
     """
     m = m._replace(orbital_velocity=orbital_velocity)
     return m._replace(los_velocities=cast_to_los(m.velocities, m.los_vector))
+
+
+def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
+                  fourier_series_static_parameters: ArrayLike, fourier_series_parameters: ArrayLike) -> MeshModel:
+    ind = spherical_harmonics_parameters[0] + m.max_pulsation_mode*spherical_harmonics_parameters[1]
+    return m._replace(
+        fourier_series_static_parameters=m.fourier_series_static_parameters.at[ind].set(fourier_series_static_parameters),
+        fourier_series_parameters=m.fourier_series_parameters.at[ind].set(fourier_series_parameters)
+    )
+    
+    
+def reset_pulsations(m: MeshModel) -> MeshModel:
+    return m._replace(
+        vertices_pulsation_offsets=jnp.zeros_like(m.vertices_pulsation_offsets),
+        center_pulsation_offsets=jnp.zeros_like(m.center_pulsation_offsets),
+        area_pulsation_offsets=jnp.zeros_like(m.area_pulsation_offsets),
+        fourier_series_static_parameters=jnp.nan*jnp.ones_like(m.fourier_series_static_parameters),
+        fourier_series_parameters=jnp.nan*jnp.ones_like(m.fourier_series_parameters)
+    )
+    
+@jax.jit
+def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, magnitude_prim: float, radius: float):
+    polar_vertices = mesh_polar_vertices(m.d_vertices)
+    polar_centers = mesh_polar_vertices(m.d_centers)
+    vertex_harmonic_mags = spherical_harmonic(harmonic_parameters[0], harmonic_parameters[1], polar_vertices)[:, jnp.newaxis]
+    center_harmonic_mags = spherical_harmonic(harmonic_parameters[0], harmonic_parameters[1], polar_centers)[:, jnp.newaxis]
+    direction_vectors = m.d_vertices/jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
+    center_direction_vectors = m.d_centers/jnp.linalg.norm(m.d_centers, axis=1).reshape((-1, 1))
+    new_vertices = (radius*magnitude*vertex_harmonic_mags*direction_vectors)
+    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(new_vertices+m.d_vertices, m.faces.astype(jnp.int32))
+    return jnp.nan_to_num(new_vertices), jnp.nan_to_num(new_areas-m.base_areas), jnp.nan_to_num(new_centers-m.d_centers), (radius*magnitude_prim*center_harmonic_mags*center_direction_vectors)
+
+def evaluate_pulsations(m: MeshModel, t: ArrayLike):
+    fourier_static_params = jnp.nan_to_num(m.fourier_series_static_parameters)
+    fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
+    pulsation_magnitudes = jnp.nan_to_num(
+        evaluate_many_fouriers_for_value(
+            fourier_static_params[:, 0],
+            fourier_static_params[:, 1],
+            fourier_params[:, :, 0],
+            fourier_params[:, :, 1],
+            t)
+        )
+    pulsation_velocity_magnitudes = jnp.nan_to_num(
+        evaluate_many_fouriers_prim_for_value(
+            fourier_static_params[:, 0],
+            fourier_static_params[:, 1],
+            fourier_params[:, :, 0],
+            fourier_params[:, :, 1],
+            t)
+        )
+    harmonic_params = create_harmonics_params(m.max_pulsation_mode)
+    vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(calculate_pulsations, in_axes=(None, 0, 0, 0, None))(m, harmonic_params, pulsation_magnitudes, pulsation_velocity_magnitudes, m.radius)
+    return m._replace(
+        vertices_pulsation_offsets=jnp.sum(vert_offsets, axis=0),
+        center_pulsation_offsets=jnp.sum(center_offsets, axis=0),
+        area_pulsation_offsets=jnp.sum(area_offsets, axis=0),
+        pulsation_velocities=jnp.sum(pulsation_velocities, axis=0)*1e-5 # cm/s to km/s
+    )
