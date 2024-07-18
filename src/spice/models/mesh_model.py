@@ -3,8 +3,10 @@ import jax.numpy as jnp
 
 from abc import abstractmethod
 from typing import NamedTuple, Union
+from collections import namedtuple
 
 from .mesh_generation import icosphere
+from .model import Model
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
@@ -21,7 +23,17 @@ def create_harmonics_params(n: int):
     x, y = jnp.meshgrid(jnp.arange(0, n), jnp.arange(0, n))
     return jnp.vstack([x.ravel(), y.ravel()]).T
 
-class MeshModel(NamedTuple):
+MeshModelNamedTuple = namedtuple("MeshModel",
+                                 ["center", "radius", "mass", "abs_luminosity",
+                                  "log_g", "d_vertices", "faces", "d_centers",
+                                  "base_areas", "parameters", "rotation_velocities",
+                                  "vertices_pulsation_offsets", "center_pulsation_offsets", "area_pulsation_offsets", "pulsation_velocities",
+                                  "rotation_axis", "rotation_matrix", "rotation_matrix_prim",
+                                  "axis_radii", "rotation_velocity", "orbital_velocity", "los_vector",
+                                  "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
+                                  "fourier_series_static_parameters", "fourier_series_parameters"])
+
+class MeshModel(Model, MeshModelNamedTuple):
     # Stellar properties
     center: ArrayLike
     radius: float
@@ -77,7 +89,11 @@ class MeshModel(NamedTuple):
         if len(self.d_vertices.shape)==2:
             return self.d_vertices + self.center + self.vertices_pulsation_offsets
         else:
-            return self.d_vertices + self.center.reshape((self.d_vertices.shape[0], *([1]*(len(self.d_vertices.shape)-2)), self.d_vertices.shape[-1])) + self.vertices_pulsation_offsets
+            return self.d_vertices + self.center.reshape((self.d_vertices.shape[0], *([1]*(len(self.d_vertices.shape)-2)), self.d_vertices.shape[-1]))
+        
+    @property
+    def mesh_elements(self) -> ArrayLike:
+        return self.vertices[self.faces.astype(int)]
     
     @property
     def centers(self) -> ArrayLike:
@@ -153,7 +169,7 @@ class IcosphereModel(MeshModel):
                 vertices_pulsation_offsets=jnp.zeros_like(vertices),
                 center_pulsation_offsets=jnp.zeros_like(centers),
                 area_pulsation_offsets=jnp.zeros_like(areas),
-                pulsation_velocities=jnp.zeros_like(areas),
+                pulsation_velocities=jnp.zeros_like(centers),
                 rotation_axis=DEFAULT_ROTATION_AXIS,
                 rotation_matrix=NO_ROTATION_MATRIX,
                 rotation_matrix_prim=NO_ROTATION_MATRIX,
@@ -161,7 +177,6 @@ class IcosphereModel(MeshModel):
                 rotation_velocity=0.,
                 orbital_velocity=0.,
                 los_vector=DEFAULT_LOS_VECTOR,
-            
                 max_pulsation_mode=max_pulsation_mode,
                 max_fourier_order=max_fourier_order,
                 spherical_harmonics_parameters=harmonics_params,
