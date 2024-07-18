@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .mesh_generation import face_center
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
+from spice.models.phoebe_model import PhoebeModel
 from .utils import (cast_to_los, cast_normalized_to_los,
                     cast_to_normal_plane, mesh_polar_vertices,
                     rotation_matrix, rotation_matrix_prim,
@@ -15,7 +16,7 @@ from spice.geometry.utils import get_cast_areas
 
 
 @jax.jit
-def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
+def _transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
     """Transform the mesh by a vector
 
     Args:
@@ -32,10 +33,25 @@ def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
                          cast_vertices=cast_vertices,
                          cast_centers=cast_to_normal_plane(cast_vector+mesh.d_centers, mesh.los_vector),
                          cast_areas=get_cast_areas(cast_vertices[mesh.faces.astype(int)]))
+    
+
+def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
+    """Transform the mesh by a vector
+
+    Args:
+        mesh (MeshModel): Mesh to transform
+        vector (ArrayLike): transform vector
+
+    Returns:
+        MeshModel: Mesh with transformed center and vertices coordinates
+    """   
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError("PHOEBE models are read-only in SPICE - the position is already evaluated in the PHOEBE model.")
+    return _transform(mesh, vector)
 
 
 @jax.jit
-def add_rotation(mesh: MeshModel,
+def _add_rotation(mesh: MeshModel,
                  rotation_velocity: ArrayLike,
                  rotation_axis: ArrayLike = DEFAULT_ROTATION_AXIS) -> MeshModel:
     """Add a rigid rotation to the mesh model
@@ -57,8 +73,25 @@ def add_rotation(mesh: MeshModel,
                          rotation_velocity = rotation_velocity)
 
 
+def add_rotation(mesh: MeshModel,
+                 rotation_velocity: ArrayLike,
+                 rotation_axis: ArrayLike = DEFAULT_ROTATION_AXIS) -> MeshModel:
+    """Add a rigid rotation to the mesh model
+
+    Args:
+        mesh (MeshModel): mesh to add the rotation to
+        rotation_velocity (ArrayLike): rotation velocity in km/s
+        rotation_axis (ArrayLike, optional): rootation axis vector. Defaults to [0., 0., 1.].
+
+    Returns:
+        MeshModel: mesh with rotation added
+    """
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError("PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
+    return _add_rotation(mesh, rotation_velocity, rotation_axis)
+
 @jax.jit
-def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
+def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     """Evaluate the effects of a rotation at a given timestep t
 
     Args:
@@ -81,6 +114,12 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
                          d_centers = rotated_centers,
                          rotation_velocities = rotated_centers_vel*1e-5, # back to km/s
                          axis_radii = new_axis_radii)
+    
+
+def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError("PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
+    return _evaluate_rotation(mesh, t)
 
 
 def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:

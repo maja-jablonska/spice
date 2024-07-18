@@ -115,7 +115,7 @@ def simulate_spectrum(intensity_fn: Callable[[ArrayLike, float, ArrayLike], Arra
     
     return __spectrum_flash_sum(intensity_fn,
                                 log_wavelengths,
-                                _adjust_dim(m.areas, chunk_size),
+                                _adjust_dim(jnp.where(m.mus>0, m.cast_areas, 0.), chunk_size),
                                 _adjust_dim(jnp.where(m.mus>0, m.mus, 0.), chunk_size),
                                 _adjust_dim(m.los_velocities, chunk_size),
                                 _adjust_dim(m.parameters, chunk_size),
