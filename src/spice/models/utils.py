@@ -145,3 +145,21 @@ def calculate_axis_radii(centers: ArrayLike, axis: ArrayLike) -> ArrayLike:
     norm_axis = len(centers.shape)-1
     return jnp.linalg.norm(jnp.cross(axis, -centers),
                            axis=norm_axis)/jnp.linalg.norm(axis)
+
+### UTILITY FUNCTIONS FOR FOURIER SERIES
+
+@jax.jit
+def cos_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[ArrayLike, ArrayLike]:
+    return jnp.array([0., P]), jnp.array([[max_amplitude, 0.]])
+
+@jax.jit
+def sin_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[ArrayLike, ArrayLike]:
+    return jnp.array([0., P]), jnp.array([[max_amplitude, -jnp.pi/2]])
+
+@jax.jit
+def sin2_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[ArrayLike, ArrayLike]:
+    return jnp.array([0.5, 0.5*P]), jnp.array([[0.5*max_amplitude, 0.]])
+
+@jax.jit
+def sinh_as_fourier_coords(P: float, max_amplitude: float, n: int) -> Tuple[ArrayLike, ArrayLike]:
+    return jnp.array([0., P]), jnp.array([[2*jnp.sinh(jnp.pi)/jnp.pi*jnp.power(-1, n0+1)*n0/(jnp.power(n0, 2)+1)*max_amplitude, 0.] for n0 in range(1, n+1)])
