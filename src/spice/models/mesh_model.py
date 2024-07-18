@@ -2,14 +2,18 @@ from jax.typing import ArrayLike
 import jax.numpy as jnp
 
 from abc import abstractmethod
-from typing import NamedTuple, Union
+from typing import List, NamedTuple, Optional, Union
 from collections import namedtuple
+import warnings
 
 from .mesh_generation import icosphere
 from .model import Model
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
+
+LOG_G_NAME: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
+                         'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 
 DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.]) # from the Y direction
 DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.]) # from the Y direction
@@ -23,10 +27,14 @@ def create_harmonics_params(n: int):
     x, y = jnp.meshgrid(jnp.arange(0, n), jnp.arange(0, n))
     return jnp.vstack([x.ravel(), y.ravel()]).T
 
+
+def calculate_log_gs(mass: float, d_centers: ArrayLike):
+    return jnp.log(6.6743e-11*mass/jnp.power(jnp.linalg.norm(d_centers, axis=1)*1e-2, 2)/9.80665)
+
 MeshModelNamedTuple = namedtuple("MeshModel",
                                  ["center", "radius", "mass", "abs_luminosity",
-                                  "log_g", "d_vertices", "faces", "d_centers",
-                                  "base_areas", "parameters", "rotation_velocities",
+                                  "d_vertices", "faces", "d_centers",
+                                  "base_areas", "parameters", "log_g_index", "rotation_velocities",
                                   "vertices_pulsation_offsets", "center_pulsation_offsets", "area_pulsation_offsets", "pulsation_velocities",
                                   "rotation_axis", "rotation_matrix", "rotation_matrix_prim",
                                   "axis_radii", "rotation_velocity", "orbital_velocity", "los_vector",
@@ -39,7 +47,6 @@ class MeshModel(Model, MeshModelNamedTuple):
     radius: float
     mass: float
     abs_luminosity: float
-    log_g: ArrayLike
 
     # Mesh properties
     # vertices and centers in the reference frame of centered on the center vector
@@ -49,6 +56,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     base_areas: ArrayLike
 
     parameters: ArrayLike
+    log_g_index: Optional[int]
 
     # Motion properties per-triangle
     rotation_velocities: ArrayLike
@@ -83,6 +91,10 @@ class MeshModel(Model, MeshModelNamedTuple):
     @property
     def areas(self) -> ArrayLike:
         return self.base_areas + self.area_pulsation_offsets
+    
+    @property
+    def log_gs(self) -> ArrayLike:
+        return calculate_log_gs(self.mass, self.centers-self.center)
 
     @property
     def vertices(self) -> ArrayLike:
@@ -139,8 +151,11 @@ class IcosphereModel(MeshModel):
                   mass: float,
                   abs_luminosity: float,
                   parameters: Union[float, ArrayLike],
+                  parameter_names: List[str],
                   max_pulsation_mode: int = DEFAULT_MAX_PULSATION_MODE_PARAMETER,
-                  max_fourier_order: int = DEFAULT_FOURIER_ORDER) -> "IcosphereModel": # What to do about parameters?
+                  max_fourier_order: int = DEFAULT_FOURIER_ORDER,
+                  override_log_g: bool = True,
+                  log_g_index: Optional[int] = None) -> "IcosphereModel":
         """Construct an Icosphere.
 
         Args:
@@ -155,16 +170,25 @@ class IcosphereModel(MeshModel):
         """
         vertices, faces, areas, centers = icosphere(n_vertices)
         sphere_area = 4*jnp.pi*jnp.power(radius, 2)
-        log_g = jnp.log(6.6743e-11*mass/jnp.power(radius, 2)/9.80665)
 
         parameters = jnp.atleast_1d(parameters)
         if len(parameters.shape) == 1:
             parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats = areas.shape[0], axis = 0)
+        if override_log_g:
+            if any([pn in parameter_names for pn in LOG_G_NAME]):
+                log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAME][0]
+                parameters[log_g_index] = calculate_log_gs(mass, centers*radius)
+            elif log_g_index and isinstance(log_g_index, int):
+                parameters[log_g_index] = calculate_log_gs(mass, centers*radius)
+            else:
+                warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(LOG_G_NAME) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
         
         harmonics_params = create_harmonics_params(max_pulsation_mode)
 
-        return MeshModel.__new__(cls, 0., radius, mass, abs_luminosity, log_g*jnp.ones_like(areas),
-                d_vertices=vertices*radius, faces=faces, d_centers=centers*radius, base_areas=areas*sphere_area/jnp.sum(areas), parameters=parameters,
+        return MeshModel.__new__(cls, 0., radius, mass, abs_luminosity,
+                d_vertices=vertices*radius, faces=faces, d_centers=centers*radius, base_areas=areas*sphere_area/jnp.sum(areas),
+                parameters=parameters,
+                log_g_index = log_g_index,
                 rotation_velocities=jnp.zeros_like(centers),
                 vertices_pulsation_offsets=jnp.zeros_like(vertices),
                 center_pulsation_offsets=jnp.zeros_like(centers),
