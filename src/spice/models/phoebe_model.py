@@ -6,17 +6,23 @@ from typing import List, Optional
 from collections import namedtuple
 import numpy as np
 
-
 R_SOL_CM = 69570000000.0
 DAY_TO_S = 86400.0
 
-PHOEBE_PARAMETERS = ['teffs', 'loggs']
+LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
+                         'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
+TEFF_NAMES: List[str] = ['teff', 't_eff', 't eff', 'teffs', 't_effs', 't effs',
+                         'effective_temperature', 'effective_temperatures',
+                         'effective temperature', 'effective temperatures']
+ABUNDANCE_NAMES: List[str] = ['abundance', 'abundances',
+                              'abun', 'abuns',
+                              'metallicity', 'metallicities']
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
                                     ["time", "mass", "radius", "center",
                                      "d_vertices", "d_cast_vertices",
                                      "d_centers",
-                                     "d_cast_centers", "d_mus",
+                                     "d_cast_centers", "d_mus", "d_log_gs",
                                      "d_cast_areas", "center_velocities",
                                      "rotation_velocity", "rotation_axis",
                                      "parameters", "los_vector", "orbital_velocity"
@@ -30,6 +36,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     d_centers: ArrayLike
     d_cast_centers: ArrayLike
     d_mus: ArrayLike
+    d_log_gs: ArrayLike
     d_cast_areas: ArrayLike
     center_velocities: ArrayLike
     rotation_velocity: float
@@ -55,6 +62,10 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         return self.d_mus
     
     @property
+    def log_gs(self) -> ArrayLike:
+        return self.d_log_gs
+    
+    @property
     def los_velocities(self) -> ArrayLike:
         return cast_to_los(self.velocities, self.los_vector)
     
@@ -78,8 +89,9 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     def construct(cls,
                   phoebe_config: PhoebeConfig,
                   time: float,
-                  parameter_labels: List[str] = None,
-                  component: Optional[Component] = None) -> "PhoebeModel":
+                  parameter_names: List[str] = None,
+                  component: Optional[Component] = None,
+                  override_parameters: Optional[ArrayLike] = None) -> "PhoebeModel":
         radius = phoebe_config.get_quantity('requiv', component=component)*R_SOL_CM
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component)*DAY_TO_S
@@ -111,15 +123,23 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         
         lin_velocity = 2*np.pi*radius/period/1e5 # km/s
         
-        params = []
-        if parameter_labels:
-            for pl in parameter_labels:
-                if pl+'s' in PHOEBE_PARAMETERS:
-                    params.append(phoebe_config.get_parameter(time, pl+'s', component=component))
-                elif pl in PHOEBE_PARAMETERS:
-                    params.append(phoebe_config.get_parameter(time, pl, component=component))
-        if len(params)==0:
-            params = phoebe_config.get_parameter(time, 'teffs', component=component)
+        ones_like_centers = np.ones_like(phoebe_config.get_center_velocities(time, component))
+        log_gs = ones_like_centers*phoebe_config.b.get_quantity('logg', component=component, context='component')
+        
+        if override_parameters:
+            params = override_parameters
+        else:
+            params = []
+            if parameter_names:
+                for pl in parameter_names:
+                    if pl.lower() in TEFF_NAMES:
+                        params.append(phoebe_config.get_parameter(time, 'teffs', component=component))
+                    elif pl.lower() in LOG_G_NAMES:
+                        params.append(log_gs)
+                    elif pl.lower() in ABUNDANCE_NAMES:
+                        params.append(phoebe_config.get_quantity('abun', component=component))
+            if len(params)==0:
+                params = phoebe_config.get_parameter(time, 'teffs', component=component)
             
         # If binary, retrieve orbit centers
         if phoebe_config.orbit_dataset_name:
@@ -139,6 +159,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             d_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
             d_mus=mus,
+            d_log_gs=log_gs,
             d_cast_areas=phoebe_config.get_projected_areas(time, component),
             rotation_velocity=lin_velocity,
             center_velocities=phoebe_config.get_center_velocities(time, component),
