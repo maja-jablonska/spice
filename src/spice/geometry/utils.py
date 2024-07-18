@@ -92,6 +92,20 @@ def append_value_to_last_nan(arr: ArrayLike, to_add: ArrayLike) -> ArrayLike:
     return arr.at[next_ind].set(to_add)
 
 
+def append_value_to_last_nan_2d(arr: ArrayLike, to_add: ArrayLike) -> ArrayLike:
+    """Append a single value to the first nan in array
+
+    Args:
+        arr (ArrayLike): Array to add the value to
+        to_add (ArrayLike): The value to be appended
+
+    Returns:
+        ArrayLike: Array with an appended value
+    """
+    next_ind = jnp.min(jnp.argwhere(jnp.all(jnp.isnan(arr), axis=1), size=arr.shape[0], fill_value=arr.shape[0]-1))
+    return arr.at[next_ind].set(to_add)
+
+
 def repeat_last(arr: ArrayLike) -> ArrayLike:
     """Repeat the last non-nan row to fill the whole array
 
