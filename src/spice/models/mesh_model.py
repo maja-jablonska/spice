@@ -177,9 +177,9 @@ class IcosphereModel(MeshModel):
         if override_log_g:
             if any([pn in parameter_names for pn in LOG_G_NAMES]):
                 log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES][0]
-                parameters[log_g_index] = calculate_log_gs(mass, centers*radius)
+                parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers*radius))
             elif log_g_index and isinstance(log_g_index, int):
-                parameters[log_g_index] = calculate_log_gs(mass, centers*radius)
+                parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers*radius))
             else:
                 warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(LOG_G_NAMES) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
         
