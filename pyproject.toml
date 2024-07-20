@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stellar-spice"
-version = "0.6"
+version = "0.7"
 readme = "README.md"
 dependencies = [
     "celluloid~=0.2.0",
@@ -25,6 +25,9 @@ dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+spice = ["icosphere_cache/*.pickle"]
 
 [tool.pytest.ini_options]
 python_classes = ["Test", "Describe"]
