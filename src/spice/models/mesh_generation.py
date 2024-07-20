@@ -1,4 +1,7 @@
+import warnings
 from typing import Tuple
+import pkgutil
+import pickle
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 import jax
@@ -200,15 +203,22 @@ def _icosphere(subdiv: int) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]
     areas, centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(verts, faces.astype(jnp.int32))
     return verts, faces, areas, centers
 
-def icosphere(points: int) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
-    """Create an icosphere with at least that n points.
+def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
+    """Create an icosphere_cache with at least that n points.
 
     Args:
-        points (int): Minimal number of vertices in the icosphere
+        points (int): Minimal number of vertices in the icosphere_cache
 
     Returns:
         Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
     """
     subdivs = jnp.ceil(.5*jnp.log2(points/5)-1).astype(int)
+
+    if use_cache:
+        try:
+            return pickle.loads(pkgutil.get_data('spice', f"icosphere_cache/icosphere_{subdivs}.pickle"))
+        except FileNotFoundError:
+            warnings.warn('No .pickle file for requested subdivisions found.')
+
     verts, faces, areas, centers = _icosphere(subdivs)
     return verts, faces, areas, centers
