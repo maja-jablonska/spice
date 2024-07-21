@@ -10,13 +10,14 @@ R_SOL_CM = 69570000000.0
 DAY_TO_S = 86400.0
 
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
-                         'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
+                          'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 TEFF_NAMES: List[str] = ['teff', 't_eff', 't eff', 'teffs', 't_effs', 't effs',
                          'effective_temperature', 'effective_temperatures',
                          'effective temperature', 'effective temperatures']
 ABUNDANCE_NAMES: List[str] = ['abundance', 'abundances',
                               'abun', 'abuns',
                               'metallicity', 'metallicities']
+
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
                                     ["time", "mass", "radius", "center",
@@ -44,39 +45,39 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     parameters: ArrayLike
     los_vector: ArrayLike
     orbital_velocity: ArrayLike
-    
+
     @property
     def mesh_elements(self) -> ArrayLike:
         return self.d_vertices
-    
+
     @property
     def centers(self) -> ArrayLike:
         return self.center + self.d_centers
-        
+
     @property
     def velocities(self) -> ArrayLike:
         return self.orbital_velocity + self.center_velocities
-    
+
     @property
     def mus(self) -> ArrayLike:
         return self.d_mus
-    
+
     @property
     def log_gs(self) -> ArrayLike:
         return self.d_log_gs
-    
+
     @property
     def los_velocities(self) -> ArrayLike:
         return cast_to_los(self.velocities, self.los_vector)
-    
+
     @property
     def los_z(self) -> ArrayLike:
         raise NotImplementedError
-    
+
     @property
     def cast_vertices(self) -> ArrayLike:
         return self.center + self.d_cast_vertices
-    
+
     @property
     def cast_centers(self) -> ArrayLike:
         return self.center + self.d_cast_centers
@@ -84,7 +85,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     @property
     def cast_areas(self) -> ArrayLike:
         return self.d_cast_areas
-    
+
     @classmethod
     def construct(cls,
                   phoebe_config: PhoebeConfig,
@@ -92,11 +93,11 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                   parameter_names: List[str] = None,
                   component: Optional[Component] = None,
                   override_parameters: Optional[ArrayLike] = None) -> "PhoebeModel":
-        radius = phoebe_config.get_quantity('requiv', component=component)*R_SOL_CM
+        radius = phoebe_config.get_quantity('requiv', component=component) * R_SOL_CM
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
-        period = phoebe_config.get_quantity('period', component=component)*DAY_TO_S
+        period = phoebe_config.get_quantity('period', component=component) * DAY_TO_S
         rotation_axis = np.array([0., np.sin(inclination), np.cos(inclination)])
-        
+
         try:
             yaw = np.deg2rad(phoebe_config.b.get_parameter('yaw', component=str(component)).value)
             rotation_axis = np.matmul(rotation_axis,
@@ -108,7 +109,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             pass
 
         try:
-            pitch = np.deg2rad(phoebe_config.b.get_parameter('pitch', component=str(component)).value)-inclination
+            pitch = np.deg2rad(phoebe_config.b.get_parameter('pitch', component=str(component)).value) - inclination
             rotation_axis = np.matmul(rotation_axis,
                                       np.array([[np.cos(pitch), 0., np.sin(pitch)],
                                                 [0., 1., 0.],
@@ -116,16 +117,16 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                                       )
         except ValueError:
             pass
-        
+
         los_vector = np.array([0., 0., -1.])
-        
-        mus=phoebe_config.get_mus(time, component)
-        
-        lin_velocity = 2*np.pi*radius/period/1e5 # km/s
-        
+
+        mus = phoebe_config.get_mus(time, component)
+
+        lin_velocity = 2 * np.pi * radius / period / 1e5  # km/s
+
         ones_like_centers = np.ones_like(phoebe_config.get_center_velocities(time, component))
-        log_gs = ones_like_centers*phoebe_config.b.get_quantity('logg', component=component, context='component')
-        
+        log_gs = ones_like_centers * phoebe_config.b.get_quantity('logg', component=component, context='component')
+
         if override_parameters:
             params = override_parameters
         else:
@@ -138,9 +139,9 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                         params.append(log_gs)
                     elif pl.lower() in ABUNDANCE_NAMES:
                         params.append(phoebe_config.get_quantity('abun', component=component))
-            if len(params)==0:
+            if len(params) == 0:
                 params = phoebe_config.get_parameter(time, 'teffs', component=component)
-            
+
         # If binary, retrieve orbit centers
         if phoebe_config.orbit_dataset_name:
             center = phoebe_config.get_orbit_centers(time, component=component)
@@ -148,23 +149,23 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         else:
             center = np.zeros(3)
             orbital_velocity = np.zeros(3)
-        
+
         return PhoebeModel.__new__(cls,
-            time=time,
-            mass=phoebe_config.get_quantity('mass', component=component),
-            radius=radius,
-            center=center,
-            d_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
-            d_cast_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
-            d_centers=phoebe_config.get_mesh_projected_centers(time, component),
-            d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
-            d_mus=mus,
-            d_log_gs=log_gs,
-            d_cast_areas=phoebe_config.get_projected_areas(time, component),
-            rotation_velocity=lin_velocity,
-            center_velocities=phoebe_config.get_center_velocities(time, component),
-            rotation_axis=rotation_axis,
-            parameters=np.array(params).reshape((mus.shape[0], -1)),
-            los_vector=los_vector,
-            orbital_velocity=orbital_velocity
-        )
+                                   time=time,
+                                   mass=phoebe_config.get_quantity('mass', component=component),
+                                   radius=radius,
+                                   center=center,
+                                   d_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
+                                   d_cast_vertices=phoebe_config.get_mesh_projected_vertices(time, component),
+                                   d_centers=phoebe_config.get_mesh_projected_centers(time, component),
+                                   d_cast_centers=phoebe_config.get_mesh_projected_centers(time, component),
+                                   d_mus=mus,
+                                   d_log_gs=log_gs,
+                                   d_cast_areas=phoebe_config.get_projected_areas(time, component),
+                                   rotation_velocity=lin_velocity,
+                                   center_velocities=phoebe_config.get_center_velocities(time, component),
+                                   rotation_axis=rotation_axis,
+                                   parameters=np.array(params).reshape((mus.shape[0], -1)),
+                                   los_vector=los_vector,
+                                   orbital_velocity=orbital_velocity
+                                   )
