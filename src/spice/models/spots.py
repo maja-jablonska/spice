@@ -40,7 +40,7 @@ def _add_spherical_harmonic_spot(mesh: MeshModel,
                                 param_index: int) -> MeshModel:
     center_polar_coords = mesh_polar_vertices(mesh.centers)
     spot_parameters = spherical_harmonic(m, n, center_polar_coords) * param_delta
-    return mesh._replace(parameters = mesh.parameters.at[:, param_index].set(
+    return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index]+spot_parameters.reshape((-1, 1))))
 
 
@@ -63,17 +63,19 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
     else:
-        return _add_spherical_harmonic_spot(mesh, m, n, param_delta, param_index)
+        return _add_spherical_harmonic_spot(mesh, m, n,
+                                            jnp.atleast_1d(param_delta), jnp.atleast_1d(param_index).astype(int))
 
 
 @jax.jit
 def _add_spherical_harmonic_spots(mesh: MeshModel,
-                                 m: ArrayLike, n: ArrayLike,
-                                 param_deltas: ArrayLike,
-                                 param_indices: ArrayLike) -> MeshModel:
+                                  m: ArrayLike, n: ArrayLike,
+                                  param_deltas: ArrayLike,
+                                  param_indices: ArrayLike) -> MeshModel:
     def scan(carry, params):
         return add_spherical_harmonic_spot(
-            carry, m=params[0].astype(int), n=params[1].astype(int), param_delta=params[2], param_index=jnp.atleast_1d(params[3].astype(int))
+            carry, m=params[0].astype(int), n=params[1].astype(int),
+            param_delta=jnp.atleast_1d(params[2]), param_index=jnp.atleast_1d(params[3].astype(int))
             ), params
         
     updated_mesh, _ = jax.lax.scan(scan, mesh, jnp.vstack([m, n, param_deltas, param_indices]).T)
