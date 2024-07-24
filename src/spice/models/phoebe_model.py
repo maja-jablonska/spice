@@ -124,8 +124,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
         lin_velocity = 2 * np.pi * radius / period / 1e5  # km/s
 
-        ones_like_centers = np.ones_like(phoebe_config.get_center_velocities(time, component))
-        log_gs = ones_like_centers * phoebe_config.b.get_quantity('logg', component=component, context='component')
+        ones_like_centers = np.ones_like(phoebe_config.get_center_velocities(time, component))[:, 0]
+        log_gs = ones_like_centers * phoebe_config.b.get_quantity('logg', component=str(component), context='component')
 
         if override_parameters:
             params = override_parameters
@@ -138,7 +138,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                     elif pl.lower() in LOG_G_NAMES:
                         params.append(log_gs)
                     elif pl.lower() in ABUNDANCE_NAMES:
-                        params.append(phoebe_config.get_quantity('abun', component=component))
+                        params.append(ones_like_centers * phoebe_config.get_quantity('abun', component=component))
             if len(params) == 0:
                 params = phoebe_config.get_parameter(time, 'teffs', component=component)
 
