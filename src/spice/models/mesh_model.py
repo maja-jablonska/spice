@@ -33,13 +33,14 @@ def calculate_log_gs(mass: float, d_centers: ArrayLike):
 
 
 MeshModelNamedTuple = namedtuple("MeshModel",
-                                 ["center", "radius", "mass", "abs_luminosity",
+                                 ["center", "radius", "mass",
                                   "d_vertices", "faces", "d_centers",
                                   "base_areas", "parameters", "log_g_index", "rotation_velocities",
                                   "vertices_pulsation_offsets", "center_pulsation_offsets", "area_pulsation_offsets",
                                   "pulsation_velocities",
                                   "rotation_axis", "rotation_matrix", "rotation_matrix_prim",
-                                  "axis_radii", "rotation_velocity", "orbital_velocity", "los_vector",
+                                  "axis_radii", "rotation_velocity", "orbital_velocity",
+                                  "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
                                   "fourier_series_static_parameters", "fourier_series_parameters"])
 
@@ -49,7 +50,6 @@ class MeshModel(Model, MeshModelNamedTuple):
     center: ArrayLike
     radius: float
     mass: float
-    abs_luminosity: float
 
     # Mesh properties
     # vertices and centers in the reference frame of centered on the center vector
@@ -80,6 +80,9 @@ class MeshModel(Model, MeshModelNamedTuple):
     rotation_velocity: ArrayLike
 
     orbital_velocity: float
+
+    # Occlusions
+    occluded_areas: ArrayLike
 
     # Mesh LOS properties
     los_vector: ArrayLike
@@ -146,7 +149,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def cast_areas(self) -> ArrayLike:
-        return get_cast_areas(self.cast_vertices[self.faces.astype(int)])
+        return get_cast_areas(self.cast_vertices[self.faces.astype(int)]) - self.occluded_areas
 
 
 class IcosphereModel(MeshModel):
@@ -155,25 +158,34 @@ class IcosphereModel(MeshModel):
     def construct(cls, n_vertices: int,
                   radius: float,
                   mass: float,
-                  abs_luminosity: float,
                   parameters: Union[float, ArrayLike],
                   parameter_names: List[str],
                   max_pulsation_mode: int = DEFAULT_MAX_PULSATION_MODE_PARAMETER,
                   max_fourier_order: int = DEFAULT_FOURIER_ORDER,
                   override_log_g: bool = True,
                   log_g_index: Optional[int] = None) -> "IcosphereModel":
-        """Construct an Icosphere.
+        """
+        Constructs an IcosphereModel with specified stellar and mesh properties.
+
+        This method generates an icosphere mesh and initializes the model with given parameters, including
+        stellar properties (mass, radius, absolute luminosity) and mesh properties (vertices, faces, areas,
+        centers). It also handles the calculation of surface gravity (log g) values if required.
 
         Args:
-            n_vertices (int): Minimal number of vertices (used to calculate number of divisions)
-            radius (float): Radius in cm
-            mass (float): Mass in kg
-            abs_luminosity (float): Absolute luminosity in solar luminosities
-            parameters (ArrayLike): Array of global parameters
+            n_vertices (int): Number of vertices for the icosphere mesh.
+            radius (float): Radius of the icosphere.
+            mass (float): Mass of the stellar object.
+            parameters (Union[float, ArrayLike]): Parameters for the model, can be a single value or an array.
+            parameter_names (List[str]): Names of the parameters, used for identifying log g parameter.
+            max_pulsation_mode (int, optional): Maximum pulsation mode for the model. Defaults to a predefined value.
+            max_fourier_order (int, optional): Maximum order of Fourier series for pulsation calculation. Defaults to a predefined value.
+            override_log_g (bool, optional): Whether to override the log g values based on the model's mass and centers. Defaults to True.
+            log_g_index (Optional[int], optional): Index of the log g parameter in the parameters array. Required if override_log_g is True and specific log g parameter name is not in parameter_names.
 
         Returns:
-            IcosphereModel:
+            IcosphereModel: An instance of IcosphereModel initialized with the specified properties.
         """
+
         vertices, faces, areas, centers = icosphere(n_vertices)
         sphere_area = 4 * jnp.pi * jnp.power(radius, 2)
 
@@ -192,7 +204,7 @@ class IcosphereModel(MeshModel):
 
         harmonics_params = create_harmonics_params(max_pulsation_mode)
 
-        return MeshModel.__new__(cls, 0., radius, mass, abs_luminosity,
+        return MeshModel.__new__(cls, 0., radius, mass,
                                  d_vertices=vertices * radius, faces=faces, d_centers=centers * radius,
                                  base_areas=areas * sphere_area / jnp.sum(areas),
                                  parameters=parameters,
@@ -208,6 +220,7 @@ class IcosphereModel(MeshModel):
                                  axis_radii=calculate_axis_radii(centers, DEFAULT_ROTATION_AXIS),
                                  rotation_velocity=0.,
                                  orbital_velocity=0.,
+                                 occluded_areas=jnp.zeros_like(areas),
                                  los_vector=DEFAULT_LOS_VECTOR,
                                  max_pulsation_mode=max_pulsation_mode,
                                  max_fourier_order=max_fourier_order,
