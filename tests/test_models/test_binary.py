@@ -3,6 +3,7 @@ import pickle
 import jax.numpy as jnp
 import pytest
 
+from spice.models import IcosphereModel
 from spice.models.binary import Binary, PhoebeBinary, evaluate_orbit, evaluate_orbit_at_times, add_orbit
 from spice.models.mesh_transform import transform
 from spice.models.model import Model
@@ -37,7 +38,7 @@ class TestBinaryModels:
         time = 0.5
         n_cells = 10
         primary, secondary = evaluate_orbit(binary, time, n_cells)
-        assert isinstance(primary, Model) and isinstance(secondary, Model), "Orbit evaluation failed to return Model instances"
+        assert isinstance(primary, IcosphereModel) and isinstance(secondary, IcosphereModel), "Orbit evaluation failed to return Model instances"
 
     def test_evaluate_orbit_at_times(self, setup_binary):
         binary = add_orbit(setup_binary, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10)
