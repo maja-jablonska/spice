@@ -1,5 +1,4 @@
-from typing import Generic, TypeVar
-from typing import NamedTuple, NamedTupleMeta
+from typing import TypeVar
 
 
 T = TypeVar('T')
