@@ -87,7 +87,7 @@ class PhoebeConfig:
         if component is not None:
             if str(component) not in self.b.components:
                 raise ValueError("No component {} in the bundle. Bundle components: {}".format(str(component), ",".join(self.b.components)))
-            return self.b.get_quantity(qualifier=qualifier, component=component, context='component', **kwargs).value
+            return self.b.get_quantity(qualifier=qualifier, component=str(component), context='component', **kwargs).value
         else:
             return self.b.get_quantity(qualifier=qualifier, **kwargs).value
         
