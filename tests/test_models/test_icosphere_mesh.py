@@ -17,7 +17,6 @@ class TestIcosphere:
                 n_vertices=1000,
                 radius=SOLAR_RADIUS_CM,
                 mass=SOLAR_MASS_KG,
-                abs_luminosity=1.,
                 parameters=[5777.],
                 parameter_names=['teff']
                 )
@@ -31,7 +30,6 @@ class TestIcosphere:
                 n_vertices=1000,
                 radius=SOLAR_RADIUS_CM,
                 mass=SOLAR_MASS_KG,
-                abs_luminosity=1.,
                 parameters=[5777.],
                 parameter_names=['teff']
                 )
@@ -44,7 +42,6 @@ class TestIcosphere:
                 n_vertices=1000,
                 radius=SOLAR_RADIUS_CM,
                 mass=SOLAR_MASS_KG,
-                abs_luminosity=1.,
                 parameters=[5777., 0.5],
                 parameter_names=['teff', 'some_param']
                 )
@@ -61,7 +58,6 @@ class TestIcosphere:
                 n_vertices=1000,
                 radius=SOLAR_RADIUS_CM,
                 mass=SOLAR_MASS_KG,
-                abs_luminosity=1.,
                 parameters=[5777., 0.5],
                 parameter_names=['teff', 'logg']
                 )
@@ -79,7 +75,6 @@ class TestIcosphere:
             n_vertices=1000,
             radius=SOLAR_RADIUS_CM,
             mass=SOLAR_MASS_KG,
-            abs_luminosity=1.,
             parameters=[5777., 0.5],
             parameter_names=['teff', 'logg'],
             override_log_g=False
@@ -97,7 +92,6 @@ class TestIcosphere:
                 n_vertices=1000,
                 radius=SOLAR_RADIUS_CM,
                 mass=SOLAR_MASS_KG,
-                abs_luminosity=1.,
                 parameters=0.5,
                 parameter_names=['some_param']
                 )
