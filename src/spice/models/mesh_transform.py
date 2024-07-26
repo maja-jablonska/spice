@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
@@ -11,6 +13,10 @@ from .utils import (cast_to_normal_plane, mesh_polar_vertices,
                     evaluate_many_fouriers_for_value,
                     evaluate_many_fouriers_prim_for_value,
                     spherical_harmonic)
+
+
+def _is_arraylike(x):
+    return hasattr(x, '__array__') or hasattr(x, '__array_interface__')
 
 
 @jax.jit
@@ -139,19 +145,21 @@ def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
     return m._replace(orbital_velocity=orbital_velocity)
 
 
-@jax.jit
+@partial(jax.jit, static_argnums=(4,))
 def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
-                  fourier_series_static_parameters: ArrayLike, fourier_series_parameters: ArrayLike) -> MeshModel:
-    ind = spherical_harmonics_parameters[0] + m.max_pulsation_mode * spherical_harmonics_parameters[1]
+                   pulsation_periods: ArrayLike, fourier_series_parameters: ArrayLike,
+                   total_pad_len: int) -> MeshModel:
+    harmonic_ind = spherical_harmonics_parameters[0] + m.max_pulsation_mode * spherical_harmonics_parameters[1]
     return m._replace(
-        fourier_series_static_parameters=m.fourier_series_static_parameters.at[ind].set(
-            fourier_series_static_parameters),
-        fourier_series_parameters=m.fourier_series_parameters.at[ind].set(fourier_series_parameters)
+        pulsation_periods=m.pulsation_periods.at[harmonic_ind].set(pulsation_periods),
+        fourier_series_parameters=m.fourier_series_parameters.at[harmonic_ind].set(
+            jnp.pad(fourier_series_parameters, ((0, total_pad_len), (0, 0)))
+        )
     )
 
 
 def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
-                  fourier_series_static_parameters: ArrayLike, fourier_series_parameters: ArrayLike) -> MeshModel:
+                  period: float, fourier_series_parameters: ArrayLike) -> MeshModel:
     """
     Adds pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -163,8 +171,7 @@ def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
         m (MeshModel): The mesh model to add pulsation effects to.
         spherical_harmonics_parameters (ArrayLike): Parameters for the spherical harmonics, typically including
             the degree (l) and order (m) of the harmonics.
-        fourier_series_static_parameters (ArrayLike): Static parameters for the Fourier series that define
-            the baseline of the pulsation.
+        period (float): Pulsation period
         fourier_series_parameters (ArrayLike): Dynamic parameters for the Fourier series that define the
             time-varying aspect of the pulsation.
 
@@ -176,7 +183,10 @@ def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
     """
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
-    return _add_pulsation(m, spherical_harmonics_parameters, fourier_series_static_parameters, fourier_series_parameters)
+    if _is_arraylike(period):
+        period = period[0]
+    return _add_pulsation(m, spherical_harmonics_parameters, period,
+                          fourier_series_parameters, m.max_fourier_order-fourier_series_parameters.shape[0])
 
 
 @jax.jit
@@ -185,7 +195,7 @@ def _reset_pulsations(m: MeshModel) -> MeshModel:
         vertices_pulsation_offsets=jnp.zeros_like(m.vertices_pulsation_offsets),
         center_pulsation_offsets=jnp.zeros_like(m.center_pulsation_offsets),
         area_pulsation_offsets=jnp.zeros_like(m.area_pulsation_offsets),
-        fourier_series_static_parameters=jnp.nan * jnp.ones_like(m.fourier_series_static_parameters),
+        pulsation_periods=jnp.nan * jnp.ones_like(m.pulsation_periods),
         fourier_series_parameters=jnp.nan * jnp.ones_like(m.fourier_series_parameters)
     )
 
@@ -257,20 +267,17 @@ def evaluate_pulsations(m: MeshModel, t: ArrayLike):
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
-    fourier_static_params = jnp.nan_to_num(m.fourier_series_static_parameters)
     fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
     pulsation_magnitudes = jnp.nan_to_num(
         evaluate_many_fouriers_for_value(
-            fourier_static_params[:, 0],
-            fourier_static_params[:, 1],
+            m.pulsation_periods,
             fourier_params[:, :, 0],
             fourier_params[:, :, 1],
             t)
     )
     pulsation_velocity_magnitudes = jnp.nan_to_num(
         evaluate_many_fouriers_prim_for_value(
-            fourier_static_params[:, 0],
-            fourier_static_params[:, 1],
+            m.pulsation_periods,
             fourier_params[:, :, 0],
             fourier_params[:, :, 1],
             t)
