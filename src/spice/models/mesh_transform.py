@@ -13,7 +13,10 @@ from .utils import (cast_to_normal_plane, mesh_polar_vertices,
                     evaluate_many_fouriers_for_value,
                     evaluate_many_fouriers_prim_for_value,
                     spherical_harmonic)
-from ..geometry.utils import last_non_nan_arg
+
+
+def _is_arraylike(x):
+    return hasattr(x, '__array__') or hasattr(x, '__array_interface__')
 
 
 @jax.jit
@@ -156,7 +159,7 @@ def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
 
 
 def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
-                  fourier_series_static_parameters: ArrayLike, fourier_series_parameters: ArrayLike) -> MeshModel:
+                  period: float, fourier_series_parameters: ArrayLike) -> MeshModel:
     """
     Adds pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -168,8 +171,7 @@ def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
         m (MeshModel): The mesh model to add pulsation effects to.
         spherical_harmonics_parameters (ArrayLike): Parameters for the spherical harmonics, typically including
             the degree (l) and order (m) of the harmonics.
-        fourier_series_static_parameters (ArrayLike): Static parameters for the Fourier series that define
-            the baseline of the pulsation.
+        period (float): Pulsation period
         fourier_series_parameters (ArrayLike): Dynamic parameters for the Fourier series that define the
             time-varying aspect of the pulsation.
 
@@ -181,7 +183,9 @@ def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
     """
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
-    return _add_pulsation(m, spherical_harmonics_parameters, fourier_series_static_parameters,
+    if _is_arraylike(period):
+        period = period[0]
+    return _add_pulsation(m, spherical_harmonics_parameters, period,
                           fourier_series_parameters, m.max_fourier_order-fourier_series_parameters.shape[0])
 
 
