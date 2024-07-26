@@ -28,8 +28,9 @@ def create_harmonics_params(n: int):
     return jnp.vstack([x.ravel(), y.ravel()]).T
 
 
-def calculate_log_gs(mass: float, d_centers: ArrayLike):
-    return jnp.log(6.6743e-11 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1) * 1e-2, 2) / 9.80665)
+def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0):
+    return jnp.log(((6.6743e-11 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1) * 1e-2, 2)) -
+                    jnp.power(rot_velocities, 2) / jnp.linalg.norm(d_centers, axis=1)) / 9.80665)
 
 
 MeshModelNamedTuple = namedtuple("MeshModel",
@@ -42,7 +43,7 @@ MeshModelNamedTuple = namedtuple("MeshModel",
                                   "axis_radii", "rotation_velocity", "orbital_velocity",
                                   "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
-                                  "fourier_series_static_parameters", "fourier_series_parameters"])
+                                  "pulsation_periods", "fourier_series_parameters"])
 
 
 class MeshModel(Model, MeshModelNamedTuple):
@@ -91,7 +92,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     max_fourier_order: int
 
     spherical_harmonics_parameters: ArrayLike
-    fourier_series_static_parameters: ArrayLike
+    pulsation_periods: ArrayLike
     fourier_series_parameters: ArrayLike
 
     @property
@@ -100,7 +101,11 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def log_gs(self) -> ArrayLike:
-        return calculate_log_gs(self.mass, self.centers - self.center)
+        return calculate_log_gs(
+            self.mass,
+            self.centers - self.center,
+            jnp.linalg.norm(self.rotation_velocities, axis=1)
+        )
 
     @property
     def vertices(self) -> ArrayLike:
@@ -225,7 +230,7 @@ class IcosphereModel(MeshModel):
                                  max_pulsation_mode=max_pulsation_mode,
                                  max_fourier_order=max_fourier_order,
                                  spherical_harmonics_parameters=harmonics_params,
-                                 fourier_series_static_parameters=jnp.nan * jnp.ones((harmonics_params.shape[0], 2)),
+                                 pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0]),
                                  # D_0 (amplitude), period
                                  fourier_series_parameters=jnp.nan * jnp.ones(
                                      (harmonics_params.shape[0], max_fourier_order, 2)))  # D_n, phi_n
