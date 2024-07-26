@@ -28,7 +28,7 @@ def spherical_harmonic(m, n, polar_coordinates):
                                       polar_coordinates[:, 1],
                                       n_max=10).real
     
-def evaluate_fourier_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+def evaluate_fourier_for_value(P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
     """
     Args:
         d0 (float): amplitude D_0
@@ -41,9 +41,9 @@ def evaluate_fourier_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike
         ArrayLike: values
     """
     n = jnp.arange(1, d.shape[0]+1)
-    return d0 + jnp.sum(d*jnp.cos(n/P*timestamp-phi))
+    return jnp.nan_to_num(jnp.sum(d*jnp.cos(2*jnp.pi*n/P*timestamp-phi)))
 
-def evaluate_fourier_prim_for_value(d0: float, P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+def evaluate_fourier_prim_for_value(P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
     """
     Args:
         d0 (float): amplitude D_0
@@ -56,10 +56,10 @@ def evaluate_fourier_prim_for_value(d0: float, P: float, d: ArrayLike, phi: Arra
         ArrayLike: values
     """
     n = jnp.arange(1, d.shape[0]+1)
-    return jnp.sum(-d*n/P*jnp.sin(n/P*timestamp-phi))
+    return jnp.sum(-2*jnp.pi*d*n/P*jnp.sin(2*jnp.pi*n/P*timestamp-phi))
 
-evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, 0, None)))
-evaluate_many_fouriers_prim_for_value = jax.jit(jax.vmap(evaluate_fourier_prim_for_value, in_axes=(0, 0, 0, 0, None)))
+evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, None)))
+evaluate_many_fouriers_prim_for_value = jax.jit(jax.vmap(evaluate_fourier_prim_for_value, in_axes=(0, 0, 0, None)))
 
 @jax.jit
 def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:
@@ -149,17 +149,17 @@ def calculate_axis_radii(centers: ArrayLike, axis: ArrayLike) -> ArrayLike:
 ### UTILITY FUNCTIONS FOR FOURIER SERIES
 
 @jax.jit
-def cos_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[ArrayLike, ArrayLike]:
-    return jnp.array([0., P]), jnp.array([[max_amplitude, 0.]])
+def cos_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[float, ArrayLike]:
+    return P, jnp.array([[max_amplitude, 0.]])
 
 @jax.jit
-def sin_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[ArrayLike, ArrayLike]:
-    return jnp.array([0., P]), jnp.array([[max_amplitude, -jnp.pi/2]])
+def sin_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[float, ArrayLike]:
+    return P, jnp.array([[max_amplitude, -jnp.pi/2]])
 
 @jax.jit
-def sin2_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[ArrayLike, ArrayLike]:
-    return jnp.array([0.5, 0.5*P]), jnp.array([[0.5*max_amplitude, 0.]])
+def sin2_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[float, ArrayLike]:
+    return 0.5*P, jnp.array([[0.5*max_amplitude, 0.]])
 
 @jax.jit
-def sinh_as_fourier_coords(P: float, max_amplitude: float, n: int) -> Tuple[ArrayLike, ArrayLike]:
-    return jnp.array([0., P]), jnp.array([[2*jnp.sinh(jnp.pi)/jnp.pi*jnp.power(-1, n0+1)*n0/(jnp.power(n0, 2)+1)*max_amplitude, 0.] for n0 in range(1, n+1)])
+def sinh_as_fourier_coords(P: float, max_amplitude: float, n: int) -> Tuple[float, ArrayLike]:
+    return P, jnp.array([[2*jnp.sinh(jnp.pi)/jnp.pi*jnp.power(-1, n0+1)*n0/(jnp.power(n0, 2)+1)*max_amplitude, 0.] for n0 in range(1, n+1)])
