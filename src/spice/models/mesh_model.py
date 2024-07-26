@@ -28,8 +28,9 @@ def create_harmonics_params(n: int):
     return jnp.vstack([x.ravel(), y.ravel()]).T
 
 
-def calculate_log_gs(mass: float, d_centers: ArrayLike):
-    return jnp.log(6.6743e-11 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1) * 1e-2, 2) / 9.80665)
+def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0):
+    return jnp.log(((6.6743e-11 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1) * 1e-2, 2)) -
+                    jnp.power(rot_velocities, 2) / jnp.linalg.norm(d_centers, axis=1)) / 9.80665)
 
 
 MeshModelNamedTuple = namedtuple("MeshModel",
@@ -100,7 +101,11 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def log_gs(self) -> ArrayLike:
-        return calculate_log_gs(self.mass, self.centers - self.center)
+        return calculate_log_gs(
+            self.mass,
+            self.centers - self.center,
+            jnp.linalg.norm(self.rotation_velocities, axis=1)
+        )
 
     @property
     def vertices(self) -> ArrayLike:
