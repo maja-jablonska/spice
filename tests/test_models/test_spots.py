@@ -46,7 +46,7 @@ class TestSpotFunctions:
                                                      param_deltas[1], param_indices[1])
         assert jnp.allclose(modified_mesh.parameters, modified_mesh1.parameters)
 
-    def test_raises_error_for_m_larger_than_n_add_spherical_harmonic_spot(self, mock_mesh, spherical_harmonic_params):
+    def test_raises_error_for_m_larger_than_n_add_spherical_harmonic_spot(self, mock_mesh):
         with pytest.raises(ValueError):
             add_spherical_harmonic_spot(mock_mesh, 1, 0, 10, 0)
 
