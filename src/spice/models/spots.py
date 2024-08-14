@@ -2,6 +2,8 @@ from typing import Union
 
 import jax
 import jax.numpy as jnp
+from PIL.ImageOps import scale
+from jax import Array
 from jax.typing import ArrayLike
 from spice.models.phoebe_model import PhoebeModel
 from .mesh_model import MeshModel
@@ -16,16 +18,28 @@ def __cos_law_distance(theta1, phi1, theta2, phi2):
     return jnp.arccos(jnp.sin(theta1) * jnp.sin(theta2) + jnp.cos(theta1) * jnp.cos(theta2) * jnp.cos(phi1 - phi2))
 
 
-v_cos_law_distance = jax.jit(jax.vmap(__cos_law_distance, in_axes=(0, 0, None, None)))
+def __spherical_to_cartesian(theta: float, phi: float, radius: float) -> tuple[Array, Array, Array]:
+    x = jnp.sin(theta) * jnp.cos(phi) * radius
+    y = jnp.sin(theta) * jnp.sin(phi) * radius
+    z = jnp.cos(theta) * radius
+    return x, y, z
 
 
-def sigmoid(x, smoothness):
+def __cartesian_distance(x1: float, y1: float, z1: float, x2: float, y2: float, z2: float) -> Array:
+    return jnp.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2 + (z1 - z2) ** 2)
+
+
+v_cartesian_distance = jax.jit(jax.vmap(__cartesian_distance, in_axes=(0, 0, 0, None, None, None)))
+
+
+def sigmoid(x: float, smoothness: float) -> Array:
+    # Apply the sigmoid function
     return 1 / (1 + jnp.exp(-smoothness * x))
 
 
 @jax.jit
-def generate_spherical_spot(thetas: ArrayLike,
-                            phis: ArrayLike,
+def generate_spherical_spot(d_centers: ArrayLike,
+                            mesh_radius: float,
                             spot_center_theta: float,
                             spot_center_phi: float,
                             spot_radius: float,
@@ -41,8 +55,8 @@ def generate_spherical_spot(thetas: ArrayLike,
     at the spot's edge.
 
     Args:
-        thetas (ArrayLike): Array of theta values (inclination) for points on the sphere.
-        phis (ArrayLike): Array of phi values (azimuth) for points on the sphere.
+        d_centers (Array):  Cartesian coordinates of the centers of the mesh elements
+        mesh_radius (float): Radius of the mesh
         spot_center_theta (float): Theta value (inclination) of the spot center.
         spot_center_phi (float): Phi value (azimuth) of the spot center.
         spot_radius (float): Angular radius of the spot.
@@ -53,14 +67,18 @@ def generate_spherical_spot(thetas: ArrayLike,
     membership and edge smoothness.
     """
 
+    spot_center_x, spot_center_y, spot_center_z = __spherical_to_cartesian(spot_center_theta, spot_center_phi,
+                                                                           mesh_radius)
+
     # Calculate distance from the spot center
-    distance = v_cos_law_distance(thetas, phis, spot_center_theta, spot_center_phi)
+    distances = v_cartesian_distance(d_centers[:, 0], d_centers[:, 1], d_centers[:, 2],
+                                     spot_center_x, spot_center_y, spot_center_z)
 
     # Calculate the difference from the spot edge
-    distance_from_edge = spot_radius - distance
+    distance_from_edge = jnp.deg2rad(spot_radius) * mesh_radius - distances
 
     # Apply smoothness to interpolate values at the spot's edge
-    differences = sigmoid(distance_from_edge, smoothness) * parameter_diff
+    differences = sigmoid(distance_from_edge / (0.01 * mesh_radius), smoothness) * parameter_diff
 
     return differences
 
@@ -118,8 +136,7 @@ def _add_spot(mesh: MeshModel,
               parameter_diff: float,
               parameter_index: int,
               smoothness: float = 1.0) -> MeshModel:
-    center_polar_coords = mesh_polar_vertices(mesh.centers)
-    spot_parameters = generate_spherical_spot(center_polar_coords[:, 0], center_polar_coords[:, 1],
+    spot_parameters = generate_spherical_spot(mesh.d_centers, mesh.radius,
                                               spot_center_theta, spot_center_phi, spot_radius, parameter_diff,
                                               smoothness)
     return mesh._replace(parameters=mesh.parameters.at[:, parameter_index].set(
@@ -131,7 +148,7 @@ def add_spot(mesh: MeshModel,
              spot_center_theta: float,
              spot_center_phi: float,
              spot_radius: float,
-             parameter_diff: float,
+             parameter_delta: float,
              parameter_index: int,
              smoothness: float = 1.0) -> MeshModel:
     """
@@ -146,7 +163,7 @@ def add_spot(mesh: MeshModel,
         spot_center_theta (float): The theta (inclination) coordinate of the spot's center, in radians.
         spot_center_phi (float): The phi (azimuthal) coordinate of the spot's center, in radians.
         spot_radius (float): The angular radius of the spot, in radians.
-        parameter_diff (float): The difference in the parameter value to be applied within the spot.
+        parameter_delta (float): The difference in the parameter value to be applied within the spot.
         parameter_index (int): The index of the parameter in the mesh model that will be modified by the spot.
         smoothness (float, optional): A parameter controlling the smoothness of the spot's edge. Higher values result in smoother transitions. Defaults to 1.0.
 
@@ -160,7 +177,47 @@ def add_spot(mesh: MeshModel,
         raise ValueError("PHOEBE models are read-only.")
     else:
         return _add_spot(mesh, spot_center_theta, spot_center_phi, spot_radius,
-                         parameter_diff, parameter_index, smoothness)
+                         parameter_delta, parameter_index, smoothness)
+
+
+v_add_spot = jax.vmap(_add_spot, in_axes=(None, 0, 0, 0, 0, 0, 0))
+
+
+def add_spots(mesh: MeshModel,
+              spot_center_thetas: ArrayLike,
+              spot_center_phis: ArrayLike,
+              spot_radii: ArrayLike,
+              parameter_deltas: ArrayLike,
+              parameter_indices: ArrayLike,
+              smoothness: ArrayLike = None) -> MeshModel:
+    """
+    Add multiple spots to a mesh model based on spherical coordinates and smoothness parameters.
+
+    This function applies modifications to the mesh model's parameters to simulate the presence of multiple spots.
+    Each spot is defined by its center (in spherical coordinates), its radius, and a differential parameter that
+    quantifies the change induced by the spot. The smoothness parameter allows for a gradual transition at the spot's edges.
+
+    Args:
+        mesh (MeshModel): The mesh model to which the spots will be added. Must not be a PHOEBE model, as they are read-only.
+        spot_center_thetas (ArrayLike): An array of theta (inclination) coordinates of the spots' centers, in radians.
+        spot_center_phis (ArrayLike): An array of phi (azimuthal) coordinates of the spots' centers, in radians.
+        spot_radii (ArrayLike): An array of angular radii of the spots, in radians.
+        parameter_deltas (ArrayLike): An array of differences in the parameter values to be applied within the spots.
+        parameter_indices (ArrayLike): An array of indices of the parameters in the mesh model that will be modified by the spots.
+        smoothness (ArrayLike, optional): An array of factors controlling the smoothness of the spots' edges. Defaults to None.
+
+    Returns:
+        MeshModel: The modified mesh model with the spots applied.
+
+    Raises:
+        ValueError: If the input mesh model is a PHOEBE model, as modifications are not supported.
+    """
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError("PHOEBE models are read-only.")
+    else:
+        parameter_indices = parameter_indices or jnp.ones_like(parameter_deltas)
+        return v_add_spot(mesh, spot_center_thetas, spot_center_phis, spot_radii,
+                          parameter_deltas, parameter_indices, smoothness)
 
 
 @jax.jit
