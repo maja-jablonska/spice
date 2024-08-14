@@ -23,19 +23,19 @@ def spherical_harmonic_params():
 
 class TestSpotFunctions:
 
-    def test_addSphericalHarmonicSpots_modifiesMeshModelWithSingleSpot(self, mock_mesh, spherical_harmonic_params):
+    def test_add_spherical_harmonic_spots_modifies_mesh_model_with_single_spot(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         modified_mesh = add_spherical_harmonic_spots(mock_mesh, m_values[:1], n_values[:1],
                                                      param_deltas[:1], param_indices[:1])
         assert not jnp.allclose(modified_mesh.parameters, mock_mesh.parameters)
 
-    def test_addSphericalHarmonicSpots_modifiesMeshModelWithMultipleSpots(self, mock_mesh, spherical_harmonic_params):
+    def test_add_spherical_harmonic_spots_modifies_mesh_model_with_multiple_spots(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         modified_mesh = add_spherical_harmonic_spots(mock_mesh, m_values, n_values,
                                                      param_deltas, param_indices)
         assert not jnp.allclose(modified_mesh.parameters, mock_mesh.parameters)
 
-    def test_addSphericalHarmonicSpots_equalsToTwo_addSphericalHarmonicSpot(self, mock_mesh, spherical_harmonic_params):
+    def test_add_spherical_harmonic_spots_equals_to_two_add_spherical_harmonic_spot(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         modified_mesh = add_spherical_harmonic_spots(mock_mesh, m_values, n_values,
                                                      param_deltas, param_indices)
@@ -46,22 +46,22 @@ class TestSpotFunctions:
                                                      param_deltas[1], param_indices[1])
         assert jnp.allclose(modified_mesh.parameters, modified_mesh1.parameters)
 
-    def test_raisesErrorFor_m_LargerThan_n_addSphericalHarmonicSpot(self, mock_mesh, spherical_harmonic_params):
+    def test_raises_error_for_m_larger_than_n_add_spherical_harmonic_spot(self, mock_mesh, spherical_harmonic_params):
         with pytest.raises(ValueError):
             add_spherical_harmonic_spot(mock_mesh, 1, 0, 10, 0)
 
-    def test_raisesErrorFor_m_LargerThan_n_addSphericalHarmonicSpots(self, mock_mesh, spherical_harmonic_params):
+    def test_raises_error_for_m_larger_than_n_add_spherical_harmonic_spots(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         with pytest.raises(ValueError):
             add_spherical_harmonic_spots(mock_mesh, 1, 0, param_deltas, param_indices)
 
-    def test_raisesErrorForReadOnlyPhoebeModel_addSphericalHarmonicSpots(self, spherical_harmonic_params, shared_datadir):
+    def test_raises_error_for_read_only_phoebe_model_add_spherical_harmonic_spots(self, spherical_harmonic_params, shared_datadir):
         phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         with pytest.raises(ValueError):
             add_spherical_harmonic_spots(phoebe_mesh, m_values, n_values, param_deltas, param_indices)
 
-    def test_handlesEmptySpotsWithoutModification_addSphericalHarmonicSpots(self, mock_mesh):
+    def test_handles_empty_spots_without_modification_add_spherical_harmonic_spots(self, mock_mesh):
         empty_arrays = jnp.array([])
         modified_mesh = add_spherical_harmonic_spots(mock_mesh, empty_arrays, empty_arrays,
                                                      empty_arrays, empty_arrays)
