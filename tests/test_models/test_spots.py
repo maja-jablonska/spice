@@ -12,18 +12,6 @@ def mock_mesh():
 
 
 @pytest.fixture
-def spot_params():
-    return {
-        "spot_center_theta": 0.5,
-        "spot_center_phi": 1.0,
-        "spot_radius": 0.1,
-        "parameter_diff": 100.,
-        "parameter_index": 0,
-        "smoothness": 1.5
-    }
-
-
-@pytest.fixture
 def spherical_harmonic_params():
     return {
         "m_values": jnp.array([0, 1]),
@@ -34,9 +22,6 @@ def spherical_harmonic_params():
 
 
 class TestSpotFunctions:
-    def test_addSpot_modifiesMeshModel(self, mock_mesh, spot_params):
-        modified_mesh = add_spot(mock_mesh, **spot_params)
-        assert not jnp.allclose(modified_mesh.parameters, mock_mesh.parameters)
 
     def test_addSphericalHarmonicSpots_modifiesMeshModelWithSingleSpot(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
@@ -70,11 +55,6 @@ class TestSpotFunctions:
         with pytest.raises(ValueError):
             add_spherical_harmonic_spots(mock_mesh, 1, 0, param_deltas, param_indices)
 
-    def test_raisesErrorForReadOnlyPhoebeModel_addSpot(self, spot_params, shared_datadir):
-        phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
-        with pytest.raises(ValueError):
-            add_spot(phoebe_mesh, **spot_params)
-
     def test_raisesErrorForReadOnlyPhoebeModel_addSphericalHarmonicSpots(self, spherical_harmonic_params, shared_datadir):
         phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
@@ -86,3 +66,20 @@ class TestSpotFunctions:
         modified_mesh = add_spherical_harmonic_spots(mock_mesh, empty_arrays, empty_arrays,
                                                      empty_arrays, empty_arrays)
         assert jnp.allclose(modified_mesh.parameters, mock_mesh.parameters)
+
+    def test_add_spot_applies_modification(self, mock_mesh):
+        result = add_spot(mock_mesh, 0.0, 0.0, 50.0, 100.0, 0)
+        assert not jnp.allclose(result.parameters, mock_mesh.parameters)
+
+    def test_add_spot_raises_error_for_phoebe_model(self, shared_datadir):
+        phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
+        with pytest.raises(ValueError):
+            add_spot(phoebe_mesh, jnp.pi / 2, 0.0, jnp.pi / 4, 1.0, 0)
+
+    def test_add_spot_with_zero_radius_does_not_modify_mesh(self, mock_mesh):
+        result = add_spot(mock_mesh, 0.0, 0.0, 0.0, 100.0, 0)
+        assert jnp.allclose(result.parameters, mock_mesh.parameters)
+
+    def test_add_spot_with_large_radius_modifies_entire_mesh(self, mock_mesh):
+        result = add_spot(mock_mesh, jnp.pi / 2, 0.0, 400., 1.0, 0)
+        assert not jnp.any(jnp.isclose(result.parameters[:, 0], mock_mesh.parameters[:, 0]))
