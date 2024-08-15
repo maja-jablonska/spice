@@ -32,9 +32,9 @@ class Model:
     @property
     def los_z(self) -> T:
         raise NotImplementedError
-    
+
     @property
-    def los_z(self) -> T:
+    def radii(self) -> T:
         raise NotImplementedError
     
     @property
