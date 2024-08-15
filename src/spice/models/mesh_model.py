@@ -7,7 +7,7 @@ from collections import namedtuple
 import warnings
 
 from .mesh_generation import icosphere
-from .model import Model
+from .model import Model, T
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
@@ -143,6 +143,10 @@ class MeshModel(Model, MeshModelNamedTuple):
     @property
     def los_z(self) -> ArrayLike:
         return cast_to_los(self.centers, self.los_vector)
+
+    @property
+    def radii(self) -> T:
+        return jnp.linalg.norm(self.centers, axis=1)
 
     @property
     def cast_vertices(self) -> ArrayLike:
