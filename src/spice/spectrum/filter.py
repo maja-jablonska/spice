@@ -426,6 +426,15 @@ class Stromgreny(Filter):
         super().__init__(transmission_curve, name='Stromgren y')
 
 
+class Bolometric(Filter):
+    def __init__(self):
+        transmission_curve = jnp.array([
+            [1., 30000.],
+            [1., 1.]
+        ])
+        super().__init__(transmission_curve, name='Bolometric')
+
+
 FILTERS = [
     BesselU, BesselB, BesselV, BesselR, BesselI,
     GaiaG, GaiaRP, GaiaBP,
@@ -437,7 +446,8 @@ FILTERS = [
     HipparcosHp,
     CousinsI, CousinsR,
     JohnsonU, JohnsonB, JohnsonV, JohnsonR, JohnsonI, JohnsonJ, JohnsonM,
-    Stromgrenu, Stromgrenv, Stromgrenb, Stromgreny
+    Stromgrenu, Stromgrenv, Stromgrenb, Stromgreny,
+    Bolometric
 ]
 
 
