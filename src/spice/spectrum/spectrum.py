@@ -130,7 +130,8 @@ def __flux_flash_sum(flux_fn,
                      areas,
                      vrads,
                      parameters,
-                     chunk_size: int):
+                     chunk_size: int,
+                     disable_doppler_shift: bool = False):
     '''
     Each surface element has a vector of parameters (mu, LOS velocity, etc)
     Some of these parameters are the flux model's input
@@ -163,7 +164,10 @@ def __flux_flash_sum(flux_fn,
                                     (k_chunk_sizes, n_parameters))
 
         # Shape: (CHUNK_SIZE, log_wavelengths)
-        shifted_log_wavelengths = v_apply_vrad_log(log_wavelengths, vrad_chunk)
+        shifted_log_wavelengths = jax.lax.cond(disable_doppler_shift,
+                                               lambda lv, _: jnp.repeat(lv[jnp.newaxis, :], chunk_size, axis=0),
+                                               v_apply_vrad_log,
+                                               log_wavelengths, vrad_chunk)
 
         # atmosphere_mul is the spectrum simulated for the corresponding wavelengths and optionally given parameters of mu, logg, and T.
         # It is then multiplied by the observed area to scale the contributions of spectra chunks
@@ -199,13 +203,15 @@ def __flux_flash_sum(flux_fn,
 def simulate_total_flux(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
                         m: MeshModel,
                         log_wavelengths: ArrayLike,
-                        chunk_size: int = DEFAULT_CHUNK_SIZE):
+                        chunk_size: int = DEFAULT_CHUNK_SIZE,
+                        disable_doppler_shift: bool = False):
     return __flux_flash_sum(flux_fn,
                             log_wavelengths,
                             _adjust_dim(m.areas, chunk_size),
                             _adjust_dim(m.los_velocities, chunk_size),
                             _adjust_dim(m.parameters, chunk_size),
-                            chunk_size)
+                            chunk_size,
+                            disable_doppler_shift)
 
 
 @partial(jax.jit, static_argnums=(0, 3))
