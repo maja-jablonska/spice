@@ -2,7 +2,7 @@ import jax.numpy as jnp
 from functools import partial
 import jax
 from jax.typing import ArrayLike
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Tuple, Dict
 
 from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
 from spice.models.phoebe_utils import Component, PhoebeConfig
@@ -55,7 +55,7 @@ class Binary(NamedTuple):
 class PhoebeBinary(namedtuple("PhoebeBinary",
                               ["body1", "body2", "P", "ecc", "T", "i", "omega", "Omega",
                                "evaluated_times", "body1_centers", "body2_centers", "body1_velocities",
-                               "body2_velocities", "phoebe_config", "parameter_labels"])):
+                               "body2_velocities", "phoebe_config", "parameter_labels", "parameter_values"])):
     body1: Model
     body2: Model
 
@@ -75,33 +75,28 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
     body2_velocities: ArrayLike
     phoebe_config: PhoebeConfig
     parameter_labels: List[str]
+    parameter_values: Dict[str, float]
 
     @classmethod
-    def construct(cls, phoebe_config: PhoebeConfig, parameter_labels: List[str] = None) -> "PhoebeBinary":
+    def construct(cls, phoebe_config: PhoebeConfig,
+                  parameter_labels: List[str] = None,
+                  parameter_values: Dict[str, float] = None) -> "PhoebeBinary":
         """
-        Constructs an IcosphereModel with specified stellar and mesh properties.
+        Construct a PhoebeBinary object from a PhoebeConfig.
 
-        This method generates an icosphere mesh and initializes the model with given parameters, including
-        stellar properties (mass, radius, absolute luminosity) and mesh properties (vertices, faces, areas,
-        centers). It also handles the calculation of surface gravity (log g) values if required.
+        This method initializes a PhoebeBinary object using the provided PhoebeConfig and optional parameter labels and values.
+        It constructs the primary and secondary body models and retrieves various orbital elements and properties from the config.
 
         Args:
-            n_vertices (int): Number of vertices for the icosphere mesh.
-            radius (float): Radius of the icosphere.
-            mass (float): Mass of the stellar object.
-            abs_luminosity (float): Absolute luminosity of the stellar object.
-            parameters (Union[float, ArrayLike]): Parameters for the model, can be a single value or an array.
-            parameter_names (List[str]): Names of the parameters, used for identifying log g parameter.
-            max_pulsation_mode (int, optional): Maximum pulsation mode for the model. Defaults to a predefined value.
-            max_fourier_order (int, optional): Maximum order of Fourier series for pulsation calculation. Defaults to a predefined value.
-            override_log_g (bool, optional): Whether to override the log g values based on the model's mass and centers. Defaults to True.
-            log_g_index (Optional[int], optional): Index of the log g parameter in the parameters array. Required if override_log_g is True and specific log g parameter name is not in parameter_names.
+            phoebe_config (PhoebeConfig): The configuration object containing the parameters and settings for the binary system.
+            parameter_labels (List[str], optional): A list of parameter labels to be used for the construction of the models. Defaults to None.
+            parameter_values (Dict[str, float], optional): A dictionary of parameter values corresponding to the labels. Defaults to None.
 
         Returns:
-            IcosphereModel: An instance of IcosphereModel initialized with the specified properties.
+            PhoebeBinary: A new instance of PhoebeBinary initialized with the provided configuration and parameters.
         """
-        body1 = PhoebeModel.construct(phoebe_config, phoebe_config.times[0], parameter_labels, Component.PRIMARY)
-        body2 = PhoebeModel.construct(phoebe_config, phoebe_config.times[0], parameter_labels, Component.SECONDARY)
+        body1 = PhoebeModel.construct(phoebe_config, phoebe_config.times[0], parameter_labels, parameter_values, Component.PRIMARY)
+        body2 = PhoebeModel.construct(phoebe_config, phoebe_config.times[0], parameter_labels, parameter_values, Component.SECONDARY)
         return PhoebeBinary.__new__(cls, body1=body1, body2=body2, evaluated_times=phoebe_config.times,
                                     P=phoebe_config.get_quantity('period', component='binary') * DAY_TO_YEAR,
                                     ecc=phoebe_config.get_quantity('ecc', component='binary'),
@@ -114,7 +109,8 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
                                     body1_velocities=phoebe_config.get_all_orbit_velocities(str(Component.PRIMARY)),
                                     body2_velocities=phoebe_config.get_all_orbit_velocities(str(Component.SECONDARY)),
                                     phoebe_config=phoebe_config,
-                                    parameter_labels=parameter_labels
+                                    parameter_labels=parameter_labels,
+                                    parameter_values=parameter_values
                                     )
 
 
@@ -219,8 +215,8 @@ def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[
         the orbit using interpolation and occlusion resolution.
     """
     if isinstance(binary, PhoebeBinary):
-        return (PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, Component.PRIMARY),
-                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, Component.SECONDARY))
+        return (PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY),
+                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY))
     else:
         if len(binary.evaluated_times) == 0:
             raise ValueError(

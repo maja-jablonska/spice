@@ -2,7 +2,7 @@ from jax.typing import ArrayLike
 from spice.models.utils import cast_to_los
 from .mesh_model import Model
 from .phoebe_utils import Component, PhoebeConfig
-from typing import List, Optional
+from typing import List, Optional, Dict
 from collections import namedtuple
 import numpy as np
 
@@ -17,6 +17,7 @@ TEFF_NAMES: List[str] = ['teff', 't_eff', 't eff', 'teffs', 't_effs', 't effs',
 ABUNDANCE_NAMES: List[str] = ['abundance', 'abundances',
                               'abun', 'abuns',
                               'metallicity', 'metallicities']
+MU_NAMES: List[str] = ['mu', 'mus']
 
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
@@ -91,6 +92,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                   phoebe_config: PhoebeConfig,
                   time: float,
                   parameter_names: List[str] = None,
+                  parameter_values: Dict[str, float] = None,
                   component: Optional[Component] = None,
                   override_parameters: Optional[ArrayLike] = None) -> "PhoebeModel":
         radius = phoebe_config.get_quantity('requiv', component=component) * R_SOL_CM
@@ -131,6 +133,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             params = override_parameters
         else:
             params = []
+            parameter_values = parameter_values or {}
+            parameter_values_keys = [pk.lower() for pk in parameter_values.keys()]
             if parameter_names:
                 for pl in parameter_names:
                     if pl.lower() in TEFF_NAMES:
@@ -139,6 +143,13 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                         params.append(log_gs)
                     elif pl.lower() in ABUNDANCE_NAMES:
                         params.append(ones_like_centers * phoebe_config.get_quantity('abun', component=component))
+                    elif pl.lower() in MU_NAMES:
+                        params.append(phoebe_config.get_mus(time, component=component))
+                    else:
+                        if pl.lower() not in parameter_values_keys:
+                            raise ValueError(f"Parameter {pl} not found in parameter_values and couldn't be inferred from the PHOEBE mesh. "
+                                             f"Please add it in the parameter_values dictionary")
+                        params.append(ones_like_centers * parameter_values[pl])
             if len(params) == 0:
                 params = phoebe_config.get_parameter(time, 'teffs', component=component)
 
