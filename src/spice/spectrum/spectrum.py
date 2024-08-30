@@ -207,7 +207,7 @@ def simulate_total_flux(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
                         disable_doppler_shift: bool = False):
     return __flux_flash_sum(flux_fn,
                             log_wavelengths,
-                            _adjust_dim(jnp.where(m.mus > 0, m.cast_areas, 0.), chunk_size),
+                            _adjust_dim(m.areas, chunk_size),
                             _adjust_dim(m.los_velocities, chunk_size),
                             _adjust_dim(m.parameters, chunk_size),
                             chunk_size,
