@@ -87,7 +87,7 @@ def __spectrum_flash_sum(intensity_fn,
                            m_chunk[:, jnp.newaxis],
                            p_chunk)
         atmosphere_mul = jnp.multiply(
-            (m_chunk * a_chunk)[:, jnp.newaxis, jnp.newaxis],
+            (a_chunk)[:, jnp.newaxis, jnp.newaxis],
             v_in)
 
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)
@@ -108,12 +108,15 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     return jnp.concatenate([x, jnp.zeros((chunk_size - x.shape[0] % chunk_size, *x.shape[1:]))], axis=0)
 
 
-@partial(jax.jit, static_argnums=(0, 3))
-def simulate_spectrum(intensity_fn: Callable[[ArrayLike, float, ArrayLike], ArrayLike],
-                      m: MeshModel,
-                      log_wavelengths: ArrayLike,
-                      chunk_size: int = DEFAULT_CHUNK_SIZE,
-                      disable_doppler_shift: bool = False):
+# Observed flux * distance
+# TODO: change name to observed flux or something else that will be more descriptive
+# The distance should go in here, probably.
+def simulate_observed_flux(intensity_fn: Callable[[ArrayLike, float, ArrayLike], ArrayLike],
+                           m: MeshModel,
+                           log_wavelengths: ArrayLike,
+                           distance: float = 9.521406136918413e+38,
+                           chunk_size: int = DEFAULT_CHUNK_SIZE,
+                           disable_doppler_shift: bool = False):
     return __spectrum_flash_sum(intensity_fn,
                                 log_wavelengths,
                                 _adjust_dim(jnp.where(m.mus > 0, m.cast_areas, 0.), chunk_size),
@@ -121,8 +124,9 @@ def simulate_spectrum(intensity_fn: Callable[[ArrayLike, float, ArrayLike], Arra
                                 _adjust_dim(m.los_velocities, chunk_size),
                                 _adjust_dim(m.parameters, chunk_size),
                                 chunk_size,
-                                disable_doppler_shift)
-
+                                disable_doppler_shift)/(distance**2)
+# -> erg/s/cm^2/A
+# /sr by sie bral z pol powierzchni podzielonych przez odleglosc
 
 @partial(jax.jit, static_argnums=(0, 5))
 def __flux_flash_sum(flux_fn,
@@ -182,6 +186,7 @@ def __flux_flash_sum(flux_fn,
         # p_chunk (CHUNK_SIZE, n_parameters)
         v_in = v_flux(shifted_log_wavelengths,  # (n,)
                       p_chunk)
+
         atmosphere_mul = jnp.multiply(
             a_chunk[:, jnp.newaxis, jnp.newaxis],  # Czemy nie 2D? Broadcastowanie?
             v_in)
@@ -200,11 +205,11 @@ def __flux_flash_sum(flux_fn,
 
 
 @partial(jax.jit, static_argnums=(0, 3))
-def simulate_total_flux(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
-                        m: MeshModel,
-                        log_wavelengths: ArrayLike,
-                        chunk_size: int = DEFAULT_CHUNK_SIZE,
-                        disable_doppler_shift: bool = False):
+def simulate_monochromatic_luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
+                                      m: MeshModel,
+                                      log_wavelengths: ArrayLike,
+                                      chunk_size: int = DEFAULT_CHUNK_SIZE,
+                                      disable_doppler_shift: bool = False):
     return __flux_flash_sum(flux_fn,
                             log_wavelengths,
                             _adjust_dim(m.areas, chunk_size),
@@ -230,7 +235,7 @@ def luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
     Returns:
         ArrayLike: _description_
     """
-    flux = simulate_total_flux(flux_fn, model, jnp.log10(wavelengths), chunk_size)
+    flux = simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size)
     return trapezoid(y=flux[:, 0], x=wavelengths * 1e-8)
 
 
@@ -242,26 +247,43 @@ def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, samp
 @partial(jax.jit, static_argnums=(0,))
 def AB_passband_luminosity(filter: Filter,
                            wavelengths: ArrayLike,
-                           intensity: ArrayLike,
-                           distance: float = 3.085677581491367e+19) -> ArrayLike:
+                           observed_flux: ArrayLike) -> ArrayLike:
     """Return the passband luminosity in a given filter.
 
     Args:
         filter (Filter):
         wavelengths (ArrayLike): wavelengths [Angstrom]
-        intensity (ArrayLike): intensity [erg/s/cm^3]
-        distance (float, optional): distance in cm. Defaults to 3.08e+19 (10 parsecs in cm)
+        observed_flux (ArrayLike): observed flux [erg/s/cm^3]
 
     Returns:
         ArrayLike: passband luminosity [mag]
     """
-    vws_hz, intensity_hz = intensity_wavelengths_to_hz(wavelengths, intensity)
-    transmission_responses = filter.filter_responses_for_frequencies(vws_hz)
-    return -2.5 * jnp.log10(trapezoid(x=vws_hz,
-                                      y=intensity_hz * JY_TO_ERG * transmission_responses / jnp.power(distance, 2) / (
-                                                  H_CONST_ERG_S * vws_hz)) /
-                            trapezoid(x=vws_hz,
-                                      y=filter.ab_zeropoint * transmission_responses / (H_CONST_ERG_S * vws_hz)))
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    return -2.5 * jnp.log10(
+        trapezoid(x=wavelengths*1e-8, y=wavelengths * 1e-8 * observed_flux * transmission_responses) /
+        (3.631*1e-20*C*1e5*trapezoid(x=wavelengths*1e-8, y=transmission_responses/(wavelengths*1e-8)))
+    )
+
+
+@partial(jax.jit, static_argnums=(0,))
+def ST_passband_luminosity(filter: Filter,
+                           wavelengths: ArrayLike,
+                           observed_flux: ArrayLike) -> ArrayLike:
+    """Return the passband luminosity in a given filter.
+
+    Args:
+        filter (Filter):
+        wavelengths (ArrayLike): wavelengths [Angstrom]
+        observed_flux (ArrayLike): observed flux [erg/s/cm^3]
+
+    Returns:
+        ArrayLike: passband luminosity [mag]
+    """
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    return -2.5 * jnp.log10(
+        trapezoid(x=wavelengths, y=wavelengths*observed_flux/1e8*transmission_responses) /
+        trapezoid(x=wavelengths, y=wavelengths*transmission_responses)
+    )-21.10
 
 
 @jax.jit
