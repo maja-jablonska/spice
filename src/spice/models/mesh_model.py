@@ -49,28 +49,38 @@ MeshModelNamedTuple = namedtuple("MeshModel",
 class MeshModel(Model, MeshModelNamedTuple):
     # Stellar properties
     center: ArrayLike
+
+    # Solar radii
     radius: float
+    # Solar masses
     mass: float
 
     # Mesh properties
     # vertices and centers in the reference frame of centered on the center vector
+    # Radius
     d_vertices: ArrayLike
     faces: ArrayLike
     d_centers: ArrayLike
+    # Sphere area
     base_areas: ArrayLike
 
     parameters: ArrayLike
     log_g_index: Optional[int]
 
     # Motion properties per-triangle
+    # km/s
     rotation_velocities: ArrayLike
 
     # Pulsations
+    # km/s
     vertices_pulsation_offsets: ArrayLike
+    # km/s
     center_pulsation_offsets: ArrayLike
+    # Sphere area
     area_pulsation_offsets: ArrayLike
 
     # Per center
+    # km/s
     pulsation_velocities: ArrayLike
 
     # Rotation
@@ -78,8 +88,10 @@ class MeshModel(Model, MeshModelNamedTuple):
     rotation_matrix: ArrayLike
     rotation_matrix_prim: ArrayLike
     axis_radii: ArrayLike
+    # km/s
     rotation_velocity: ArrayLike
 
+    # km/s
     orbital_velocity: float
 
     # Occlusions
@@ -196,7 +208,6 @@ class IcosphereModel(MeshModel):
         """
 
         vertices, faces, areas, centers = icosphere(n_vertices)
-        sphere_area = 4 * jnp.pi * jnp.power(radius, 2)
 
         parameters = jnp.atleast_1d(parameters)
         if len(parameters.shape) == 1:
@@ -213,9 +224,14 @@ class IcosphereModel(MeshModel):
 
         harmonics_params = create_harmonics_params(max_pulsation_mode)
 
-        return MeshModel.__new__(cls, 0., radius, mass,
-                                 d_vertices=vertices * radius, faces=faces, d_centers=centers * radius,
-                                 base_areas=areas * sphere_area / jnp.sum(areas),
+        return MeshModel.__new__(cls,
+                                 0.,
+                                 radius,
+                                 mass,
+                                 d_vertices=vertices,
+                                 faces=faces,
+                                 d_centers=centers,
+                                 base_areas=areas,
                                  parameters=parameters,
                                  log_g_index=log_g_index,
                                  rotation_velocities=jnp.zeros_like(centers),

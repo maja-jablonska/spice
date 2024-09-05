@@ -12,6 +12,7 @@ from spice.spectrum.filter import Filter
 
 DEFAULT_CHUNK_SIZE: int = 1024
 C: float = 299792.458  # km/s
+SOL_RAD_CM = 69570000000.0
 
 apply_vrad = lambda x, vrad: x * (vrad / C + 1)
 apply_vrad_log = lambda x, vrad: x + jnp.log10(vrad / C + 1)
@@ -114,17 +115,21 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
 def simulate_observed_flux(intensity_fn: Callable[[ArrayLike, float, ArrayLike], ArrayLike],
                            m: MeshModel,
                            log_wavelengths: ArrayLike,
-                           distance: float = 9.521406136918413e+38,
+                           distance: float = 10,
                            chunk_size: int = DEFAULT_CHUNK_SIZE,
                            disable_doppler_shift: bool = False):
-    return __spectrum_flash_sum(intensity_fn,
-                                log_wavelengths,
-                                _adjust_dim(jnp.where(m.mus > 0, m.cast_areas, 0.), chunk_size),
-                                _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
-                                _adjust_dim(m.los_velocities, chunk_size),
-                                _adjust_dim(m.parameters, chunk_size),
-                                chunk_size,
-                                disable_doppler_shift)/(distance**2)
+    return jnp.nan_to_num(__spectrum_flash_sum(intensity_fn,
+                                               log_wavelengths,
+                                               _adjust_dim(jnp.where(m.mus > 0, m.cast_areas, 0.), chunk_size),
+                                               _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
+                                               _adjust_dim(m.los_velocities, chunk_size),
+                                               _adjust_dim(m.parameters, chunk_size),
+                                               chunk_size,
+                                               disable_doppler_shift) * jnp.power(m.radius,
+                                                                                  2) * 5.08326693599739e-16 / (
+                                      distance ** 2))
+
+
 # -> erg/s/cm^2/A
 # /sr by sie bral z pol powierzchni podzielonych przez odleglosc
 
@@ -210,13 +215,13 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], 
                                       log_wavelengths: ArrayLike,
                                       chunk_size: int = DEFAULT_CHUNK_SIZE,
                                       disable_doppler_shift: bool = False):
-    return __flux_flash_sum(flux_fn,
-                            log_wavelengths,
-                            _adjust_dim(m.areas, chunk_size),
-                            _adjust_dim(m.los_velocities, chunk_size),
-                            _adjust_dim(m.parameters, chunk_size),
-                            chunk_size,
-                            disable_doppler_shift)
+    return jnp.nan_to_num(__flux_flash_sum(flux_fn,
+                                           log_wavelengths,
+                                           _adjust_dim(m.areas, chunk_size),
+                                           _adjust_dim(m.los_velocities, chunk_size),
+                                           _adjust_dim(m.parameters, chunk_size),
+                                           chunk_size,
+                                           disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)
 
 
 @partial(jax.jit, static_argnums=(0, 3))
@@ -260,8 +265,8 @@ def AB_passband_luminosity(filter: Filter,
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     return -2.5 * jnp.log10(
-        trapezoid(x=wavelengths*1e-8, y=wavelengths * 1e-8 * observed_flux * transmission_responses) /
-        (3.631*1e-20*C*1e5*trapezoid(x=wavelengths*1e-8, y=transmission_responses/(wavelengths*1e-8)))
+        trapezoid(x=wavelengths * 1e-8, y=wavelengths * 1e-8 * observed_flux * transmission_responses) /
+        (3.631 * 1e-20 * C * 1e5 * trapezoid(x=wavelengths * 1e-8, y=transmission_responses / (wavelengths * 1e-8)))
     )
 
 
@@ -281,9 +286,9 @@ def ST_passband_luminosity(filter: Filter,
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     return -2.5 * jnp.log10(
-        trapezoid(x=wavelengths, y=wavelengths*observed_flux/1e8*transmission_responses) /
-        trapezoid(x=wavelengths, y=wavelengths*transmission_responses)
-    )-21.10
+        trapezoid(x=wavelengths, y=wavelengths * observed_flux / 1e8 * transmission_responses) /
+        trapezoid(x=wavelengths, y=wavelengths * transmission_responses)
+    ) - 21.10
 
 
 @jax.jit

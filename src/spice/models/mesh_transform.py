@@ -22,7 +22,6 @@ def _is_arraylike(x):
 @jax.jit
 def _transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
     cast_vector = cast_to_normal_plane(vector, mesh.los_vector)
-    cast_vertices = cast_to_normal_plane(cast_vector + mesh.d_vertices, mesh.los_vector)
     return mesh._replace(center=vector)
 
 
