@@ -2,7 +2,7 @@ from spice.models import IcosphereModel
 from spice.models.mesh_transform import add_rotation, evaluate_rotation
 from spice.models.spots import add_spots
 from spice.plots import plot_3D, plot_3D_mesh_and_spectrum
-from spice.spectrum import simulate_spectrum
+from spice.spectrum import simulate_observed_flux
 import astropy.units as u
 import jax.numpy as jnp
 import numpy as np
@@ -45,13 +45,13 @@ vws = jnp.concatenate([jnp.linspace(3000., 3999.9, 1000),
                         jnp.linspace(5000.1, 11000, 1000)])
 
 # for a single spectrum:
-%time spec = simulate_spectrum(tp.intensity, mts[0], jnp.log10(vws), chunk_size=chunk_size).block_until_ready() # Wall time: 30.7 s on A100, 40GB for 1280 triangles (1min 24s for 5120)
-%time spec = simulate_spectrum(tp.intensity, mts[0], jnp.log10(vws), chunk_size=chunk_size).block_until_ready() # Wall time: 18.7 s on A100, 40GB for 1280 triangles (1min 17s for 5120)
+%time spec = simulate_observed_flux(tp.intensity, mts[0], jnp.log10(vws), chunk_size=chunk_size).block_until_ready() # Wall time: 30.7 s on A100, 40GB for 1280 triangles (1min 24s for 5120)
+%time spec = simulate_observed_flux(tp.intensity, mts[0], jnp.log10(vws), chunk_size=chunk_size).block_until_ready() # Wall time: 18.7 s on A100, 40GB for 1280 triangles (1min 17s for 5120)
 
 # Compute spectra:
 # This should take about 15min on A100, 40GB (50 times, 1280 traingles) 
 # Or: 2h10min for 100 times and 5120 triangles
-%time specs = [simulate_spectrum(tp.intensity, mt0, jnp.log10(vws), chunk_size=chunk_size) for mt0 in mts] 
+%time specs = [simulate_observed_flux(tp.intensity, mt0, jnp.log10(vws), chunk_size=chunk_size) for mt0 in mts]
 
 # Now compute photometric time series
 from spice.spectrum.filter import BesselU, BesselB, BesselV
