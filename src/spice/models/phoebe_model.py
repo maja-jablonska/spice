@@ -53,11 +53,11 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def centers(self) -> ArrayLike:
-        return self.center + self.d_centers
+        return self.d_centers
 
     @property
     def velocities(self) -> ArrayLike:
-        return self.orbital_velocity + self.center_velocities
+        return self.center_velocities
 
     @property
     def mus(self) -> ArrayLike:
@@ -77,11 +77,11 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def cast_vertices(self) -> ArrayLike:
-        return self.center + self.d_cast_vertices
+        return self.d_cast_vertices
 
     @property
     def cast_centers(self) -> ArrayLike:
-        return self.center + self.d_cast_centers
+        return self.d_cast_centers
 
     @property
     def cast_areas(self) -> ArrayLike:
@@ -95,7 +95,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                   parameter_values: Dict[str, float] = None,
                   component: Optional[Component] = None,
                   override_parameters: Optional[ArrayLike] = None) -> "PhoebeModel":
-        radius = phoebe_config.get_quantity('requiv', component=component) * R_SOL_CM
+        radius = phoebe_config.get_quantity('requiv', component=component)
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component) * DAY_TO_S
         rotation_axis = np.array([0., np.sin(inclination), np.cos(inclination)])
