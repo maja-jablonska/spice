@@ -3,6 +3,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
+
 from .mesh_generation import face_center
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
 from spice.models.phoebe_model import PhoebeModel
@@ -14,6 +15,7 @@ from .utils import (cast_to_normal_plane, mesh_polar_vertices,
                     evaluate_many_fouriers_prim_for_value,
                     spherical_harmonic)
 
+import astropy.units as u
 
 def _is_arraylike(x):
     return hasattr(x, '__array__') or hasattr(x, '__array_interface__')
@@ -21,7 +23,6 @@ def _is_arraylike(x):
 
 @jax.jit
 def _transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
-    cast_vector = cast_to_normal_plane(vector, mesh.los_vector)
     return mesh._replace(center=vector)
 
 
@@ -92,12 +93,12 @@ def add_rotation(mesh: MeshModel,
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     rotation_velocity_cm = mesh.rotation_velocity * 1e5
-    theta = (rotation_velocity_cm * t) / mesh.radius  # cm
+    theta = (rotation_velocity_cm * t) / mesh.radius / u.solRad.to(u.cm)  # cm
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)  # cm
     t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta)  # cm
     rotated_vertices = jnp.matmul(mesh.d_vertices, t_rotation_matrix)  # cm
     rotated_centers = jnp.matmul(mesh.d_centers, t_rotation_matrix)  # cm
-    rotated_centers_vel = rotation_velocity_cm * jnp.matmul(mesh.d_centers / mesh.radius, t_rotation_matrix_prim)  # cm
+    rotated_centers_vel = rotation_velocity_cm * jnp.matmul(mesh.d_centers, t_rotation_matrix_prim)  # cm
 
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
     return mesh._replace(d_vertices=rotated_vertices,
