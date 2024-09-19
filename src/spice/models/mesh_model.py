@@ -29,8 +29,8 @@ def create_harmonics_params(n: int):
 
 
 def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0):
-    return jnp.log(((6.6743e-11 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1) * 1e-2, 2)) -
-                    jnp.power(rot_velocities, 2) / jnp.linalg.norm(d_centers, axis=1)) / 9.80665)
+    return jnp.log(((274.20011165737316 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1), 2)) -
+                    jnp.power(rot_velocities, 2) / (695700000.0*jnp.linalg.norm(d_centers, axis=1))) / 9.80665)
 
 
 MeshModelNamedTuple = namedtuple("MeshModel",
