@@ -92,20 +92,20 @@ class PhoebeConfig:
             return self.b.get_quantity(qualifier=qualifier, **kwargs).value
         
     def get_mesh_vertices(self, time: float, component: Optional[Component] = None) -> np.array:
-        return self.get_parameter(time, 'xyz_elements', component)*R_SOL_CM
+        return self.get_parameter(time, 'xyz_elements', component)
     
     def get_mesh_projected_vertices(self, time: float, component: Optional[Component] = None) -> np.array:
-        return self.get_parameter(time, 'uvw_elements', component)*R_SOL_CM
+        return self.get_parameter(time, 'uvw_elements', component)
     
     def get_mesh_projected_centers(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'us', component).reshape((-1, 1)),
                                self.get_parameter(time, 'vs', component).reshape((-1, 1)),
-                               self.get_parameter(time, 'ws', component).reshape((-1, 1))], axis=1)*R_SOL_CM
+                               self.get_parameter(time, 'ws', component).reshape((-1, 1))], axis=1)
         
     def get_mesh_centers(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'xs', component).reshape((-1, 1)),
                                self.get_parameter(time, 'ys', component).reshape((-1, 1)),
-                               self.get_parameter(time, 'zs', component).reshape((-1, 1))], axis=1)*R_SOL_CM
+                               self.get_parameter(time, 'zs', component).reshape((-1, 1))], axis=1)
         
     def get_center_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
         return np.concatenate([self.get_parameter(time, 'vus', component).reshape((-1, 1)),
@@ -119,7 +119,7 @@ class PhoebeConfig:
     def get_projected_areas(self, time: float, component: Optional[Component] = None) -> np.array:
         areas = self.get_parameter(time, 'areas', component)
         visibilities = self.get_parameter(time, 'visibilities', component)
-        return areas*self.get_mus(time, component)*R_SURFACE_AREA*visibilities
+        return areas*self.get_mus(time, component)*visibilities
     
     def get_radial_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'vws', component)
@@ -142,7 +142,7 @@ class PhoebeConfig:
                                self.b.get_parameter(qualifier='vs', component=str(component),
                                                     dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1)),
                                self.b.get_parameter(qualifier='ws', component=str(component),
-                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1))], axis=1)*R_SOL_CM
+                                                    dataset=self.orbit_dataset_name, kind='orb').value.reshape((-1, 1))], axis=1)
         
     def get_all_orbit_velocities(self, component: Component) -> np.array:
         if self.orbit_dataset_name is None:
