@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Synthetic Photometry &mdash; SPICE 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js?v=5d32c60e"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="_static/documentation_options.js?v=f2a433a1"></script>
+        <script src="_static/doctools.js?v=9a2dae69"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            SPICE
+          </a>
+              <div class="version">
+                1.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mesh.html">Creating an Icosphere Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">SPICE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Synthetic Photometry</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/synthetic_photometry.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="synthetic-photometry">
+<h1>Synthetic Photometry<a class="headerlink" href="#synthetic-photometry" title="Link to this heading"></a></h1>
+<p>SPICE provides robust capabilities for synthetic photometry calculations. This section demonstrates how to use SPICE to generate synthetic photometry for various passbands and calculate stellar luminosities.</p>
+<section id="passband-luminosities">
+<h2>Passband Luminosities<a class="headerlink" href="#passband-luminosities" title="Link to this heading"></a></h2>
+<p>SPICE can calculate luminosities for different photometric filters, given a synthetic spectrum:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.spectrum.filter</span> <span class="kn">import</span> <span class="n">BesselU</span><span class="p">,</span> <span class="n">BesselB</span><span class="p">,</span> <span class="n">BesselV</span><span class="p">,</span> <span class="n">Bolometric</span><span class="p">,</span> <span class="n">GaiaG</span>
+<span class="kn">from</span> <span class="nn">spice.spectrum.spectrum</span> <span class="kn">import</span> <span class="n">AB_passband_luminosity</span><span class="p">,</span> <span class="n">luminosity</span>
+
+<span class="c1"># Calculate passband luminosities</span>
+<span class="n">filters</span> <span class="o">=</span> <span class="p">[</span><span class="n">BesselU</span><span class="p">(),</span> <span class="n">BesselB</span><span class="p">(),</span> <span class="n">BesselV</span><span class="p">(),</span> <span class="n">Bolometric</span><span class="p">(),</span> <span class="n">GaiaG</span><span class="p">()]</span>
+<span class="n">passband_lums</span> <span class="o">=</span> <span class="p">[</span><span class="n">AB_passband_luminosity</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">wavelengths</span><span class="p">,</span> <span class="n">flux</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">filters</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>This code snippet demonstrates how to calculate luminosities for Bessel U, B, V, Bolometric, and Gaia G passbands.</p>
+</section>
+<section id="solar-luminosity-calculation">
+<h2>Solar Luminosity Calculation<a class="headerlink" href="#solar-luminosity-calculation" title="Link to this heading"></a></h2>
+<p>SPICE can be used to calculate theoretical stellar luminosities, such as the Sun’s:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">astropy.units</span> <span class="k">as</span> <span class="nn">u</span>
+<span class="kn">import</span> <span class="nn">jax.numpy</span> <span class="k">as</span> <span class="nn">jnp</span>
+
+<span class="c1"># Calculate theoretical solar luminosity</span>
+<span class="n">sigma</span> <span class="o">=</span> <span class="p">(</span><span class="mf">5.67e-8</span> <span class="o">*</span> <span class="n">u</span><span class="o">.</span><span class="n">W</span> <span class="o">/</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">m</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">K</span><span class="o">**</span><span class="mi">4</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">erg</span> <span class="o">/</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">s</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">K</span><span class="o">**</span><span class="mi">4</span><span class="p">))</span>
+<span class="n">solar_luminosity</span> <span class="o">=</span> <span class="mf">0.9997011</span> <span class="o">*</span> <span class="n">jnp</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">areas</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">solRad</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">u</span><span class="o">.</span><span class="n">cm</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">sigma</span> <span class="o">*</span> <span class="p">(</span><span class="mi">5772</span><span class="o">*</span><span class="n">u</span><span class="o">.</span><span class="n">K</span><span class="p">)</span><span class="o">**</span><span class="mi">4</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Theoretical luminosity of the Sun: </span><span class="si">{</span><span class="n">solar_luminosity</span><span class="si">:</span><span class="s2">.3e</span><span class="si">}</span><span class="s2"> erg/s&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>This calculation uses the Stefan-Boltzmann law and the known properties of the Sun to compute its theoretical luminosity.</p>
+</section>
+<section id="blackbody-luminosity-offsets">
+<h2>Blackbody Luminosity Offsets<a class="headerlink" href="#blackbody-luminosity-offsets" title="Link to this heading"></a></h2>
+<p>SPICE includes utilities to calculate luminosity offsets for blackbody models with varying resolutions:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.models</span> <span class="kn">import</span> <span class="n">IcosphereModel</span>
+<span class="kn">from</span> <span class="nn">spice.spectrum</span> <span class="kn">import</span> <span class="n">simulate_observed_flux</span><span class="p">,</span> <span class="n">luminosity</span><span class="p">,</span> <span class="n">absolute_bol_luminosity</span>
+<span class="kn">from</span> <span class="nn">spice.spectrum.filter</span> <span class="kn">import</span> <span class="n">BesselB</span><span class="p">,</span> <span class="n">BesselI</span><span class="p">,</span> <span class="n">GaiaG</span><span class="p">,</span> <span class="n">JohnsonV</span>
+<span class="kn">from</span> <span class="nn">spice.spectrum.spectrum</span> <span class="kn">import</span> <span class="n">AB_passband_luminosity</span><span class="p">,</span> <span class="n">ST_passband_luminosity</span>
+<span class="kn">from</span> <span class="nn">transformer_payne</span> <span class="kn">import</span> <span class="n">Blackbody</span>
+
+<span class="k">def</span> <span class="nf">calculate_blackbody_luminosity</span><span class="p">(</span><span class="n">n_vertices</span><span class="p">):</span>
+    <span class="n">bb</span> <span class="o">=</span> <span class="n">Blackbody</span><span class="p">()</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">IcosphereModel</span><span class="o">.</span><span class="n">construct</span><span class="p">(</span><span class="n">n_vertices</span><span class="p">,</span> <span class="mf">1.</span><span class="p">,</span> <span class="mf">1.</span><span class="p">,</span> <span class="n">bb</span><span class="o">.</span><span class="n">solar_parameters</span><span class="p">,</span> <span class="n">bb</span><span class="o">.</span><span class="n">parameter_names</span><span class="p">)</span>
+
+    <span class="n">wavelengths</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mf">1.</span><span class="p">,</span> <span class="mf">100000.</span><span class="p">,</span> <span class="mi">100000</span><span class="p">)</span>
+    <span class="n">flux</span> <span class="o">=</span> <span class="n">simulate_observed_flux</span><span class="p">(</span><span class="n">bb</span><span class="o">.</span><span class="n">intensity</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">wavelengths</span><span class="p">),</span> <span class="mf">10.</span><span class="p">,</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">disable_doppler_shift</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">solar_luminosity</span> <span class="o">=</span> <span class="n">luminosity</span><span class="p">(</span><span class="n">bb</span><span class="o">.</span><span class="n">flux</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">wavelengths</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;n_vertices&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">d_vertices</span><span class="p">),</span>
+        <span class="s1">&#39;solar_luminosity&#39;</span><span class="p">:</span> <span class="n">solar_luminosity</span><span class="p">,</span>
+        <span class="s1">&#39;absolute_bol_luminosity&#39;</span><span class="p">:</span> <span class="n">absolute_bol_luminosity</span><span class="p">(</span><span class="n">solar_luminosity</span><span class="p">),</span>
+        <span class="s1">&#39;AB_solar_apparent_mag_B&#39;</span><span class="p">:</span> <span class="n">AB_passband_luminosity</span><span class="p">(</span><span class="n">BesselB</span><span class="p">(),</span> <span class="n">wavelengths</span><span class="p">,</span> <span class="n">flux</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]),</span>
+        <span class="s1">&#39;AB_solar_apparent_mag_V&#39;</span><span class="p">:</span> <span class="n">AB_passband_luminosity</span><span class="p">(</span><span class="n">JohnsonV</span><span class="p">(),</span> <span class="n">wavelengths</span><span class="p">,</span> <span class="n">flux</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]),</span>
+        <span class="s1">&#39;ST_solar_apparent_mag_G&#39;</span><span class="p">:</span> <span class="n">ST_passband_luminosity</span><span class="p">(</span><span class="n">GaiaG</span><span class="p">(),</span> <span class="n">wavelengths</span><span class="p">,</span> <span class="n">flux</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]),</span>
+    <span class="p">}</span>
+
+<span class="c1"># Calculate for different resolutions</span>
+<span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="n">calculate_blackbody_luminosity</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">100</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">5000</span><span class="p">,</span> <span class="mi">10000</span><span class="p">]]</span>
+</pre></div>
+</div>
+<p>This example shows how to calculate luminosities and magnitudes for blackbody models with different numbers of vertices, allowing for analysis of how model resolution affects the results.</p>
+<p>These examples demonstrate SPICE’s capabilities in synthetic photometry, from basic passband luminosity calculations to more complex analyses of blackbody models at various resolutions.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Maya Jablonska.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
