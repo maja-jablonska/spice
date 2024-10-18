@@ -1,21 +1,25 @@
 from functools import partial
+from typing import List, Union
+import warnings
 
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
+import numpy as np
 
 from .mesh_generation import face_center
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
 from spice.models.phoebe_model import PhoebeModel
-from .utils import (cast_to_normal_plane, mesh_polar_vertices,
+from .utils import (mesh_polar_vertices,
                     rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
                     calculate_axis_radii,
                     evaluate_many_fouriers_for_value,
                     evaluate_many_fouriers_prim_for_value,
-                    spherical_harmonic)
+                    spherical_harmonic, spherical_harmonic_with_tilt)
 
 import astropy.units as u
+
 
 def _is_arraylike(x):
     return hasattr(x, '__array__') or hasattr(x, '__array_interface__')
@@ -48,6 +52,128 @@ def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the position is already evaluated in the PHOEBE model.")
     return _transform(mesh, vector)
+
+
+@jax.jit
+def _update_parameter(mesh: MeshModel, parameter_index: ArrayLike, parameter_values: ArrayLike) -> MeshModel:
+    return mesh._replace(parameters=mesh.parameters.at[:, parameter_index].set(parameter_values))
+
+
+def update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], parameter_values: ArrayLike, parameter_names: List[str] = None) -> MeshModel:
+    """
+    Update a specific parameter or set of parameters in the mesh model.
+
+    This function allows updating one or multiple parameters of the mesh model. It can handle
+    parameter specification by name (string), index (integer), or an array-like of indices.
+
+    Args:
+        mesh (MeshModel): The mesh model to be updated.
+        parameter (Union[str, int, ArrayLike]): The parameter(s) to update. Can be:
+            - A string representing the parameter name.
+            - An integer representing the parameter index.
+            - An array-like of integers representing multiple parameter indices.
+        parameter_values (ArrayLike): The new value(s) for the specified parameter(s).
+            Should match the shape of the parameter specification.
+        parameter_names (List[str]): A list of parameter names used for the model while constructing the mesh.
+
+    Returns:
+        MeshModel: The updated mesh model with the new parameter value(s).
+
+    Raises:
+        ValueError: If the specified parameter name is not found in the mesh model's parameter list.
+
+    Note:
+        If the mesh is an instance of PhoebeModel, this function will raise a ValueError as PHOEBE models
+        are considered read-only in SPICE.
+    """
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError(
+            "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
+
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError(
+            "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
+    if isinstance(parameter, str):
+        if parameter_names is None:
+            raise ValueError(
+                "A list of parameters used for the model while constructing the mesh must be provided to update parameters by name.")
+        if parameter not in mesh.parameter_names:
+            raise ValueError(
+                f"Parameter {parameter} not found in mesh model. Model contains parameters: {mesh.parameter_names}")
+        parameter_index = parameter_names.index(parameter)
+    else:
+        parameter_index = parameter
+    return _update_parameter(mesh, parameter_index, parameter_values)
+
+
+@jax.jit
+def _update_parameters(mesh: MeshModel, parameter_indices: ArrayLike, parameter_values: ArrayLike) -> MeshModel:
+    def update_single_parameter(params, idx_val):
+        idx, val = idx_val
+        return params.at[:, idx].set(val)
+
+    updated_parameters = jax.lax.fori_loop(
+        0, len(parameter_indices),
+        lambda i, params: update_single_parameter(
+            params, (parameter_indices[i], parameter_values[i])),
+        mesh.parameters
+    )
+    return mesh._replace(parameters=updated_parameters)
+
+
+def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], parameter_values: ArrayLike, parameter_names: List[str] = None) -> MeshModel:
+    """
+    Update multiple parameters in the mesh model simultaneously.
+
+    This function allows updating multiple parameters of the mesh model at once. It can handle
+    parameter specification by names (list of strings) or indices (list of integers).
+
+    Args:
+        mesh (MeshModel): The mesh model to be updated.
+        parameters (Union[List[str], List[int]]): The parameters to update. Can be:
+            - A list of strings representing parameter names.
+            - A list of integers representing parameter indices.
+        parameter_values (ArrayLike): The new values for the specified parameters.
+            Should be an array-like with the same length as the parameters list.
+        parameter_names (List[str]): A list of parameter names used for the model while constructing the mesh.
+
+    Returns:
+        MeshModel: The updated mesh model with the new parameter values.
+
+    Raises:
+        ValueError: If any specified parameter name is not found in the mesh model's parameter list,
+                    or if the mesh is an instance of PhoebeModel.
+
+    Note:
+        This function is more efficient than calling update_parameter multiple times when
+        updating several parameters at once.
+    """
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError(
+            "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
+
+    if not isinstance(parameters, (list, tuple, np.ndarray, jnp.ndarray)):
+        raise ValueError(
+            "Parameters must be a list, tuple, or array-like object.")
+
+    if len(parameters) != len(parameter_values):
+        raise ValueError(
+            "The number of parameters must match the number of parameter values.")
+
+    if isinstance(parameters[0], str):
+        if parameter_names is None:
+            raise ValueError(
+                "A list of parameters used for the model while constructing the mesh must be provided to update parameters by name.")
+        parameter_indices = []
+        for param in parameters:
+            if param not in parameter_names:
+                raise ValueError(
+                    f"Parameter {param} not found in mesh model. Model contains parameters: {mesh.parameter_names}")
+            parameter_indices.append(parameter_names.index(param))
+    else:
+        parameter_indices = parameters
+
+    return _update_parameters(mesh, jnp.array(parameter_indices), jnp.array(parameter_values))
 
 
 @jax.jit
@@ -94,11 +220,14 @@ def add_rotation(mesh: MeshModel,
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     rotation_velocity_cm = mesh.rotation_velocity * 1e5
     theta = (rotation_velocity_cm * t) / mesh.radius / u.solRad.to(u.cm)  # cm
-    t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)  # cm
-    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta)  # cm
+    t_rotation_matrix = evaluate_rotation_matrix(
+        mesh.rotation_matrix, theta)  # cm
+    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(
+        mesh.rotation_matrix_prim, theta)  # cm
     rotated_vertices = jnp.matmul(mesh.d_vertices, t_rotation_matrix)  # cm
     rotated_centers = jnp.matmul(mesh.d_centers, t_rotation_matrix)  # cm
-    rotated_centers_vel = rotation_velocity_cm * jnp.matmul(mesh.d_centers, t_rotation_matrix_prim)  # cm
+    rotated_centers_vel = rotation_velocity_cm * \
+        jnp.matmul(mesh.d_centers, t_rotation_matrix_prim)  # cm
 
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
     return mesh._replace(d_vertices=rotated_vertices,
@@ -118,7 +247,7 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
 
     Args:
         mesh (MeshModel): The mesh model to evaluate rotation for.
-        t (ArrayLike): The time at which to evaluate the rotation.
+        t (ArrayLike): The time at which to evaluate the rotation. [seconds]
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.
@@ -148,18 +277,25 @@ def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
 @partial(jax.jit, static_argnums=(4,))
 def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
                    pulsation_periods: ArrayLike, fourier_series_parameters: ArrayLike,
-                   total_pad_len: int) -> MeshModel:
-    harmonic_ind = spherical_harmonics_parameters[0] + m.max_pulsation_mode * spherical_harmonics_parameters[1]
+                   total_pad_len: int,
+                   pulsation_axes: ArrayLike, pulsation_angles: ArrayLike) -> MeshModel:
+    harmonic_ind = spherical_harmonics_parameters[0] + \
+        m.max_pulsation_mode * spherical_harmonics_parameters[1]
     return m._replace(
-        pulsation_periods=m.pulsation_periods.at[harmonic_ind].set(pulsation_periods),
+        pulsation_periods=m.pulsation_periods.at[harmonic_ind].set(
+            pulsation_periods),
         fourier_series_parameters=m.fourier_series_parameters.at[harmonic_ind].set(
             jnp.pad(fourier_series_parameters, ((0, total_pad_len), (0, 0)))
-        )
+        ),
+        pulsation_axes=m.pulsation_axes.at[harmonic_ind].set(pulsation_axes),
+        pulsation_angles=m.pulsation_angles.at[harmonic_ind].set(
+            pulsation_angles)
     )
 
 
-def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
-                  period: float, fourier_series_parameters: ArrayLike) -> MeshModel:
+def add_pulsation(m: MeshModel, m_order: ArrayLike, n_degree: ArrayLike,
+                  period: float, fourier_series_parameters: ArrayLike,
+                  pulsation_axes: ArrayLike = None, pulsation_angles: ArrayLike = None) -> MeshModel:
     """
     Adds pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -169,11 +305,14 @@ def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
 
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
-        spherical_harmonics_parameters (ArrayLike): Parameters for the spherical harmonics, typically including
-            the degree (l) and order (m) of the harmonics.
-        period (float): Pulsation period
+        m_order (ArrayLike): The order (m) of the spherical harmonics.
+        n_degree (ArrayLike): The degree (n) of the spherical harmonics.
+        period (float): Pulsation period in seconds.
         fourier_series_parameters (ArrayLike): Dynamic parameters for the Fourier series that define the
-            time-varying aspect of the pulsation.
+            time-varying aspect of the pulsation. Shape should be (N, 2) where N is the number of terms,
+            and each row contains [amplitude, phase] for that term.
+        pulsation_axes (ArrayLike): Axes of the pulsation. Defaults to the rotation axis of the mesh model.
+        pulsation_angles (ArrayLike): Angles of the pulsation. Defaults to zero.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -185,18 +324,118 @@ def add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
         raise ValueError("PHOEBE models are read-only in SPICE.")
     if _is_arraylike(period):
         period = period[0]
-    return _add_pulsation(m, spherical_harmonics_parameters, period,
-                          fourier_series_parameters, m.max_fourier_order-fourier_series_parameters.shape[0])
+
+    if pulsation_axes is None:
+        pulsation_axes = m.rotation_axis
+    if pulsation_angles is None:
+        pulsation_angles = 0.
+
+    harmonic_ind = m_order + m.max_pulsation_mode * n_degree
+    if harmonic_ind >= len(m.pulsation_periods):
+        warnings.warn("Pulsation mode is too high for the mesh model - the mesh model has" +
+                      "been initialized with a maximum pulsation mode of {}".format(m.max_pulsation_mode) +
+                      "This pulsation will have no effect.")
+
+    return _add_pulsation(m, jnp.array([m_order, n_degree]), period, fourier_series_parameters,
+                          int(m.max_fourier_order -
+                              fourier_series_parameters.shape[0]),
+                          pulsation_axes, pulsation_angles)
+
+
+@partial(jax.jit, static_argnums=(4,))
+def _add_pulsations(m: MeshModel,
+                    pulsation_periods: ArrayLike,
+                    fourier_series_parameters: ArrayLike,
+                    harmonic_indices: ArrayLike,
+                    total_pad_len: int,
+                    pulsation_axes: ArrayLike,
+                    pulsation_angles: ArrayLike) -> MeshModel:
+
+    def update_pulsation(carry, inputs):
+        m, harmonic_ind, period, fourier_params, pulsation_axes, pulsation_angles = carry, *inputs
+        padded_fourier_params = jnp.pad(fourier_params.reshape(
+            (-1, 2)), ((0, total_pad_len), (0, 0)))
+
+        new_periods = m.pulsation_periods.at[harmonic_ind].set(period)
+        new_fourier_params = m.fourier_series_parameters.at[harmonic_ind].set(
+            padded_fourier_params)
+        new_axes = m.pulsation_axes.at[harmonic_ind].set(pulsation_axes)
+        new_angles = m.pulsation_angles.at[harmonic_ind].set(pulsation_angles)
+
+        return m._replace(pulsation_periods=new_periods,
+                          fourier_series_parameters=new_fourier_params,
+                          pulsation_axes=new_axes,
+                          pulsation_angles=new_angles), None
+
+    updated_m, _ = jax.lax.scan(update_pulsation, m,
+                                (harmonic_indices,
+                                 pulsation_periods, fourier_series_parameters,
+                                 pulsation_axes, pulsation_angles))
+
+    return updated_m
+
+
+def add_pulsations(m: MeshModel, m_orders: ArrayLike, n_degrees: ArrayLike,
+                   periods: ArrayLike, fourier_series_parameters: ArrayLike,
+                   pulsation_axes: ArrayLike = None, pulsation_angles: ArrayLike = None) -> MeshModel:
+    """
+    Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
+
+    This function updates the mesh model's pulsation parameters based on the provided arrays of spherical harmonics
+    and Fourier series parameters. It uses JAX's vmap capabilities for efficient computation.
+
+    Args:
+        m (MeshModel): The mesh model to add pulsation effects to.
+        m_orders (ArrayLike): Array of orders (m) of the spherical harmonics.
+        n_degrees (ArrayLike): Array of degrees (n) of the spherical harmonics.
+        periods (ArrayLike): Array of pulsation periods in seconds.
+        fourier_series_parameters (ArrayLike): Array of dynamic parameters for the Fourier series that define the
+            time-varying aspect of the pulsations. Shape should be (K, N, 2) where K is the number of pulsations,
+            N is the number of terms for each pulsation, and each inner array contains [amplitude, phase] for that term.
+        pulsation_axes (ArrayLike): Array of pulsation axes. Defaults to the rotation axis of the mesh model.
+        pulsation_angles (ArrayLike): Array of pulsation angles. Defaults to zero.
+
+    Returns:
+        MeshModel: The mesh model with updated pulsation parameters.
+
+    Raises:
+        ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only within SPICE.
+        ValueError: If the input arrays have inconsistent lengths.
+    """
+    if isinstance(m, PhoebeModel):
+        raise ValueError("PHOEBE models are read-only in SPICE.")
+
+    if not (len(m_orders) == len(n_degrees) == len(periods) == len(fourier_series_parameters)):
+        raise ValueError("Input arrays must have consistent lengths.")
+
+    if pulsation_axes is None:
+        pulsation_axes = mesh.rotation_axis.reshape(
+            (1, 3)).repeat(len(m_orders), axis=0)
+    if pulsation_angles is None:
+        pulsation_angles = jnp.zeros_like(m_orders)
+
+    harmonic_indices = m_orders + m.max_pulsation_mode * n_degrees
+    total_pad_len = int(m.max_fourier_order -
+                        fourier_series_parameters.shape[0]+1)
+
+    return _add_pulsations(m, periods,
+                           fourier_series_parameters, harmonic_indices, total_pad_len,
+                           pulsation_axes, pulsation_angles)
 
 
 @jax.jit
 def _reset_pulsations(m: MeshModel) -> MeshModel:
     return m._replace(
-        vertices_pulsation_offsets=jnp.zeros_like(m.vertices_pulsation_offsets),
+        vertices_pulsation_offsets=jnp.zeros_like(
+            m.vertices_pulsation_offsets),
         center_pulsation_offsets=jnp.zeros_like(m.center_pulsation_offsets),
         area_pulsation_offsets=jnp.zeros_like(m.area_pulsation_offsets),
         pulsation_periods=jnp.nan * jnp.ones_like(m.pulsation_periods),
-        fourier_series_parameters=jnp.nan * jnp.ones_like(m.fourier_series_parameters)
+        fourier_series_parameters=jnp.nan *
+        jnp.ones_like(m.fourier_series_parameters),
+        pulsation_axes=DEFAULT_ROTATION_AXIS.reshape(
+            (1, 3)).repeat(m.pulsation_periods.shape[0], axis=0),
+        pulsation_angles=jnp.zeros_like(m.pulsation_periods)
     )
 
 
@@ -226,16 +465,21 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
 
 @jax.jit
 def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, magnitude_prim: float,
-                         radius: float):
-    polar_vertices = mesh_polar_vertices(m.d_vertices)
-    polar_centers = mesh_polar_vertices(m.d_centers)
-    vertex_harmonic_mags = spherical_harmonic(harmonic_parameters[0], harmonic_parameters[1], polar_vertices)[:,
-                           jnp.newaxis]
-    center_harmonic_mags = spherical_harmonic(harmonic_parameters[0], harmonic_parameters[1], polar_centers)[:,
-                           jnp.newaxis]
-    direction_vectors = m.d_vertices / jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
-    center_direction_vectors = m.d_centers / jnp.linalg.norm(m.d_centers, axis=1).reshape((-1, 1))
-    new_vertices = (radius * magnitude * vertex_harmonic_mags * direction_vectors)
+                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
+    # polar_vertices = mesh_polar_vertices(m.d_vertices)
+    # polar_centers = mesh_polar_vertices(m.d_centers)
+    vertex_harmonic_mags = spherical_harmonic_with_tilt(harmonic_parameters[0], harmonic_parameters[1], m.d_vertices,
+                                                        pulsation_axis, pulsation_angle)[:,
+                                                                                         jnp.newaxis]
+    center_harmonic_mags = spherical_harmonic_with_tilt(harmonic_parameters[0], harmonic_parameters[1], m.d_centers,
+                                                        pulsation_axis, pulsation_angle)[:,
+                                                                                         jnp.newaxis]
+    direction_vectors = m.d_vertices / \
+        jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
+    center_direction_vectors = m.d_centers / \
+        jnp.linalg.norm(m.d_centers, axis=1).reshape((-1, 1))
+    new_vertices = (radius * magnitude *
+                    vertex_harmonic_mags * direction_vectors)
     new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(new_vertices + m.d_vertices,
                                                                                m.faces.astype(jnp.int32))
     return jnp.nan_to_num(new_vertices), jnp.nan_to_num(new_areas - m.base_areas), jnp.nan_to_num(
@@ -284,14 +528,17 @@ def evaluate_pulsations(m: MeshModel, t: ArrayLike):
     )
     harmonic_params = create_harmonics_params(m.max_pulsation_mode)
     vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(calculate_pulsations,
-                                                                                in_axes=(None, 0, 0, 0, None))(m,
-                                                                                                               harmonic_params,
-                                                                                                               pulsation_magnitudes,
-                                                                                                               pulsation_velocity_magnitudes,
-                                                                                                               m.radius)
+                                                                                in_axes=(None, 0, 0, 0, None, 0, 0))(m,
+                                                                                                                     harmonic_params,
+                                                                                                                     pulsation_magnitudes,
+                                                                                                                     pulsation_velocity_magnitudes,
+                                                                                                                     m.radius,
+                                                                                                                     m.pulsation_axes,
+                                                                                                                     m.pulsation_angles)
     return m._replace(
         vertices_pulsation_offsets=jnp.sum(vert_offsets, axis=0),
         center_pulsation_offsets=jnp.sum(center_offsets, axis=0),
         area_pulsation_offsets=jnp.sum(area_offsets, axis=0),
-        pulsation_velocities=jnp.sum(pulsation_velocities, axis=0) * 1e-5  # cm/s to km/s
+        pulsation_velocities=jnp.sum(
+            pulsation_velocities, axis=0) * 695700.0  # solRad to km/s
     )
