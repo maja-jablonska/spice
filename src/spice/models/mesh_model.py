@@ -1,8 +1,7 @@
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 
-from abc import abstractmethod
-from typing import List, NamedTuple, Optional, Union
+from typing import List, Optional, Union
 from collections import namedtuple
 import warnings
 
@@ -43,7 +42,8 @@ MeshModelNamedTuple = namedtuple("MeshModel",
                                   "axis_radii", "rotation_velocity", "orbital_velocity",
                                   "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
-                                  "pulsation_periods", "fourier_series_parameters"])
+                                  "pulsation_periods", "fourier_series_parameters",
+                                  "pulsation_axes", "pulsation_angles"])
 
 
 class MeshModel(Model, MeshModelNamedTuple):
@@ -106,7 +106,10 @@ class MeshModel(Model, MeshModelNamedTuple):
     spherical_harmonics_parameters: ArrayLike
     pulsation_periods: ArrayLike
     fourier_series_parameters: ArrayLike
-
+    
+    pulsation_axes: ArrayLike
+    pulsation_angles: ArrayLike
+    
     @property
     def areas(self) -> ArrayLike:
         return self.base_areas + self.area_pulsation_offsets
@@ -223,6 +226,9 @@ class IcosphereModel(MeshModel):
                     LOG_G_NAMES) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
 
         harmonics_params = create_harmonics_params(max_pulsation_mode)
+        
+        if len(parameter_names) != parameters.shape[1]:
+            raise ValueError("parameter_names must have the same length as the number of parameters.")
 
         return MeshModel.__new__(cls,
                                  0.,
@@ -253,4 +259,6 @@ class IcosphereModel(MeshModel):
                                  pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0]),
                                  # D_0 (amplitude), period
                                  fourier_series_parameters=jnp.nan * jnp.ones(
-                                     (harmonics_params.shape[0], max_fourier_order, 2)))  # D_n, phi_n
+                                     (harmonics_params.shape[0], max_fourier_order, 2)), # D_n, phi_n
+                                 pulsation_axes=DEFAULT_ROTATION_AXIS.reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
+                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1))) 
