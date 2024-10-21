@@ -1,3 +1,4 @@
+from copy import deepcopy
 import pickle
 
 import jax.numpy as jnp
@@ -34,14 +35,16 @@ class TestBinaryModels:
         assert isinstance(phoebe_binary, PhoebeBinary), "PhoebeBinary object creation failed"
 
     def test_evaluate_orbit(self, setup_binary):
-        binary = add_orbit(setup_binary, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10)
+        _binary = deepcopy(setup_binary)
+        binary = add_orbit(_binary, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10)
         time = 0.5
         n_cells = 10
         primary, secondary = evaluate_orbit(binary, time, n_cells)
         assert isinstance(primary, IcosphereModel) and isinstance(secondary, IcosphereModel), "Orbit evaluation failed to return Model instances"
 
     def test_evaluate_orbit_at_times(self, setup_binary):
-        binary = add_orbit(setup_binary, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10)
+        _binary = deepcopy(setup_binary)
+        binary = add_orbit(_binary, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10)
         times = jnp.array([0.1, 0.5, 0.9])
         n_cells = 10
         primary_models, secondary_models = evaluate_orbit_at_times(binary, times, n_cells)
