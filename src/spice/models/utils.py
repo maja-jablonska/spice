@@ -2,11 +2,7 @@ import jax.numpy as jnp
 import jax
 from jax.typing import ArrayLike
 from typing import Tuple
-import warnings
-
-from .mesh_generation import face_center
-from spice.utils import ExperimentalWarning
-
+from jax.scipy.spatial.transform import Rotation
 
 def vertex_to_polar(v: ArrayLike) -> ArrayLike:
     v += 1e-5
@@ -20,14 +16,30 @@ def vertex_to_polar(v: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def spherical_harmonic(m, n, polar_coordinates):
+def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:
+    return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))
+
+@jax.jit
+def spherical_harmonic(m, n, coordinates):
+    polar_coordinates = mesh_polar_vertices(coordinates)
     m_array = (m * jnp.ones_like(polar_coordinates[:, 0])).astype(int)
     n_array = (n * jnp.ones_like(polar_coordinates[:, 1])).astype(int)
     return jax.scipy.special.sph_harm(m_array,
                                       n_array,
-                                      polar_coordinates[:, 0],
-                                      polar_coordinates[:, 1],
+                                      polar_coordinates[:, 0],  # azimuthal angle (phi)
+                                      polar_coordinates[:, 1],  # polar angle (theta)
                                       n_max=10).real
+
+
+#@jax.jit
+def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0., 1.]), tilt_angle=0.):
+    # Normalize tilt axis
+    tilt_axis = tilt_axis / jnp.linalg.norm(tilt_axis)
+    
+    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    rotated_coords = jnp.matmul(coordinates, r_matrix)
+
+    return spherical_harmonic(m, n, rotated_coords)
 
 
 def evaluate_fourier_for_value(P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
@@ -64,11 +76,6 @@ def evaluate_fourier_prim_for_value(P: float, d: ArrayLike, phi: ArrayLike, time
 
 evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, None)))
 evaluate_many_fouriers_prim_for_value = jax.jit(jax.vmap(evaluate_fourier_prim_for_value, in_axes=(0, 0, 0, None)))
-
-
-@jax.jit
-def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:
-    return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))
 
 
 @jax.jit

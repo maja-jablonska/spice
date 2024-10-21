@@ -6,8 +6,8 @@ project = 'SPICE'
 copyright = '2024, Maya Jablonska'
 author = 'Maya Jablonska'
 
-release = '0.3'
-version = '0.3.0'
+release = '1.0'
+version = '1.0'
 
 # -- General configuration
 
