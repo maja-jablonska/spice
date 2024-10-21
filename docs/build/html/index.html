@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPICE: SPectra Integration Compiled Engine &mdash; SPICE 1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js?v=5d32c60e"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="_static/documentation_options.js?v=f2a433a1"></script>
+        <script src="_static/doctools.js?v=9a2dae69"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script async="async" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Examples" href="examples.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="#" class="icon icon-home">
+            SPICE
+          </a>
+              <div class="version">
+                1.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="mesh.html">Creating a Mesh Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a></li>
+<li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="#">SPICE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">SPICE: SPectra Integration Compiled Engine</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="spice-spectra-integration-compiled-engine">
+<h1>SPICE: SPectra Integration Compiled Engine<a class="headerlink" href="#spice-spectra-integration-compiled-engine" title="Link to this heading"></a></h1>
+<p>SPICE (SPectra Integration Compiled Engine) is a Python library designed for simulating synthetic <strong>spectra of inhomogeneous stellar surfaces</strong>. SPICE offers the following capabilities:</p>
+<p>The core principle of SPICE is numerical integration over a stellar surface. Here’s how it works:</p>
+<ol class="arabic simple">
+<li><p>The stellar surface is divided into many small elements using tessellation.</p></li>
+<li><p>For each surface element, a synthetic spectrum is calculated.</p></li>
+<li><p>These individual spectra are then summed to produce the final, integrated spectrum of the entire stellar surface.</p></li>
+</ol>
+<p>This approach allows SPICE to accurately model stars with inhomogeneous surfaces, including features like spots, temperature variations, or chemical abundance patterns.</p>
+<ol class="arabic simple">
+<li><p><strong>Stellar Surface Modeling</strong>:
+- Create icosphere models of stellar surfaces with varying resolutions
+- Add spots and other surface features to the stellar models
+- Implement rotation and pulsations for stellar mesh models</p></li>
+<li><p><strong>Spectral Synthesis</strong>:
+- Generate synthetic spectra using various models (e.g., Blackbody, TransformerPayne)
+- Simulate observed flux for different stellar configurations with varying resolutions
+- Account for Doppler shifts in spectral calculations</p></li>
+<li><p><strong>Synthetic Photometry</strong>:
+- Calculate monochromatic and bolometric luminosities
+- Compute magnitudes in various photometric systems (e.g., AB, ST)
+- Support for multiple standard filters (e.g., Johnson, Bessel, Gaia)</p></li>
+<li><p><strong>Binary System Modeling</strong>:
+- Simulate synthetic spectra and photometric for binary star systems
+- Account for eclipsing</p></li>
+<li><p><strong>Data Visualization</strong>:
+- 3D plotting of stellar surface models
+- Spectrum visualization tools</p></li>
+<li><p><strong>Performance Optimization</strong>:
+- Utilize JAX for efficient computations
+- Support for GPU acceleration</p></li>
+<li><p><strong>Interoperability</strong>:
+- Integration with other astronomical tools and libraries (e.g., PHOEBE, Synphot)</p></li>
+</ol>
+<p>The underlying spectrum model is configurable - we provide a machine-learning based spectrum emulator, <a class="reference external" href="https://github.com/RozanskiT/transformer_payne">Transformer Payne</a></p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This project is under active development.</p>
+</div>
+<section id="contents">
+<h2>Contents<a class="headerlink" href="#contents" title="Link to this heading"></a></h2>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#synthetic-photometry">Synthetic Photometry</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#binary-star-modeling">Binary Star Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#stellar-rotation">Stellar Rotation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#stellar-pulsation">Stellar Pulsation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples.html#solar-luminosity-calculation">Solar Luminosity Calculation</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="mesh.html">Creating a Mesh Model</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="mesh.html#basic-icosphere-creation">Basic Icosphere Creation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-rotation">Adding Rotation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mesh.html#visualizing-the-mesh">Visualizing the Mesh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-pulsation">Adding Pulsation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="mesh.html#tilted-pulsation-axis">Tilted Pulsation Axis</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-temperature-spots">Adding Temperature Spots</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="binaries.html#phoebe-configuration-and-binary-system-setup">PHOEBE Configuration and Binary System Setup</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="phoebe_integration.html#setting-up-a-phoebe-model">Setting up a PHOEBE Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="phoebe_integration.html#generating-spectra">Generating Spectra</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="troubleshooting.html#resource-exhaustion">Resource Exhaustion</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="examples.html" class="btn btn-neutral float-right" title="Examples" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Maya Jablonska.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
