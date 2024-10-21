@@ -163,6 +163,68 @@ This example pulsation will look like this:
 
 Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.
 
+
+Tilted Pulsation Axis
+^^^^^^^^^^^^^^^^^^^^^
+
+You can also define pulsations with an axis different from the rotation axis. This is done by specifying the `pulsation_axes` and `pulsation_angles` parameters in the `add_pulsation()` function:
+
+.. code-block:: python
+
+    from spice.models.mesh_transform import add_pulsation, evaluate_pulsations
+    import jax.numpy as jnp
+
+    # Create a basic model (assuming 'm' is already defined)
+    
+    # Add a tilted pulsation
+    tilted_m = add_pulsation(
+        m,  # Model instance
+        0,  # m order
+        1,  # n degree
+        2.,  # pulsation period
+        jnp.array([[1e-1, 0.]]),  # Fourier series parameters
+        pulsation_axes=jnp.array([0., 1., 0.]),  # Tilt axis (y-axis in this case)
+        pulsation_angles=jnp.array([45.])  # Tilt angle in degrees
+    )
+
+    # Evaluate the pulsation at a specific time
+    t = 0.5  # time in the same unit as the pulsation period
+    tilted_pulsated_m = evaluate_pulsations(tilted_m, t)
+
+This will create a pulsation with its axis tilted 45 degrees around the y-axis. You can visualize the difference between an untilted and tilted pulsation:
+
+.. code-block:: python
+
+    from spice.plots.plot_mesh import plot_3D
+    import matplotlib.pyplot as plt
+
+    # Create an untilted pulsation for comparison
+    m = IcosphereModel.construct(1000, 1., 1.,
+                                bb.to_parameters(), bb.parameter_names)
+    untilted_m = add_pulsation(m, 0, 1, 2., jnp.array([[1e-1, 0.]]))
+    tilted_m = add_pulsation(m, 0, 1, 2., jnp.array([[1e-1, 0.]]), pulsation_axes=jnp.array([0., 1., 0.]), pulsation_angles=jnp.array([45.]))
+
+    untilted_pulsated_m = evaluate_pulsations(untilted_m, 0.5)
+    tilted_pulsated_m = evaluate_pulsations(tilted_m, 0.5)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10), subplot_kw={'projection': '3d'})
+
+    plot_3D(untilted_pulsated_m, property='los_velocities', cmap='magma', axes=(fig, ax1))
+    ax1.set_title('Untilted Pulsation')
+
+    plot_3D(tilted_pulsated_m, property='los_velocities', cmap='magma', axes=(fig, ax2))
+    ax2.set_title('Tilted Pulsation')
+
+    plt.tight_layout()
+    plt.show()
+
+This will produce a visualization showing the difference between untilted and tilted pulsations:
+
+.. image:: ../img/pulsation_with_tilt.png
+   :width: 800
+   :alt: Comparison of untilted and tilted pulsations
+
+
 Adding Temperature Spots
 ------------------------
 
@@ -187,6 +249,24 @@ You can add temperature spots to your model using spherical harmonics:
 which should produce a temperature map like this:
 
 .. image:: ../img/temp_harmonic.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for harmonic series spots
+
+Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and `tilt_degree` parameters:
+
+.. code-block:: python
+
+    m = add_spherical_harmonic_spot(
+        m, # Model instance
+        4, # m order
+        4, # n degree
+        param_delta=9300, # difference in the parameter value between the spot and the background
+        param_index=0, # index of the parameter in the parameters array
+        tilt_axis=jnp.array([0., 1., 0.]),
+        tilt_degree=45.
+    )
+
+.. image:: ../img/tilted_temperature_spot.png
    :width: 600
    :alt: 3D visualization of a temperature map for harmonic series spots
 
