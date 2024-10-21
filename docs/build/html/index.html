@@ -50,6 +50,8 @@
               <ul>
 <li class="toctree-l1"><a class="reference internal" href="examples.html">Examples</a></li>
 <li class="toctree-l1"><a class="reference internal" href="mesh.html">Creating a Mesh Model</a></li>
+<li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a></li>
+<li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
 </ul>
@@ -80,7 +82,7 @@
              
   <section id="spice-spectra-integration-compiled-engine">
 <h1>SPICE: SPectra Integration Compiled Engine<a class="headerlink" href="#spice-spectra-integration-compiled-engine" title="Link to this heading"></a></h1>
-<p>SPICE (SPectra Integration Compiled Engine) is a Python library designed for simulating synthetic spectra of inhomogeneous stellar surfaces. SPICE offers the following capabilities:</p>
+<p>SPICE (SPectra Integration Compiled Engine) is a Python library designed for simulating synthetic <strong>spectra of inhomogeneous stellar surfaces</strong>. SPICE offers the following capabilities:</p>
 <p>The core principle of SPICE is numerical integration over a stellar surface. Here’s how it works:</p>
 <ol class="arabic simple">
 <li><p>The stellar surface is divided into many small elements using tessellation.</p></li>
@@ -89,28 +91,28 @@
 </ol>
 <p>This approach allows SPICE to accurately model stars with inhomogeneous surfaces, including features like spots, temperature variations, or chemical abundance patterns.</p>
 <ol class="arabic simple">
-<li><p>Stellar Surface Modeling:
+<li><p><strong>Stellar Surface Modeling</strong>:
 - Create icosphere models of stellar surfaces with varying resolutions
 - Add spots and other surface features to the stellar models
 - Implement rotation and pulsations for stellar mesh models</p></li>
-<li><p>Spectral Synthesis:
+<li><p><strong>Spectral Synthesis</strong>:
 - Generate synthetic spectra using various models (e.g., Blackbody, TransformerPayne)
 - Simulate observed flux for different stellar configurations with varying resolutions
 - Account for Doppler shifts in spectral calculations</p></li>
-<li><p>Synthetic Photometry:
+<li><p><strong>Synthetic Photometry</strong>:
 - Calculate monochromatic and bolometric luminosities
 - Compute magnitudes in various photometric systems (e.g., AB, ST)
 - Support for multiple standard filters (e.g., Johnson, Bessel, Gaia)</p></li>
-<li><p>Binary System Modeling:
+<li><p><strong>Binary System Modeling</strong>:
 - Simulate synthetic spectra and photometric for binary star systems
 - Account for eclipsing</p></li>
-<li><p>Data Visualization:
+<li><p><strong>Data Visualization</strong>:
 - 3D plotting of stellar surface models
 - Spectrum visualization tools</p></li>
-<li><p>Performance Optimization:
+<li><p><strong>Performance Optimization</strong>:
 - Utilize JAX for efficient computations
 - Support for GPU acceleration</p></li>
-<li><p>Interoperability:
+<li><p><strong>Interoperability</strong>:
 - Integration with other astronomical tools and libraries (e.g., PHOEBE, Synphot)</p></li>
 </ol>
 <p>The underlying spectrum model is configurable - we provide a machine-learning based spectrum emulator, <a class="reference external" href="https://github.com/RozanskiT/transformer_payne">Transformer Payne</a></p>
@@ -134,8 +136,20 @@
 <li class="toctree-l2"><a class="reference internal" href="mesh.html#basic-icosphere-creation">Basic Icosphere Creation</a></li>
 <li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-rotation">Adding Rotation</a></li>
 <li class="toctree-l2"><a class="reference internal" href="mesh.html#visualizing-the-mesh">Visualizing the Mesh</a></li>
-<li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-pulsation">Adding Pulsation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-pulsation">Adding Pulsation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="mesh.html#tilted-pulsation-axis">Tilted Pulsation Axis</a></li>
+</ul>
+</li>
 <li class="toctree-l2"><a class="reference internal" href="mesh.html#adding-temperature-spots">Adding Temperature Spots</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="binaries.html#phoebe-configuration-and-binary-system-setup">PHOEBE Configuration and Binary System Setup</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="phoebe_integration.html#setting-up-a-phoebe-model">Setting up a PHOEBE Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="phoebe_integration.html#generating-spectra">Generating Spectra</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
