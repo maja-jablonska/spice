@@ -176,6 +176,5 @@ def get_cast_areas(face_vertices: ArrayLike) -> ArrayLike:
     Returns:
         ArrayLike: areas of 2D-casted polygons
     """
-    cast_ind = cast_indexes(face_vertices)
-    return polygon_areas(face_vertices[:, :, cast_ind[0]],
-                         face_vertices[:, :, cast_ind[1]])
+    return polygon_areas(face_vertices[:, :, 0],
+                         face_vertices[:, :, 1])

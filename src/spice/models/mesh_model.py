@@ -144,7 +144,7 @@ class MeshModel(Model, MeshModelNamedTuple):
                                                          self.d_centers.shape[-1])) + self.center_pulsation_offsets
 
     @property
-    def velocities(self) -> jnp.float64:
+    def velocities(self) -> ArrayLike:
         return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
 
     @property
@@ -161,7 +161,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def radii(self) -> T:
-        return jnp.linalg.norm(self.centers, axis=1)
+        return jnp.linalg.norm(self.d_centers, axis=1)
 
     @property
     def cast_vertices(self) -> ArrayLike:
@@ -173,7 +173,11 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def cast_areas(self) -> ArrayLike:
-        return get_cast_areas(self.cast_vertices[self.faces.astype(int)]) - self.occluded_areas
+        return get_cast_areas(self.cast_vertices[self.faces.astype(int)])
+    
+    @property
+    def visible_cast_areas(self) -> ArrayLike:
+        return self.cast_areas - self.occluded_areas
 
 
 class IcosphereModel(MeshModel):
@@ -211,6 +215,8 @@ class IcosphereModel(MeshModel):
         """
 
         vertices, faces, areas, centers = icosphere(n_vertices)
+        vertices = vertices * radius
+        centers = centers * radius
 
         parameters = jnp.atleast_1d(parameters)
         if len(parameters.shape) == 1:
