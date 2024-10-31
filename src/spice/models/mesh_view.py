@@ -127,7 +127,7 @@ def get_grid_index(grid: Grid, cast_point: ArrayLike) -> tuple[ArrayLike, ArrayL
 def assign_element_to_grid(i: int, carry: ArrayLike, m: MeshModel):
     def assign_element_to_grid1_pos_mu(i: int, carry):
         grid, grid_points, reverse_grid = carry
-        grid_index_x, grid_index_y = get_grid_index(grid, m.cast_centers[i, 1:])
+        grid_index_x, grid_index_y = get_grid_index(grid, m.cast_centers[i])
         grid_points = grid_points.at[grid_index_x, grid_index_y].set(
             append_value_to_last_nan(grid_points[grid_index_x, grid_index_y], i))
         reverse_grid = reverse_grid.at[i].set(jnp.array([grid_index_x, grid_index_y]))
@@ -169,22 +169,23 @@ def get_neighbouring(x: int, y: int):
 @partial(jax.jit, static_argnums=(3,))
 def resolve_occlusion_for_face(m1: MeshModel, m2: MeshModel, face_index: int, grid: Grid):
     (_, _, reverse_grids_m1), (_, grids_m2, _) = create_grid_dictionaries(m1, m2, grid)
-    nonzero_indexer_1 = cast_indexes(m1.cast_centers)
-    nonzero_indexer_2 = cast_indexes(m2.cast_centers)
     ix, iy = jnp.nan_to_num(reverse_grids_m1[face_index], reverse_grids_m1.shape[0] + 1).astype(int)
     grid_neighbours = get_neighbouring(ix, iy)
     points_in_grid = (grids_m2[grid_neighbours[:, 0], grid_neighbours[:, 1]]).flatten()
     points_mask = jnp.where(jnp.isnan(points_in_grid), 0., 1.) * (m1.mus[face_index] > 0).astype(float)
-    return jnp.sum(total_visible_area(m1.cast_vertices[m1.faces[face_index].astype(int)][:, nonzero_indexer_1],
-                                      m2.cast_vertices[m2.faces[points_in_grid.astype(int)].astype(int)][:, :,
-                                      nonzero_indexer_2]) * points_mask)
+    # Calculate occlusion for each neighboring point
+    occlusions = total_visible_area(m1.cast_vertices[m1.faces[face_index].astype(int)],
+                                  m2.cast_vertices[m2.faces[points_in_grid.astype(int)].astype(int)]) * points_mask
+    
+    total_occlusion = jnp.clip(jnp.sum(occlusions), 0., m1.cast_areas[face_index])
+    return total_occlusion
 
 
 v_resolve_occlusion_for_face = jax.jit(jax.vmap(resolve_occlusion_for_face, in_axes=(None, None, 0, None)),
                                        static_argnums=(3,))
 
 
-@partial(jax.jit, static_argnums=(2,))
+#@partial(jax.jit, static_argnums=(2,))
 def resolve_occlusion(m1: MeshModel, m2: MeshModel, grid: Grid) -> MeshModel:
     """Calculate the occlusion of m1 by m2
 
