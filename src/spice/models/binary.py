@@ -15,7 +15,8 @@ from collections import namedtuple
 
 YEAR_TO_SECONDS = u.year.to(u.s)
 DAY_TO_YEAR = 0.0027378507871321013
-
+SOLAR_MASS_KG = 1.988409870698051e+30
+SOLAR_RAD_CM = 6.957e10
 
 class Binary(NamedTuple):
     body1: Model
@@ -122,7 +123,7 @@ def _add_orbit(binary: Binary, P: float, ecc: float,
                           ecc, T, i, omega, Omega)
     return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega,
                            evaluated_times=orbit_resolution_times,
-                           body1_centers=orbit[2, :, :], body2_centers=orbit[4, :, :],
+                           body1_centers=orbit[2, :, :]/SOLAR_RAD_CM, body2_centers=orbit[4, :, :]/SOLAR_RAD_CM,
                            body1_velocities=orbit[3, :, :], body2_velocities=orbit[5, :, :])
 
 
@@ -134,21 +135,25 @@ def add_orbit(binary: Binary,
               omega: float,
               Omega: float,
               orbit_resolution_points: int) -> Binary:
-    """Add orbit information to the binary object
+    """
+    Add orbit information to the binary object.
 
-      Args:
-          binary (Binary):
-          P (float): orbit period [years]
-          ecc (float): orbit eccentrity
-          T (float): [defined time units]
-          i (float): inclination [rad]
-          omega (float): []
-          Omega (float): []
-          orbit_resolution_points (int): number of times to resolve the orbit at
+    This function calculates the orbit of the binary system and updates the Binary object
+    with the new orbital information.
 
-      Returns:
-          Binary: object with calculated orbit property values
-      """
+    Args:
+        binary (Binary): The binary object to update.
+        P (float): Orbital period in years.
+        ecc (float): Eccentricity of the orbit.
+        T (float): Time of periastron passage in years.
+        i (float): Inclination of the orbit in radians.
+        omega (float): Argument of periastron in radians.
+        Omega (float): Longitude of the ascending node in radians.
+        orbit_resolution_points (int): Number of points to use for orbit resolution.
+
+    Returns:
+        Binary: Updated binary object with new orbital information.
+    """
     if isinstance(binary, PhoebeBinary):
         raise ValueError("PhoebeBinary objects are read-only - the orbit information is already added.")
     else:
@@ -251,4 +256,7 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20)
         compilation features, enabling efficient computation over arrays of times.
     """
     grid = Grid.construct(binary.body1, binary.body2, n_cells)
-    return v_evaluate_orbit(binary, times, grid)
+    if isinstance(binary, PhoebeBinary):
+        return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
+               [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
+    return v_evaluate_orbit(binary, times, grid), grid
