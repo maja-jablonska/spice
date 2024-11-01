@@ -37,12 +37,11 @@ class Grid:
     @classmethod
     def construct(cls, m1: MeshModel, m2: MeshModel, n_cells: int):
         vs1, vs2 = m1.cast_vertices[m1.faces.astype(int)], m2.cast_vertices[m2.faces.astype(int)]
-        vs1, vs2 = vs1[:, :, cast_indexes(vs1)], vs2[:, :, cast_indexes(vs2)]
 
-        x_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, :, 0], vs2[:, :, 0]])),
-                               jnp.max(jnp.concatenate([vs1[:, :, 0], vs2[:, :, 0]])), n_cells)
-        y_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, :, 1], vs2[:, :, 1]])),
-                               jnp.max(jnp.concatenate([vs1[:, :, 1], vs2[:, :, 1]])), n_cells)
+        x_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, 0], vs2[:, 0]])),
+                               jnp.max(jnp.concatenate([vs1[:, 0], vs2[:, 0]])), n_cells)
+        y_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, 1], vs2[:, 1]])),
+                               jnp.max(jnp.concatenate([vs1[:, 1], vs2[:, 1]])), n_cells)
 
         nx, ny = jnp.meshgrid(x_range, y_range)
         x, y = jnp.meshgrid(x_range, y_range, sparse=True)
@@ -76,6 +75,35 @@ class Grid:
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children)
+    
+    
+@jax.jit
+def get_grid_spans(m1, m2, n_cells_array):
+    """Calculate grid cell spans for different grid sizes.
+    
+    For each number of cells in n_cells_array, calculates the span (width/height) of grid cells
+    that would cover the projected area of both meshes. Returns the minimum of x and y spans
+    to ensure square grid cells.
+    
+    Args:
+        m1 (MeshModel): First mesh model with cast_vertices and faces
+        m2 (MeshModel): Second mesh model with cast_vertices and faces 
+        n_cells_array (ArrayLike): Array of different grid cell counts to try
+        
+    Returns:
+        ArrayLike: Array of grid cell spans corresponding to each n_cells value
+    """
+    vs1, vs2 = m1.cast_vertices[m1.faces.astype(int)], m2.cast_vertices[m2.faces.astype(int)]
+
+    x_min = jnp.min(jnp.concatenate([vs1[:, 0], vs2[:, 0]]))
+    x_max = jnp.max(jnp.concatenate([vs1[:, 0], vs2[:, 0]]))
+    y_min = jnp.min(jnp.concatenate([vs1[:, 1], vs2[:, 1]]))
+    y_max = jnp.max(jnp.concatenate([vs1[:, 1], vs2[:, 1]]))
+    
+    x_spans = (x_max - x_min) / n_cells_array
+    y_spans = (y_max - y_min) / n_cells_array
+    
+    return jnp.minimum(x_spans, y_spans)
 
 
 @jax.jit
