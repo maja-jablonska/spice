@@ -4,6 +4,9 @@ from jax.typing import ArrayLike
 from functools import partial
 
 
+SOLAR_MASS_KG = 1.988409870698051e+30
+
+
 class c:# Solar mas
     Msun = 1.989e30 # kg
     # Astronomical unit
@@ -68,7 +71,7 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega) -> ArrayLike:
     M1 = m1
     M2 = m2
     period_seconds = P*c.yr
-    a = (period_seconds**2 * c.G * (M1 + M2) / (4 * jnp.pi**2))**(1/3)*100 # m -> cm
+    a = (period_seconds**2 * c.G * (M1 + M2) * SOLAR_MASS_KG / (4 * jnp.pi**2))**(1/3)*100 # m -> cm
     M_t = 2*jnp.pi / P * (time - T) # mean anomaly
     E = solve_kepler_jax(M_t, ecc) # eccentric anomaly
     nu = 2 * jnp.arctan2(jnp.sqrt((1+ecc)/(1-ecc)) * jnp.sin(E/2), jnp.cos(E/2)) # true anomaly
