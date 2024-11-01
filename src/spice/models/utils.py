@@ -123,19 +123,30 @@ def cast_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def cast_to_normal_plane(vectors: ArrayLike, normal_vector: ArrayLike) -> ArrayLike:
+def cast_to_normal_plane(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
     """Cast 3D vectors to a 2D plane determined by a normal vector
 
     Args:
         vectors (ArrayLike): Properties to be casted (n, 3)
-        normal_vector (ArrayLike): Normal vector (3,)
+        los_vector (ArrayLike): LOS vector (3,)
 
     Returns:
-        ArrayLike: Casted vectors (n, 3), where one of the axes contains only zeroes
+        ArrayLike: Casted vectors (n, 2)
     """
-    n_normal_vector = normal_vector / jnp.linalg.norm(normal_vector)
-    cast_onto_n = jnp.dot(vectors, n_normal_vector).reshape((-1, 1))
-    return vectors - cast_onto_n * n_normal_vector
+    """Cast 3D vectors to a 2D plane determined by the line-of-sight vector"""
+    # Calculate the normal vector from the line-of-sight vector
+    n = los_vector / jnp.linalg.norm(los_vector)
+    
+    # Create two orthogonal vectors in the plane perpendicular to the los_vector
+    v1 = jnp.array([n[1], -n[0], 0])
+    v1 = v1 / jnp.linalg.norm(v1)
+    v2 = jnp.cross(n, v1)
+    
+    # Project the vectors onto the plane
+    x = jnp.dot(vectors, v1)
+    y = jnp.dot(vectors, v2)
+    
+    return jnp.column_stack((x, y))
 
 
 @jax.jit
