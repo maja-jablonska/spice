@@ -92,12 +92,12 @@ def clip(subject_polygon: ArrayLike, clipping_polygon: ArrayLike) -> ArrayLike:
     """ 
     subject_polygon = sort_xy(subject_polygon)
     clipping_polygon = sort_xy(clipping_polygon)
-    final_polygon = repeat_last(jnp.concatenate([jnp.copy(subject_polygon), jnp.nan*jnp.ones((6-subject_polygon.shape[0], 2))], axis=0))
+    final_polygon = repeat_last(jnp.concatenate([jnp.copy(subject_polygon), jnp.nan*jnp.ones((12-subject_polygon.shape[0], 2))], axis=0))
 
     def outer_iteration(i, final_polygon):
         next_polygon = jnp.copy(final_polygon)
 
-        final_polygon = jnp.nan*jnp.ones((6, 2))
+        final_polygon = jnp.nan*jnp.ones((12, 2))
 
         #c_edge_start = clipping_polygon[((i-1)%(clipping_polygon.shape[0])).astype(int)]
         c_edge_start = jax.lax.cond(i==0,
@@ -109,7 +109,6 @@ def clip(subject_polygon: ArrayLike, clipping_polygon: ArrayLike) -> ArrayLike:
             s_edge_start = jax.lax.cond(j==0,
                                         lambda: last_non_nan(next_polygon),
                                         lambda: next_polygon[j-1])
-            #s_edge_start = next_polygon[((j-1)%(next_polygon.shape[0])).astype(int)]
             s_edge_end = next_polygon[j]
 
             return jax.lax.cond(

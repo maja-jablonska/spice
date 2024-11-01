@@ -120,7 +120,7 @@ def simulate_observed_flux(intensity_fn: Callable[[ArrayLike, float, ArrayLike],
                            disable_doppler_shift: bool = False):
     return jnp.nan_to_num(__spectrum_flash_sum(intensity_fn,
                                                log_wavelengths,
-                                               _adjust_dim(jnp.where(m.mus > 0, m.cast_areas, 0.), chunk_size),
+                                               _adjust_dim(m.visible_cast_areas, chunk_size),
                                                _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
                                                _adjust_dim(m.los_velocities, chunk_size),
                                                _adjust_dim(m.parameters, chunk_size),
