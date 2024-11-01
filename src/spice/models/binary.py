@@ -1,8 +1,9 @@
+import warnings
 import jax.numpy as jnp
 from functools import partial
 import jax
 from jax.typing import ArrayLike
-from typing import List, NamedTuple, Tuple, Dict
+from typing import List, NamedTuple, Optional, Tuple, Dict
 
 from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
 from spice.models.phoebe_utils import Component, PhoebeConfig
@@ -10,7 +11,7 @@ from .model import Model
 from .mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
 from .orbit_utils import get_orbit_jax
-from .mesh_view import resolve_occlusion, Grid
+from .mesh_view import get_grid_spans, resolve_occlusion, Grid
 from collections import namedtuple
 
 YEAR_TO_SECONDS = u.year.to(u.s)
@@ -195,9 +196,50 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, grid: Grid) -> Tuple[Mode
         inner_treedef=jax.tree.structure([0 for t in times]),
         pytree_to_transpose=jax.tree.map(lambda x: list(x), result_body2)
     )
+    
+
+def get_optimal_grid_size(m1, m2, min_cells=5, max_cells=30):
+    """
+    Calculate optimal grid size based on mesh cast areas and grid cell sizes.
+    
+    The function finds a grid size where the grid cell area is smaller than the 
+    average cast area of mesh faces, but not so small that it creates unnecessary 
+    computational overhead.
+    
+    Args:
+        m1 (MeshModel): First mesh model
+        m2 (MeshModel): Second mesh model 
+        min_cells (int): Minimum number of grid cells to try
+        max_cells (int): Maximum number of grid cells to try
+        
+    Returns:
+        int: Optimal number of grid cells
+    """
+    # Get visible faces only
+    mus1 = m1.mus > 0
+    mus2 = m2.mus > 0
+    
+    # Calculate target area as 1.5x max of visible cast areas
+    # This provides some margin to ensure grid cells are appropriately sized
+    target_area = 1.5 * jnp.maximum(
+        jnp.max(m1.cast_areas[mus1]),
+        jnp.max(m2.cast_areas[mus2])
+    )
+    
+    # Calculate grid spans for range of cell counts
+    n_cells_array = jnp.arange(min_cells, max_cells)
+    spans = get_grid_spans(m1, m2, n_cells_array)
+    
+    cell_areas = spans**2
+    valid_sizes = jnp.where(cell_areas >= target_area)[0]
+    
+    # Return first valid size, or max_cells if none found
+    if valid_sizes.size > 0:
+        return n_cells_array[valid_sizes[-1]].item()
+    return min_cells
 
 
-def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[Model, Model]:
+def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: Optional[int] = None) -> Tuple[Model, Model]:
     """
     Evaluates the orbit of binary components at a specific time.
 
@@ -223,6 +265,17 @@ def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[
         return (PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY),
                 PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY))
     else:
+        optimal_size = get_optimal_grid_size(binary.body1, binary.body2)
+        if n_cells is None:
+            n_cells = int(optimal_size)
+        else:
+            span_size = get_grid_spans(binary.body1, binary.body2, jnp.array([n_cells]))
+            if span_size < 1.5 * jnp.maximum(
+                jnp.max(binary.body1.cast_areas[binary.body1.mus>0]),
+                jnp.max(binary.body2.cast_areas[binary.body2.mus>0])
+            ):
+                warnings.warn(f"Grid size {n_cells} is too small for the given cast areas. Optimal size is {optimal_size}.")
+            
         if len(binary.evaluated_times) == 0:
             raise ValueError(
                 "Binary object does not have orbit information. Please add orbit information using add_orbit.")
@@ -230,7 +283,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: int = 20) -> Tuple[
         return _evaluate_orbit(binary, time, grid)
 
 
-def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20) -> Tuple[Model, Model]:
+def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: Optional[int] = None) -> Tuple[Model, Model]:
     """
     Evaluates the orbit of binary components at multiple specific times.
 
@@ -244,7 +297,7 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20)
         times (ArrayLike): An array of times at which to evaluate the orbit. Each time should correspond to a specific
             point in the orbit where the positions and velocities of the binary components are desired.
         n_cells (int, optional): The number of cells to use for the occlusion grid construction. This grid is used to
-            detect and resolve occlusions between the binary components. Defaults to 20.
+            detect and resolve occlusions between the binary components. Defaults to an optimal size.
 
     Returns:
         Tuple[Model, Model]: A tuple containing arrays of evaluated models for the primary and secondary components of
@@ -255,8 +308,20 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: int = 20)
         This function is optimized for performance by using JAX's vectorized map (`vmap`) and just-in-time (`jit`)
         compilation features, enabling efficient computation over arrays of times.
     """
-    grid = Grid.construct(binary.body1, binary.body2, n_cells)
+    
     if isinstance(binary, PhoebeBinary):
         return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
                [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
-    return v_evaluate_orbit(binary, times, grid), grid
+    else:
+        optimal_size = get_optimal_grid_size(binary.body1, binary.body2)
+        if n_cells is None:
+            n_cells = int(optimal_size)
+        else:
+            span_size = get_grid_spans(binary.body1, binary.body2, jnp.array([n_cells]))
+            if span_size < 1.5 * jnp.maximum(
+                jnp.max(binary.body1.cast_areas[binary.body1.mus>0]),
+                jnp.max(binary.body2.cast_areas[binary.body2.mus>0])
+            ):
+                warnings.warn(f"Grid size {n_cells} is too small for the given cast areas. Optimal size is {optimal_size}.")
+        grid = Grid.construct(binary.body1, binary.body2, n_cells)
+    return v_evaluate_orbit(binary, times, grid)
