@@ -22,18 +22,21 @@ def _evaluate_to_be_mapped_property(mesh: MeshModel,
                                     property: Union[str, int] = DEFAULT_PROPERTY,
                                     property_label: Optional[str] = None) -> Tuple[ArrayLike, str]:
 
-    if type(property) is str:
-        if property not in COLORMAP_PROPERTIES:
-            raise ValueError(f'Invalid property {property} - must be one of ({",".join(COLORMAP_PROPERTIES)})')
-        else:
+    if isinstance(property, str):
+        if property in DEFAULT_PLOT_PROPERTY_LABELS:
             to_be_mapped = getattr(mesh, property)
-        if property_label is None:
-            property_label = DEFAULT_PLOT_PROPERTY_LABELS.get(property, '')
-    elif type(property) is int:
+            if property_label is None:
+                property_label = DEFAULT_PLOT_PROPERTY_LABELS[property]
+        elif hasattr(mesh, property):
+            to_be_mapped = getattr(mesh, property)
+            if property_label is None:
+                property_label = property
+        else:
+            raise ValueError(f'Invalid property {property} - must be an attribute of MeshModel or one of {list(DEFAULT_PLOT_PROPERTY_LABELS.keys())}')
+    elif isinstance(property, int):
         if property > mesh.parameters.shape[-1]-1:
             raise ValueError(f'Invalid property index {property} - must be smaller than {mesh.parameters.shape[-1]}')
-        else:
-            to_be_mapped = mesh.parameters[:, property]
+        to_be_mapped = mesh.parameters[:, property]
         if property_label is None:
             property_label = ''
     else:
@@ -62,7 +65,6 @@ def plot_3D(mesh: MeshModel,
         fig = plt.figure(figsize=(10, 12))
         spec = fig.add_gridspec(10, 12)
         plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
-        plot_ax.view_init(elev=30, azim=60)
     else:
         try:
             fig, plot_ax = axes
@@ -133,7 +135,6 @@ def plot_3D_binary(mesh1: MeshModel,
         fig = plt.figure(figsize=(10, 12))
         spec = fig.add_gridspec(10, 12)
         plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
-        plot_ax.view_init(elev=30, azim=60)
     else:
         try:
             fig, plot_ax = axes
@@ -157,9 +158,9 @@ def plot_3D_binary(mesh1: MeshModel,
         normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
         normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
         
-        plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
+        plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*scale_radius),
                     color='black', linewidth=3., label='Rotation axis of mesh1')
-        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*scale_radius),
                     color='blue', linewidth=3., label='Rotation axis of mesh2')
     if draw_los_vector or draw_rotation_axes:
         plot_ax.legend()
@@ -389,7 +390,6 @@ def animate_binary(meshes1: MeshModel,
     spec = fig.add_gridspec(10, 12)
     plot_ax = fig.add_subplot(spec[:, :11], projection='3d')
     cax = fig.add_subplot(spec[2:8, 11])
-    plot_ax.view_init(elev=30, azim=60)
     camera = Camera(fig)
     
     center_differences = [np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh1.radius)) for mesh1, mesh2 in zip(meshes1, meshes2)]
@@ -505,7 +505,6 @@ def plot_3D_mesh_and_spectrum(mesh: MeshModel,
     fig = plt.figure(figsize=(24, 10))
     spec = fig.add_gridspec(10, 24)
     plot_ax = fig.add_subplot(spec[:, :10], projection='3d')
-    plot_ax.view_init(elev=30, azim=-60)
 
     spectrum_ax = fig.add_subplot(spec[3:7, 11:-1])
     spectrum_ax.set_xlabel('wavelength [$\\AA$]', fontsize=13)
