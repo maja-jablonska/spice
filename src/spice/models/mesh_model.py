@@ -177,7 +177,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     
     @property
     def visible_cast_areas(self) -> ArrayLike:
-        return self.cast_areas - self.occluded_areas
+        return jnp.where(self.mus > 0, self.cast_areas - self.occluded_areas, 0.)
 
 
 class IcosphereModel(MeshModel):
