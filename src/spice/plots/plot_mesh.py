@@ -158,9 +158,9 @@ def plot_3D_binary(mesh1: MeshModel,
         normalized_rotation_axis1 = mesh1.rotation_axis/np.linalg.norm(mesh1.rotation_axis)
         normalized_rotation_axis2 = mesh2.rotation_axis/np.linalg.norm(mesh2.rotation_axis)
         
-        plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*np.sqrt(scale_radius)),
+        plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), *(mesh1.radius*normalized_rotation_axis1*scale_radius),
                     color='black', linewidth=3., label='Rotation axis of mesh1')
-        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*np.sqrt(scale_radius)),
+        plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), *(mesh2.radius*normalized_rotation_axis2*scale_radius),
                     color='blue', linewidth=3., label='Rotation axis of mesh2')
     if draw_los_vector or draw_rotation_axes:
         plot_ax.legend()
