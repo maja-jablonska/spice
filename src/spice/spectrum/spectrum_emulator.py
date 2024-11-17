@@ -14,6 +14,10 @@ class SpectrumEmulator(Generic[T]):
             T:
         """
         raise NotImplementedError
+    
+    @abstractmethod
+    def to_parameters(self, parameters: T) -> T:
+        raise NotImplementedError
 
     @abstractmethod
     def flux(self, log_wavelengths: T, parameters: T) -> T:
