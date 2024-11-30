@@ -1,10 +1,11 @@
 from functools import lru_cache
+import pickle
 import warnings
 import jax
 import numpy as np
 from spice.spectrum.spectrum_emulator import SpectrumEmulator
 from overrides import override
-from typing import List
+from typing import List, Optional
 from numpy.typing import ArrayLike
 import jax.numpy as jnp
 from huggingface_hub import hf_hub_download
@@ -27,14 +28,22 @@ FILENAME = "korg_grid_interpolator.pkl"
 DEFAULT_CACHE_PATH = '.spice_cache'
 
 class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
-    def __init__(self, cache_path: str = DEFAULT_CACHE_PATH):
-        self.cache_path = cache_path
-        # Check if the file exists in cache
-        try:
-            self.model = joblib.load(hf_hub_download(repo_id=REPO_ID, filename=FILENAME, cache_dir=cache_path))
-            self._v_interpolate = jax.vmap(lambda p, mu, w: self.model(jnp.concatenate([p, jnp.array([mu]), jnp.array([w])])), in_axes=(None, None, 0))
-        except Exception as e:
-            raise RuntimeError(f"Failed to load model from cache: {e}")
+    def __init__(self, cache_path: str = DEFAULT_CACHE_PATH, model_path: Optional[str] = None):
+        if model_path is not None:
+            try:
+                model_path = pickle.load(model_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to load model from path: {e}. If no model_path is provided, the model will be downloaded from the Hugging Face Hub.")
+        
+        else:
+            self.cache_path = cache_path
+            # Check if the file exists in cache
+            try:
+                self.model = joblib.load(hf_hub_download(repo_id=REPO_ID, filename=FILENAME, cache_dir=cache_path))
+            except Exception as e:
+                raise RuntimeError(f"Failed to load model from cache: {e}")
+        
+        self._v_interpolate = jax.vmap(lambda p, mu, w: self.model(jnp.concatenate([p, jnp.array([mu]), jnp.array([w])])), in_axes=(None, None, 0))
 
     @property
     @override
