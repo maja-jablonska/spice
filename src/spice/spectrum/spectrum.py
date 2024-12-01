@@ -7,7 +7,7 @@ from typing import Callable, List
 from spice.models import MeshModel
 import math
 from functools import partial
-from spice.spectrum.utils import ERG_S_TO_W, intensity_wavelengths_to_hz, H_CONST_ERG_S, JY_TO_ERG
+from spice.spectrum.utils import ERG_S_TO_W, H_CONST_ERG_S, JY_TO_ERG
 from spice.spectrum.filter import Filter
 
 DEFAULT_CHUNK_SIZE: int = 1024
