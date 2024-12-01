@@ -69,7 +69,7 @@ def plot_3D(mesh: MeshModel,
         try:
             fig, plot_ax = axes
         except ValueError:
-            raise ValueError("Pass either no axes or (plt.figure, plt.axes, plt.axes) for the plot axis and colorbar axis")
+            raise ValueError("Pass either no axes or (plt.figure, plt.axes) for the figure and plot axis")
     axes_lim = 1.5*mesh.radius
     plot_ax.set_xlim3d(-axes_lim, axes_lim)
     plot_ax.set_ylim3d(-axes_lim, axes_lim)
@@ -107,7 +107,7 @@ def plot_3D(mesh: MeshModel,
     if update_colorbar:
         cbar = fig.colorbar(mappable, shrink=0.45, pad=0.125, ax=plot_ax)
         cbar.set_label(cbar_label, fontsize=12)
-
+        
     return fig, plot_ax
 
 
