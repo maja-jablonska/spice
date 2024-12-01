@@ -1,6 +1,4 @@
-from functools import lru_cache
 import pickle
-import warnings
 import jax
 import numpy as np
 from spice.spectrum.spectrum_emulator import SpectrumEmulator
