@@ -1,8 +1,9 @@
 from typing import Callable, List
-from .spectrum import BaseSpectrum
 from overrides import override
 from jax.typing import ArrayLike
 import jax.numpy as jnp
+
+from spice.spectrum.spectrum_emulator import SpectrumEmulator
 
 
 # Define constants
@@ -35,7 +36,7 @@ def blackbody_intensity(log_wave: ArrayLike, mu: float, parameters: ArrayLike) -
     return jnp.tile(intensity, (2, 1))
 
 
-class BlackbodySpectrum(BaseSpectrum):
+class BlackbodySpectrum(SpectrumEmulator[ArrayLike]):
     @override
     @staticmethod
     def get_label_names() -> List[str]:
