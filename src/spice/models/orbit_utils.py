@@ -77,7 +77,7 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega) -> ArrayLike:
     nu = 2 * jnp.arctan2(jnp.sqrt((1+ecc)/(1-ecc)) * jnp.sin(E/2), jnp.cos(E/2)) # true anomaly
     r = a * (1 - ecc * jnp.cos(E)) # distance
     vec_x = jnp.array([r* jnp.cos(nu), r* jnp.sin(nu), jnp.zeros_like(r)])
-    C = jnp.sqrt(c.G*(M1+M2)/(a*(1-ecc**2)))
+    C = jnp.sqrt(c.G*(M1+M2)*SOLAR_MASS_KG/(a*(1-ecc**2)))
     vec_v = jnp.array([-C * jnp.sin(nu), C * (ecc + jnp.cos(nu)), jnp.zeros_like(r)])
     # now get orbits for the bodies 1 and 2
     vec_v1 = -vec_v * M2 / (M1 + M2)
