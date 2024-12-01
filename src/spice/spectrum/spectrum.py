@@ -3,11 +3,11 @@ import jax.numpy as jnp
 from jax import lax
 from jax.typing import ArrayLike
 from jax.scipy.integrate import trapezoid
-from typing import Callable, List
+from typing import Callable
 from spice.models import MeshModel
 import math
 from functools import partial
-from spice.spectrum.utils import ERG_S_TO_W, H_CONST_ERG_S, JY_TO_ERG
+from spice.spectrum.utils import ERG_S_TO_W
 from spice.spectrum.filter import Filter
 
 DEFAULT_CHUNK_SIZE: int = 1024
