@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
 
@@ -6,7 +6,8 @@ T = TypeVar("T")
 
 
 class SpectrumEmulator(Generic[T]):
-    @abstractproperty
+    @property
+    @abstractmethod
     def stellar_parameter_names(self) -> T:
         """Get labels of stellar parameters (no geometry-related parameters, e.g. mu)
 
