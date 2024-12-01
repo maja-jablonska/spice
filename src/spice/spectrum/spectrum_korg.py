@@ -25,7 +25,7 @@ label_names = ["teff", "logg", "m/h"]
 
 REPO_ID = "mjablonska/spice_korg_interpolator"
 FILENAME = "korg_grid_interpolator.pkl"
-DEFAULT_CACHE_PATH = '.spice_cache'
+DEFAULT_CACHE_PATH = '~/.spice_cache'
 
 class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
     def __init__(self, cache_path: str = DEFAULT_CACHE_PATH, model_path: Optional[str] = None):
@@ -39,11 +39,15 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
             self.cache_path = cache_path
             # Check if the file exists in cache
             try:
-                self.model = joblib.load(hf_hub_download(repo_id=REPO_ID, filename=FILENAME, cache_dir=cache_path))
+                self.model = joblib.load(hf_hub_download(repo_id=REPO_ID, filename=FILENAME))
             except Exception as e:
                 raise RuntimeError(f"Failed to load model from cache: {e}")
         
-        self._v_interpolate = jax.vmap(lambda p, mu, w: self.model(jnp.concatenate([p, jnp.array([mu]), jnp.array([w])])), in_axes=(None, None, 0))
+        self._v_interpolate = jax.vmap(lambda p, mu, w: self.model(jnp.concatenate([p, jnp.atleast_1d(mu), jnp.atleast_1d(w)])), in_axes=(None, None, 0))
+
+    @property
+    def parameter_names(self) -> ArrayLike:
+        return label_names
 
     @property
     @override
@@ -100,4 +104,4 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
     @override
     def intensity(self, log_wavelengths: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
-        return self._v_interpolate(parameters, mu, log_wavelengths)
+        return self._v_interpolate(parameters, mu, log_wavelengths).repeat(2, axis=1)
