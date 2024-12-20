@@ -7,7 +7,9 @@ from typing import List, Optional
 from numpy.typing import ArrayLike
 import jax.numpy as jnp
 from huggingface_hub import hf_hub_download
-import joblib
+import h5py
+
+from spice.spectrum.utils import linear_multivariate_interpolation
 
 METALLICITY_NAMES = ["default_metals_h", "metals/h", "me/h",
                       "[metals/h]", "[me/h]", "metallicity", "metals_h", "me_h"]
@@ -22,11 +24,13 @@ TEFF_NAMES: List[str] = ['teff', 't_eff', 't eff',
 label_names = ["teff", "logg", "m/h"]
 
 REPO_ID = "mjablonska/spice_korg_interpolator"
-FILENAME = "korg_grid_interpolator.pkl"
+REGULAR_FILENAME = "regular_grid.h5"
+SMALL_FILENAME = "small_grid.h5"
 DEFAULT_CACHE_PATH = '~/.spice_cache'
 
+
 class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
-    def __init__(self, cache_path: str = DEFAULT_CACHE_PATH, model_path: Optional[str] = None):
+    def __init__(self, cache_path: str = DEFAULT_CACHE_PATH, model_path: Optional[str] = None, grid_type: str = "small"):
         if model_path is not None:
             try:
                 model_path = pickle.load(model_path)
@@ -34,15 +38,70 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
                 raise RuntimeError(f"Failed to load model from path: {e}. If no model_path is provided, the model will be downloaded from the Hugging Face Hub.")
         
         else:
+            print("Using default cache path:", cache_path)
             self.cache_path = cache_path
             # Check if the file exists in cache
             try:
-                self.model = joblib.load(hf_hub_download(repo_id=REPO_ID, filename=FILENAME))
+                print("Attempting to download and load model from Hugging Face Hub...")
+                filename = SMALL_FILENAME if grid_type == "small" else REGULAR_FILENAME
+                model_path = hf_hub_download(repo_id=REPO_ID, filename=filename)
+                print("Model downloaded to:", model_path)
+                
+                with h5py.File(model_path, 'r') as f:
+                    print("Loading model parameters...")
+                    self.parameters = jnp.array(f['parameters']) # [teff, logg, metallicity, mu]
+                    print("Parameters shape:", self.parameters.shape)
+                    
+                    print("Loading model intensities...")
+                    self.intensities = jnp.array(f['sp_intensity'])
+                    print("Intensities shape:", self.intensities.shape)
+                    
+                    print("Loading wavelengths...")
+                    self.log10_wavelengths = jnp.array(f['log10_sp_wave'])
+                    print("Wavelengths shape:", self.log10_wavelengths.shape)
+                    
+                    print("Loading continuum intensities...")
+                    self.continuum_intensities = jnp.array(f['sp_no_lines_intensity'])
+                    print("Continuum intensities shape:", self.continuum_intensities.shape)
+                    
+                    print("Loading continuum wavelengths...")
+                    self.continuum_wavelengths = jnp.array(f['log10_sp_no_lines_wave'])
+                    print("Continuum wavelengths shape:", self.continuum_wavelengths.shape)
+                
+                print("Model loaded successfully")
             except Exception as e:
+                print("Error loading model:", str(e))
                 raise RuntimeError(f"Failed to load model from cache: {e}")
-        
-        self._v_interpolate = jax.vmap(lambda p, mu, w: self.model(jnp.concatenate([p, jnp.atleast_1d(mu), jnp.atleast_1d(w)])), in_axes=(None, None, 0))
+         
+        def _interpolate_spectrum(parameters, log10_wavelength):
+            wave_diffs = jnp.abs(self.log10_wavelengths - log10_wavelength)
+            wave_indices = jnp.argpartition(wave_diffs, 2)[:2]
+            
+            continuum_wave_diffs = jnp.abs(self.continuum_wavelengths - log10_wavelength)
+            continuum_wave_indices = jnp.argpartition(continuum_wave_diffs, 2)[:2]
+            
+            repeated_params = jnp.repeat(self.parameters, 2, axis=0)
+            repeated_log10_wavelengths = jnp.tile(self.log10_wavelengths[wave_indices],
+                                                    (self.parameters.shape[0], 1)).reshape((-1, 1))
+            repeated_continuum_wavelengths = jnp.tile(self.continuum_wavelengths[continuum_wave_indices],
+                                                    (self.parameters.shape[0], 1)).reshape((-1, 1))
+            
+            params_with_wavelength = jnp.hstack([parameters, log10_wavelength]).reshape(1, -1)
+            
+            return jnp.concatenate([
+                linear_multivariate_interpolation(
+                    jnp.hstack([repeated_params, repeated_log10_wavelengths]),
+                    self.intensities[:, [wave_indices]].flatten(),
+                    params_with_wavelength
+                ),
+                linear_multivariate_interpolation(
+                    jnp.hstack([repeated_params, repeated_continuum_wavelengths]),
+                    self.continuum_intensities[:, [continuum_wave_indices]].flatten(),
+                    params_with_wavelength
+                )
+            ])
 
+        self.interpolate_spectrum = jax.jit(jax.vmap(_interpolate_spectrum, in_axes=(None, 0)))
     @property
     def parameter_names(self) -> ArrayLike:
         return label_names
@@ -102,4 +161,4 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
     @override
     def intensity(self, log_wavelengths: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
-        return self._v_interpolate(parameters, mu, log_wavelengths).repeat(2, axis=1)
+        return self.interpolate_spectrum(jnp.hstack([parameters, jnp.atleast_1d(mu)]), log_wavelengths)
