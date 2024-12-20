@@ -74,11 +74,11 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
                 raise RuntimeError(f"Failed to load model from cache: {e}")
          
         def _interpolate_spectrum(parameters, log10_wavelength):
-            wave_diffs = jnp.abs(self.log10_wavelengths - log10_wavelength)
-            wave_indices = jnp.argpartition(wave_diffs, 2)[:2]
+            wave_idx = jnp.searchsorted(self.log10_wavelengths, log10_wavelength)
+            wave_indices = jnp.clip(jnp.array([wave_idx - 1, wave_idx]), 0, len(self.log10_wavelengths) - 1)
             
-            continuum_wave_diffs = jnp.abs(self.continuum_wavelengths - log10_wavelength)
-            continuum_wave_indices = jnp.argpartition(continuum_wave_diffs, 2)[:2]
+            continuum_wave_idx = jnp.searchsorted(self.continuum_wavelengths, log10_wavelength)
+            continuum_wave_indices = jnp.clip(jnp.array([continuum_wave_idx - 1, continuum_wave_idx]), 0, len(self.continuum_wavelengths) - 1)
             
             repeated_params = jnp.repeat(self.parameters, 2, axis=0)
             repeated_log10_wavelengths = jnp.tile(self.log10_wavelengths[wave_indices],
@@ -102,6 +102,7 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
             ])
 
         self.interpolate_spectrum = jax.jit(jax.vmap(_interpolate_spectrum, in_axes=(None, 0)))
+
     @property
     def parameter_names(self) -> ArrayLike:
         return label_names
