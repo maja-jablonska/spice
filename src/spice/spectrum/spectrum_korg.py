@@ -164,4 +164,4 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
     @override
     def intensity(self, log_wavelengths: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
-        return self.interpolate_spectrum(self.log10_wavelengths, self.continuum_wavelengths, self.intensities, self.continuum_intensities, jnp.hstack([parameters, jnp.atleast_1d(mu)]), log_wavelengths)
+        return interpolate_spectrum(self.log10_wavelengths, self.continuum_wavelengths, self.intensities, self.continuum_intensities, jnp.hstack([parameters, jnp.atleast_1d(mu)]), log_wavelengths)
