@@ -30,18 +30,18 @@ DEFAULT_CACHE_PATH = '~/.spice_cache'
 
 
 @jax.jit
-def _interpolate_spectrum(log10_wavelengths, continuum_wavelengths, intensities, continuum_intensities, parameters, log10_wavelength):
+def _interpolate_spectrum(log10_wavelengths, continuum_wavelengths, intensities, continuum_intensities, all_parameters, parameters, log10_wavelength):
     wave_idx = jnp.searchsorted(log10_wavelengths, log10_wavelength)
     wave_indices = jnp.clip(jnp.array([wave_idx - 1, wave_idx]), 0, len(log10_wavelengths) - 1)
     
     continuum_wave_idx = jnp.searchsorted(continuum_wavelengths, log10_wavelength)
     continuum_wave_indices = jnp.clip(jnp.array([continuum_wave_idx - 1, continuum_wave_idx]), 0, len(continuum_wavelengths) - 1)
     
-    repeated_params = jnp.repeat(parameters, 2, axis=0)
+    repeated_params = jnp.repeat(all_parameters, 2, axis=0)
     repeated_log10_wavelengths = jnp.tile(log10_wavelengths[wave_indices],
-                                            (parameters.shape[0], 1)).reshape((-1, 1))
+                                            (all_parameters.shape[0], 1)).reshape((-1, 1))
     repeated_continuum_wavelengths = jnp.tile(continuum_wavelengths[continuum_wave_indices],
-                                            (parameters.shape[0], 1)).reshape((-1, 1))
+                                            (all_parameters.shape[0], 1)).reshape((-1, 1))
     
     params_with_wavelength = jnp.hstack([parameters, log10_wavelength]).reshape(1, -1)
     
