@@ -29,6 +29,38 @@ SMALL_FILENAME = "small_grid.h5"
 DEFAULT_CACHE_PATH = '~/.spice_cache'
 
 
+@jax.jit
+def _interpolate_spectrum(log10_wavelengths, continuum_wavelengths, intensities, continuum_intensities, parameters, log10_wavelength):
+    wave_idx = jnp.searchsorted(log10_wavelengths, log10_wavelength)
+    wave_indices = jnp.clip(jnp.array([wave_idx - 1, wave_idx]), 0, len(log10_wavelengths) - 1)
+    
+    continuum_wave_idx = jnp.searchsorted(continuum_wavelengths, log10_wavelength)
+    continuum_wave_indices = jnp.clip(jnp.array([continuum_wave_idx - 1, continuum_wave_idx]), 0, len(continuum_wavelengths) - 1)
+    
+    repeated_params = jnp.repeat(parameters, 2, axis=0)
+    repeated_log10_wavelengths = jnp.tile(log10_wavelengths[wave_indices],
+                                            (parameters.shape[0], 1)).reshape((-1, 1))
+    repeated_continuum_wavelengths = jnp.tile(continuum_wavelengths[continuum_wave_indices],
+                                            (parameters.shape[0], 1)).reshape((-1, 1))
+    
+    params_with_wavelength = jnp.hstack([parameters, log10_wavelength]).reshape(1, -1)
+    
+    return jnp.concatenate([
+        linear_multivariate_interpolation(
+            jnp.hstack([repeated_params, repeated_log10_wavelengths]),
+            intensities[:, [wave_indices]].flatten(),
+            params_with_wavelength
+        ),
+        linear_multivariate_interpolation(
+            jnp.hstack([repeated_params, repeated_continuum_wavelengths]),
+            continuum_intensities[:, [continuum_wave_indices]].flatten(),
+            params_with_wavelength
+        )
+    ])
+
+interpolate_spectrum = jax.vmap(_interpolate_spectrum, in_axes=(None, None, None, None, None, None, 0))
+
+
 class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
     def __init__(self, cache_path: str = DEFAULT_CACHE_PATH, model_path: Optional[str] = None, grid_type: str = "small"):
         if model_path is not None:
@@ -72,36 +104,6 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
             except Exception as e:
                 print("Error loading model:", str(e))
                 raise RuntimeError(f"Failed to load model from cache: {e}")
-         
-        def _interpolate_spectrum(parameters, log10_wavelength):
-            wave_idx = jnp.searchsorted(self.log10_wavelengths, log10_wavelength)
-            wave_indices = jnp.clip(jnp.array([wave_idx - 1, wave_idx]), 0, len(self.log10_wavelengths) - 1)
-            
-            continuum_wave_idx = jnp.searchsorted(self.continuum_wavelengths, log10_wavelength)
-            continuum_wave_indices = jnp.clip(jnp.array([continuum_wave_idx - 1, continuum_wave_idx]), 0, len(self.continuum_wavelengths) - 1)
-            
-            repeated_params = jnp.repeat(self.parameters, 2, axis=0)
-            repeated_log10_wavelengths = jnp.tile(self.log10_wavelengths[wave_indices],
-                                                    (self.parameters.shape[0], 1)).reshape((-1, 1))
-            repeated_continuum_wavelengths = jnp.tile(self.continuum_wavelengths[continuum_wave_indices],
-                                                    (self.parameters.shape[0], 1)).reshape((-1, 1))
-            
-            params_with_wavelength = jnp.hstack([parameters, log10_wavelength]).reshape(1, -1)
-            
-            return jnp.concatenate([
-                linear_multivariate_interpolation(
-                    jnp.hstack([repeated_params, repeated_log10_wavelengths]),
-                    self.intensities[:, [wave_indices]].flatten(),
-                    params_with_wavelength
-                ),
-                linear_multivariate_interpolation(
-                    jnp.hstack([repeated_params, repeated_continuum_wavelengths]),
-                    self.continuum_intensities[:, [continuum_wave_indices]].flatten(),
-                    params_with_wavelength
-                )
-            ])
-
-        self.interpolate_spectrum = jax.jit(jax.vmap(_interpolate_spectrum, in_axes=(None, 0)))
 
     @property
     def parameter_names(self) -> ArrayLike:
@@ -162,4 +164,4 @@ class KorgSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
     @override
     def intensity(self, log_wavelengths: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
-        return self.interpolate_spectrum(jnp.hstack([parameters, jnp.atleast_1d(mu)]), log_wavelengths)
+        return self.interpolate_spectrum(self.log10_wavelengths, self.continuum_wavelengths, self.intensities, self.continuum_intensities, jnp.hstack([parameters, jnp.atleast_1d(mu)]), log_wavelengths)
