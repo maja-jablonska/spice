@@ -36,3 +36,76 @@ def intensity_wavelengths_to_hz(wavelengths: ArrayLike, intensity: ArrayLike) ->
 @jax.jit
 def intensity_Jy_to_erg(intensity: ArrayLike) -> ArrayLike:
     return intensity*JY_TO_ERG
+
+def linear_interpolation_1d(x: jnp.ndarray, 
+                          y: jnp.ndarray, 
+                          x_query: jnp.ndarray) -> jnp.ndarray:
+    """
+    1D linear interpolation using JAX.
+    
+    Args:
+        x: Array of x coordinates (must be sorted)
+        y: Array of y coordinates 
+        x_query: Points to interpolate at
+        
+    Returns:
+        Interpolated values at x_query points
+    """
+    # Find indices of closest points
+    idx = jnp.searchsorted(x, x_query) - 1
+    idx = jnp.clip(idx, 0, len(x)-2)
+    
+    # Get surrounding points
+    x0 = x[idx]
+    x1 = x[idx + 1]
+    y0 = y[idx]
+    y1 = y[idx + 1]
+    
+    # Linear interpolation
+    t = (x_query - x0) / (x1 - x0)
+    return y0 + t * (y1 - y0)
+
+@jax.jit
+def linear_multivariate_interpolation(points: jnp.ndarray,
+                                      values: jnp.ndarray,
+                                      query_points: jnp.ndarray) -> jnp.ndarray:
+    """
+    Multivariate interpolation using JAX.
+    
+    Args:
+        points: Array of points (N x D)
+        values: Array of values at points (N,)
+        query_points: Points to interpolate at (M x D)
+        
+    Returns:
+        Interpolated values at query points (M,)
+    """
+    # Compute weights using inverse distance weighting
+    distances = jnp.sqrt(jnp.sum((points[:, None, :] - query_points[None, :, :]) ** 2, axis=-1))
+    weights = 1.0 / (distances + 1e-10)
+    weights = weights / jnp.sum(weights, axis=0, keepdims=True)
+    
+    # Compute weighted average
+    return jnp.sum(weights * values[:, None], axis=0)
+
+
+@jax.jit
+def nearest_multivariate_interpolation(points: jnp.ndarray,
+                                       values: jnp.ndarray,
+                                       query_points: jnp.ndarray) -> jnp.ndarray:
+    """
+    Multivariate interpolation using JAX.
+    
+    Args:
+        points: Array of points (N x D)
+        values: Array of values at points (N,)
+        query_points: Points to interpolate at (M x D)
+        
+    Returns:
+        Interpolated values at query points (M,)
+    """
+    # Compute pairwise distances
+    distances = jnp.sum((points[:, None, :] - query_points[None, :, :]) ** 2, axis=-1)
+    # Find nearest neighbor
+    nearest_idx = jnp.argmin(distances, axis=0)
+    return values[nearest_idx]

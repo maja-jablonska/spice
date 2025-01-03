@@ -128,7 +128,7 @@ To add pulsation to your model, you can use the `add_pulsation()` function:
     from spice.models.mesh_transform import add_pulsation, evaluate_pulsations
 
     # Add pulsation to the model
-    m = add_pulsation(
+    mp = add_pulsation(
         m, # Model instance
         1, # m order
         1, # n degree
@@ -139,7 +139,7 @@ To add pulsation to your model, you can use the `add_pulsation()` function:
     t = 40. # time in the same unit as the pulsation period
 
     # To get the pulsated mesh at a specific time:
-    pulsated_mesh = evaluate_pulsations(m, t)  # t is the time
+    pulsated_mesh = evaluate_pulsations(mp, t)  # t is the time
 
 Note that the time and pulsation period can be any time units, as long as they are consistent.
 
@@ -283,7 +283,7 @@ or add it as a circular spot:
         spot_radius=50., # spot radius in degrees
         parameter_delta=1000, # difference in the parameter value between the spot and the background
         parameter_index=0, # index of the parameter in the parameters array
-        smoothness=0.5 # smoothness of the spot edges
+        smoothness=0.1 # smoothness of the spot edges
     )
 
     The larger the smoothness parameter, the sharper the spot edges. A value of 1.0 will be a one-zero transition between the spot and the background.
@@ -333,7 +333,7 @@ or by adding two circular spots:
     m = add_spots(
         mesh=m, # Model instance
         spot_center_thetas=jnp.array([0.5, 1.5]), # spot center in spherical coordinates, in radians
-        spot_center_phis=jnp.array([0.5, 1.5]), # spot center in spherical coordinates, in radians
+        spot_center_phis=jnp.array([0.5, 0.]), # spot center in spherical coordinates, in radians
         spot_radii=jnp.array([20., 20.]), # spot radius in degrees
         parameter_deltas=jnp.array([1000., 1000.]), # difference in the parameter value between the spot and the background
         parameter_indices=jnp.array([0, 0]), # index of the parameter in the parameters array
