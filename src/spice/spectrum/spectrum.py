@@ -104,6 +104,38 @@ def __spectrum_flash_sum(intensity_fn,
     return out
 
 
+@partial(jax.jit, static_argnums=(0, 6, 7))
+def __spectrum_flash_sum_with_padding(intensity_fn,
+                         log_wavelengths,
+                         areas,
+                         mus,
+                         vrads,
+                         parameters,
+                         chunk_size: int,
+                         wavelengths_chunk_size: int,
+                         disable_doppler_shift: bool = False):
+    n_padding = wavelengths_chunk_size - (log_wavelengths.shape[0] % wavelengths_chunk_size)
+    log_wavelengths_padded = jnp.pad(log_wavelengths, (0, n_padding), mode='constant', constant_values=0)
+    # Reshape padded wavelengths into chunks
+    wavelength_chunks = log_wavelengths_padded.reshape(-1, wavelengths_chunk_size).T
+    
+    def scan_fn(carry, chunk):
+        result = __spectrum_flash_sum(intensity_fn,
+                                    chunk,
+                                    areas,
+                                    mus,
+                                    vrads,
+                                    parameters,
+                                    chunk_size,
+                                    disable_doppler_shift)
+        return carry, result
+
+    _, results = lax.scan(scan_fn,
+                         None,
+                         wavelength_chunks)
+    return results.reshape(-1, 2, order='F')
+
+
 @partial(jax.jit, static_argnums=(1,))
 def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     return jnp.concatenate([x, jnp.zeros((chunk_size - x.shape[0] % chunk_size, *x.shape[1:]))], axis=0)
@@ -112,22 +144,25 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
 # Observed flux * distance
 # TODO: change name to observed flux or something else that will be more descriptive
 # The distance should go in here, probably.
+@partial(jax.jit, static_argnums=(0, 4, 5))
 def simulate_observed_flux(intensity_fn: Callable[[ArrayLike, float, ArrayLike], ArrayLike],
                            m: MeshModel,
                            log_wavelengths: ArrayLike,
                            distance: float = 10,
                            chunk_size: int = DEFAULT_CHUNK_SIZE,
+                           wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
                            disable_doppler_shift: bool = False):
-    return jnp.nan_to_num(__spectrum_flash_sum(intensity_fn,
+    return jnp.nan_to_num(__spectrum_flash_sum_with_padding(intensity_fn,
                                                log_wavelengths,
                                                _adjust_dim(m.visible_cast_areas, chunk_size),
                                                _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
                                                _adjust_dim(m.los_velocities, chunk_size),
                                                _adjust_dim(m.parameters, chunk_size),
                                                chunk_size,
+                                               wavelengths_chunk_size,
                                                disable_doppler_shift) * jnp.power(m.radius,
                                                                                   2) * 5.08326693599739e-16 / (
-                                      distance ** 2))
+                                      distance ** 2))[:len(log_wavelengths), :]
 
 
 # -> erg/s/cm^2/A
@@ -209,26 +244,61 @@ def __flux_flash_sum(flux_fn,
     return out
 
 
-@partial(jax.jit, static_argnums=(0, 3))
+@partial(jax.jit, static_argnums=(0, 6, 7))
+def __flux_flash_sum_with_padding(intensity_fn,
+                         log_wavelengths,
+                         areas,
+                         mus,
+                         vrads,
+                         parameters,
+                         chunk_size: int,
+                         wavelengths_chunk_size: int,
+                         disable_doppler_shift: bool = False):
+    n_padding = wavelengths_chunk_size - (log_wavelengths.shape[0] % wavelengths_chunk_size)
+    log_wavelengths_padded = jnp.pad(log_wavelengths, (0, n_padding), mode='constant', constant_values=0)
+    # Reshape padded wavelengths into chunks
+    wavelength_chunks = log_wavelengths_padded.reshape(-1, wavelengths_chunk_size).T
+    
+    def scan_fn(carry, chunk):
+        result = __flux_flash_sum(intensity_fn,
+                                    chunk,
+                                    areas,
+                                    mus,
+                                    vrads,
+                                    parameters,
+                                    chunk_size,
+                                    disable_doppler_shift)
+        return carry, result
+
+    _, results = lax.scan(scan_fn,
+                         None,
+                         wavelength_chunks)
+    return results.reshape(-1, 2, order='F')
+
+
+@partial(jax.jit, static_argnums=(0, 3, 4))
 def simulate_monochromatic_luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
                                       m: MeshModel,
                                       log_wavelengths: ArrayLike,
                                       chunk_size: int = DEFAULT_CHUNK_SIZE,
+                                      wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
                                       disable_doppler_shift: bool = False):
-    return jnp.nan_to_num(__flux_flash_sum(flux_fn,
+    return jnp.nan_to_num(__flux_flash_sum_with_padding(flux_fn,
                                            log_wavelengths,
                                            _adjust_dim(m.areas, chunk_size),
                                            _adjust_dim(m.los_velocities, chunk_size),
                                            _adjust_dim(m.parameters, chunk_size),
                                            chunk_size,
-                                           disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)
+                                           wavelengths_chunk_size,
+                                           disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)[:len(log_wavelengths), :]
 
 
-@partial(jax.jit, static_argnums=(0, 3))
+@partial(jax.jit, static_argnums=(0, 3, 4))
 def luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
                model: MeshModel,
                wavelengths: ArrayLike,
-               chunk_size: int = DEFAULT_CHUNK_SIZE) -> ArrayLike:
+               chunk_size: int = DEFAULT_CHUNK_SIZE,
+               wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE) -> ArrayLike:
     """Calculate the bolometric luminsity of the model.
 
     Args:
@@ -236,11 +306,11 @@ def luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
         model (MeshModel):
         wavelengths (ArrayLike): wavelengths [Angstrom]
         chunk_size (int, optional): size of the chunk in the GPU memory. Defaults to 1024.
-
+        wavelengths_chunk_size (int, optional): size of the chunk in the wavelengths. Defaults to 1024.
     Returns:
         ArrayLike: _description_
     """
-    flux = simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size)
+    flux = simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size, wavelengths_chunk_size)
     return trapezoid(y=flux[:, 0], x=wavelengths * 1e-8)
 
 
