@@ -86,6 +86,10 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
     @property
     def cast_areas(self) -> ArrayLike:
         return self.d_cast_areas
+    
+    @property
+    def visible_cast_areas(self) -> ArrayLike:
+        return self.d_cast_areas
 
     @classmethod
     def construct(cls,

@@ -53,9 +53,11 @@ Contents
 
 .. toctree::
 
-   examples
+   introduction
    mesh
    binaries
+   transformer_payne_integration
    phoebe_integration
+   korg_interpolator
    api
    troubleshooting
