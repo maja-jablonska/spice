@@ -322,4 +322,7 @@ def add_spherical_harmonic_spots(mesh: MeshModel,
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
-    return _add_spherical_harmonic_spots(mesh, m_orders, n_degrees, param_deltas, param_indices)
+    if (tilt_axes is not None) and (tilt_angles is not None):
+        return _add_spherical_harmonic_spots_with_tilt(mesh, m_orders, n_degrees, param_deltas, param_indices, tilt_axes, tilt_angles)
+    else:
+        return _add_spherical_harmonic_spots(mesh, m_orders, n_degrees, param_deltas, param_indices)
