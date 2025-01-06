@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from spice.models import MeshModel
 from jax.typing import ArrayLike
+import cmasher as cmr
 
 PLOT_MODES = ['MESH', 'POINTS']
 COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas', 'log_gs']
@@ -16,6 +17,12 @@ DEFAULT_PLOT_PROPERTY_LABELS = {
     'cast_areas': 'cast area [km$^2$]',
     'log_gs': 'log g'
 }
+
+DEFAULT_PROPERTY_CMAPS = {
+    'los_velocities': 'cmr.redshift_r',
+}
+
+DEFAULT_CMAP = 'cmr.bubblegum'
 
 
 def _evaluate_to_be_mapped_property(mesh: MeshModel,
@@ -48,7 +55,7 @@ def _evaluate_to_be_mapped_property(mesh: MeshModel,
 def plot_3D(mesh: MeshModel,
             property: Union[str, int] = DEFAULT_PROPERTY,
             axes: Optional[Tuple[plt.figure, plt.axes]] = None,
-            cmap: str = 'turbo',
+            cmap: Optional[str] = None,
             property_label: Optional[str] = None,
             mode: str = 'MESH',
             update_colorbar: bool = True,
@@ -60,6 +67,9 @@ def plot_3D(mesh: MeshModel,
     mode = mode.upper()
     
     to_be_mapped, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
+    
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
 
     if axes is None:
         fig = plt.figure(figsize=(10, 12))
@@ -84,9 +94,14 @@ def plot_3D(mesh: MeshModel,
                    color='red', linewidth=3., label='LOS vector')
     
     if draw_rotation_axis:
+        if plt.style.available and plt.rcParams['axes.facecolor'] == 'black':
+            arrow_color = 'white'
+        else:
+            arrow_color = 'black'
+        
         normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
         plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
-                    color='black', linewidth=3., label='Rotation axis')
+                    color=arrow_color, linewidth=3., label='Rotation axis')
         
     if draw_los_vector or draw_rotation_axis:
         plot_ax.legend()
@@ -115,7 +130,7 @@ def plot_3D_binary(mesh1: MeshModel,
                    mesh2: MeshModel,
                    property: Union[str, int] = DEFAULT_PROPERTY,
                    axes: Optional[Tuple[plt.figure, plt.axes]] = None,
-                   cmap: str = 'turbo',
+                   cmap: Optional[str] = None,
                    property_label: Optional[str] = None,
                    mode: str = 'MESH',
                    update_colorbar: bool = True,
@@ -130,6 +145,9 @@ def plot_3D_binary(mesh1: MeshModel,
     to_be_mapped1, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
     to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
     to_be_mapped = np.concatenate([to_be_mapped1, to_be_mapped2])
+    
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
 
     if axes is None:
         fig = plt.figure(figsize=(10, 12))
@@ -199,7 +217,7 @@ def plot_3D_sequence(meshes: List[MeshModel],
                      property: Union[str, int] = DEFAULT_PROPERTY,
                      timestamps: Optional[ArrayLike] = None,
                      axes: Optional[Tuple[plt.figure, List[plt.axes], plt.axes]] = None,
-                     cmap: str = 'turbo',
+                     cmap: Optional[str] = None,
                      property_label: Optional[str] = None,
                      timestamp_label: Optional[str] = None,
                      figsize: Tuple[int, int] = (12, 10),
@@ -214,6 +232,9 @@ def plot_3D_sequence(meshes: List[MeshModel],
     _, cbar_label = _evaluate_to_be_mapped_property(meshes[0], property, property_label)
     to_be_mapped_arrays = [_evaluate_to_be_mapped_property(mesh, property, property_label)[0] for mesh in meshes]
     to_be_mapped_arrays_concatenated = np.concatenate(to_be_mapped_arrays)
+
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
 
     axes_lim = 1.5*max([mesh.radius for mesh in meshes])
     num_plots = len(meshes)
@@ -284,10 +305,9 @@ def animate_mesh_and_spectra(meshes: List[MeshModel],
                              spectra: ArrayLike,
                              filename: str,
                              property: Union[str, int] = DEFAULT_PROPERTY,
-                             cmap: str = 'turbo',
+                             cmap: Optional[str] = None,
                              property_label: Optional[str] = None,
                              timestamp_label: Optional[str] = None,
-                             figsize: Tuple[int, int] = (12, 10),
                              mode: str = 'MESH'):
     try:
         from celluloid import Camera
@@ -300,6 +320,9 @@ def animate_mesh_and_spectra(meshes: List[MeshModel],
     cax = fig.add_subplot(spec[2:8, 10])
     spectrum_ax = fig.add_subplot(spec[2:8, 13:])
     camera = Camera(fig)
+
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
 
     mesh = meshes[0]
     to_be_mapped, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
@@ -363,7 +386,7 @@ def animate_binary(meshes1: MeshModel,
                    meshes2: MeshModel,
                    filename: str,
                    property: Union[str, int] = DEFAULT_PROPERTY,
-                   cmap: str = 'turbo',
+                   cmap: Optional[str] = None,
                    property_label: Optional[str] = None,
                    mode: str = 'MESH',
                    scale_radius: float = 1.0,
@@ -385,6 +408,9 @@ def animate_binary(meshes1: MeshModel,
     to_be_mapped2s = np.concatenate([_evaluate_to_be_mapped_property(mesh2, property, property_label)[0] for mesh2 in meshes2])
     
     to_be_mapped = np.concatenate([to_be_mapped1s, to_be_mapped2s])
+    
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
 
     fig = plt.figure(figsize=(10, 12))
     spec = fig.add_gridspec(10, 12)
@@ -460,10 +486,14 @@ def animate_binary(meshes1: MeshModel,
 def plot_2D(mesh: MeshModel,
             property: Union[str, int] = DEFAULT_PROPERTY,
             axes: Optional[Tuple[plt.figure, plt.axes, plt.axes]] = None,
-            cmap: str = 'turbo',
+            cmap: Optional[str] = None,
             x_index: int = 0,
             y_index: int = 1,
             property_label: Optional[str] = None):
+    
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
+    
     if x_index == y_index:
         raise ValueError('x_index and y_index cannot be the same index!')
     elif x_index >= 3 or y_index >= 3:
@@ -511,4 +541,4 @@ def plot_3D_mesh_and_spectrum(mesh: MeshModel,
     spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=13)
 
     spectrum_ax.plot(wavelengths, spectrum, color='black')
-    return *plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs), spectrum_ax
+    return plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs), spectrum_ax
