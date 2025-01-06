@@ -161,7 +161,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def radii(self) -> T:
-        return jnp.linalg.norm(self.d_centers, axis=1)
+        return jnp.linalg.norm(self.d_centers+self.center_pulsation_offsets, axis=1)
 
     @property
     def cast_vertices(self) -> ArrayLike:
