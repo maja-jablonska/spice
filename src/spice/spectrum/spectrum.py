@@ -244,11 +244,10 @@ def __flux_flash_sum(flux_fn,
     return out
 
 
-@partial(jax.jit, static_argnums=(0, 6, 7))
+@partial(jax.jit, static_argnums=(0, 5, 6))
 def __flux_flash_sum_with_padding(intensity_fn,
                          log_wavelengths,
                          areas,
-                         mus,
                          vrads,
                          parameters,
                          chunk_size: int,
@@ -263,7 +262,6 @@ def __flux_flash_sum_with_padding(intensity_fn,
         result = __flux_flash_sum(intensity_fn,
                                     chunk,
                                     areas,
-                                    mus,
                                     vrads,
                                     parameters,
                                     chunk_size,
