@@ -218,10 +218,11 @@ def add_rotation(mesh: MeshModel,
 
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
-    
+    jax.debug.print("entering func")
     rotation_velocity_km_s = mesh.rotation_velocity
-    
+    jax.debug.print("rotation velocity km/s: {}", rotation_velocity_km_s)
     theta = (rotation_velocity_km_s * t) / mesh.radius / 695700.0
+    jax.debug.print("theta: {}", theta)
     
     jax.debug.print("rotation matrix")
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
@@ -268,6 +269,7 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only.
     """
+    print("evaluating rotation")
     if isinstance(mesh, PhoebeModel):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
