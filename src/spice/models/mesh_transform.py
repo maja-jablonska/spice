@@ -218,21 +218,34 @@ def add_rotation(mesh: MeshModel,
 
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
-    rotation_velocity_cm = mesh.rotation_velocity * 1e5
-    theta = (rotation_velocity_cm * t) / mesh.radius / u.solRad.to(u.cm)  # cm
-    t_rotation_matrix = evaluate_rotation_matrix(
-        mesh.rotation_matrix, theta)  # cm
-    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(
-        mesh.rotation_matrix_prim, theta)  # cm
-    rotated_vertices = jnp.matmul(mesh.d_vertices, t_rotation_matrix)  # cm
-    rotated_centers = jnp.matmul(mesh.d_centers, t_rotation_matrix)  # cm
-    rotated_centers_vel = rotation_velocity_cm * \
-        jnp.matmul(mesh.d_centers, t_rotation_matrix_prim)  # cm
+    
+    rotation_velocity_km_s = mesh.rotation_velocity
+    
+    theta = (rotation_velocity_km_s * t) / mesh.radius / 695700.0
+    
+    jax.debug.print("rotation matrix")
+    t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
+    
+    jax.debug.print("rotation matrix prim")
+    t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta)
+    
+    jax.debug.print("d_vertices shape: {}", mesh.d_vertices.shape)
+    jax.debug.print("t_rotation_matrix shape: {}", t_rotation_matrix.shape)
+    rotated_vertices = jnp.matmul(mesh.d_vertices, t_rotation_matrix)
+    
+    jax.debug.print("d_centers shape: {}", mesh.d_centers.shape) 
+    jax.debug.print("t_rotation_matrix shape: {}", t_rotation_matrix.shape)
+    rotated_centers = jnp.matmul(mesh.d_centers, t_rotation_matrix)
+    
+    jax.debug.print("d_centers shape: {}", mesh.d_centers.shape)
+    jax.debug.print("t_rotation_matrix_prim shape: {}", t_rotation_matrix_prim.shape)
+    rotated_centers_vel = rotation_velocity_km_s * jnp.matmul(mesh.d_centers, t_rotation_matrix_prim)
 
+    jax.debug.print("rotated_centers shape: {}", rotated_centers.shape)
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
     return mesh._replace(d_vertices=rotated_vertices,
                          d_centers=rotated_centers,
-                         rotation_velocities=rotated_centers_vel * 1e-5,  # back to km/s
+                         rotation_velocities=rotated_centers_vel,  # back to km/s
                          axis_radii=new_axis_radii)
 
 
