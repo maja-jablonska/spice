@@ -1,4 +1,4 @@
-![spice logo](https://raw.githubusercontent.com/maja-jablonska/spice/main/docs/img/spice.svg)
+![spice logo](https://raw.githubusercontent.com/maja-jablonska/spice/main/docs/img/spice_pink.svg)
 
 A stellar spectra integration library.
 
