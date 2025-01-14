@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" /><link rel="next" title="Binaries" href="binaries.html" /><link rel="prev" title="Introduction" href="introduction.html" />
 
-    <!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
+    <link rel="shortcut icon" href="_static/spice_pink-cropped.png"/><!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
         <title>Creating a Mesh Model - SPICE 1.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=354aac6f" />
@@ -18,18 +18,24 @@
   body {
     --color-code-background: #f8f8f8;
   --color-code-foreground: black;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
   }
   @media not print {
     body[data-theme="dark"] {
       --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
     }
     @media (prefers-color-scheme: dark) {
       body:not([data-theme="light"]) {
         --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
       }
     }
@@ -189,6 +195,9 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
   
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="_static/spice_pink.svg" alt="Logo"/>
+  </div>
   
   <span class="sidebar-brand-text">SPICE 1.0 documentation</span>
   
@@ -204,6 +213,7 @@
 <li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a></li>
 <li class="toctree-l1"><a class="reference internal" href="transformer_payne_integration.html">TransformerPayne Integration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="korg_interpolator.html">Korg.jl Interpolator</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
 </ul>
@@ -260,7 +270,7 @@
 
 <span class="c1"># Create an icosphere model</span>
 <span class="n">m</span> <span class="o">=</span> <span class="n">IcosphereModel</span><span class="o">.</span><span class="n">construct</span><span class="p">(</span>
-    <span class="mi">10000</span><span class="p">,</span>  <span class="c1"># Minimal number of vertices</span>
+    <span class="mi">1000</span><span class="p">,</span>  <span class="c1"># Minimal number of vertices</span>
     <span class="mf">1.</span><span class="p">,</span>     <span class="c1"># Radius in solar radii</span>
     <span class="mf">1.</span><span class="p">,</span>     <span class="c1"># Mass in solar masses</span>
     <span class="n">bb</span><span class="o">.</span><span class="n">to_parameters</span><span class="p">(),</span>  <span class="c1"># Parameters for the spectrum model</span>
@@ -343,14 +353,14 @@ distorted models, e.g. pulsation or rotation.</p>
 
 <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plot_3D</span><span class="p">(</span>
     <span class="n">rotated_mesh</span><span class="p">,</span>
-    <span class="s1">&#39;los_velocities&#39;</span><span class="p">,</span> <span class="c1"># property to be mapped - can be either a string or an integer</span>
-    <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;magma&#39;</span>
+    <span class="s1">&#39;los_velocities&#39;</span> <span class="c1"># property to be mapped - can be either a string or an integer</span>
 <span class="p">)</span>
 </pre></div>
 </div>
 <p>This will create a 3D plot of your mesh, colored by the ‘los_velocities’ property (which represents the line-of-sight velocities).</p>
 <p>Here’s an example of what the output should look like:</p>
-<a class="reference internal image-reference" href="_images/rotated_mesh.png"><img alt="3D visualization of a rotated mesh" src="_images/rotated_mesh.png" style="width: 600px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/rotated_mesh.png"><img alt="3D visualization of a rotated mesh" class="only-light" src="_images/rotated_mesh.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/rotated_mesh_dark.png"><img alt="3D visualization of a rotated mesh" class="only-dark" src="_images/rotated_mesh_dark.png" style="width: 600px;" /></a>
 <p>In this image, you can see the 3D structure of the mesh, with colors representing the ‘los_velocities’ values. The red arrow indicates the line of sight, and the black arrow shows the rotation axis.</p>
 <p>You can customize the visualization by changing the <cite>property</cite> parameter. For example, you could use ‘los_velocities’ to color the mesh by line-of-sight velocities, or ‘mus’ to show the angle between the normal and the line of sight.</p>
 </section>
@@ -385,7 +395,8 @@ The amplitude corresponds to the percent of the original radius.</p>
 <p>The Fourier series parameters are provided as a 2D array with shape (N, 2), where N is the number of terms in the series. Each row contains [A_n, phi_n], where A_n is the amplitude and phi_n is the phase for the nth term. For example, [[0.1, 0.0], [0.05, 1.57]] represents a series with two terms: the first with amplitude 0.1 and phase 0, and the second with amplitude 0.05 and phase π/2.
 Again, note that the amplitude is given in percent of the original radius.</p>
 <p>This example pulsation will look like this:</p>
-<a class="reference internal image-reference" href="_images/pulsated_mesh.png"><img alt="3D visualization of a pulsation" src="_images/pulsated_mesh.png" style="width: 600px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/pulsated_mesh.png"><img alt="3D visualization of a pulsation" class="only-light" src="_images/pulsated_mesh.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/pulsated_mesh_dark.png"><img alt="3D visualization of a pulsation" class="only-dark" src="_images/pulsated_mesh_dark.png" style="width: 600px;" /></a>
 <p>Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.</p>
 <section id="tilted-pulsation-axis">
 <h3>Tilted Pulsation Axis<a class="headerlink" href="#tilted-pulsation-axis" title="Link to this heading">¶</a></h3>
@@ -426,10 +437,10 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 
 <span class="n">fig</span><span class="p">,</span> <span class="p">(</span><span class="n">ax1</span><span class="p">,</span> <span class="n">ax2</span><span class="p">)</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="mi">10</span><span class="p">),</span> <span class="n">subplot_kw</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;projection&#39;</span><span class="p">:</span> <span class="s1">&#39;3d&#39;</span><span class="p">})</span>
 
-<span class="n">plot_3D</span><span class="p">(</span><span class="n">untilted_pulsated_m</span><span class="p">,</span> <span class="nb">property</span><span class="o">=</span><span class="s1">&#39;los_velocities&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;magma&#39;</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">ax1</span><span class="p">))</span>
+<span class="n">plot_3D</span><span class="p">(</span><span class="n">untilted_pulsated_m</span><span class="p">,</span> <span class="nb">property</span><span class="o">=</span><span class="s1">&#39;los_velocities&#39;</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">ax1</span><span class="p">))</span>
 <span class="n">ax1</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Untilted Pulsation&#39;</span><span class="p">)</span>
 
-<span class="n">plot_3D</span><span class="p">(</span><span class="n">tilted_pulsated_m</span><span class="p">,</span> <span class="nb">property</span><span class="o">=</span><span class="s1">&#39;los_velocities&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;magma&#39;</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">ax2</span><span class="p">))</span>
+<span class="n">plot_3D</span><span class="p">(</span><span class="n">tilted_pulsated_m</span><span class="p">,</span> <span class="nb">property</span><span class="o">=</span><span class="s1">&#39;los_velocities&#39;</span><span class="p">,</span> <span class="n">axes</span><span class="o">=</span><span class="p">(</span><span class="n">fig</span><span class="p">,</span> <span class="n">ax2</span><span class="p">))</span>
 <span class="n">ax2</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Tilted Pulsation&#39;</span><span class="p">)</span>
 
 <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
@@ -437,7 +448,8 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 </pre></div>
 </div>
 <p>This will produce a visualization showing the difference between untilted and tilted pulsations:</p>
-<a class="reference internal image-reference" href="_images/pulsation_with_tilt.png"><img alt="Comparison of untilted and tilted pulsations" src="_images/pulsation_with_tilt.png" style="width: 800px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/pulsation_with_tilt.png"><img alt="Comparison of untilted and tilted pulsations" class="only-light" src="_images/pulsation_with_tilt.png" style="width: 800px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/pulsation_with_tilt_dark.png"><img alt="Comparison of untilted and tilted pulsations" class="only-dark" src="_images/pulsation_with_tilt_dark.png" style="width: 800px;" /></a>
 </section>
 </section>
 <section id="adding-temperature-spots">
@@ -449,7 +461,7 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 <span class="n">spot_temp</span> <span class="o">=</span> <span class="mi">15000</span>
 
 <span class="c1"># Add temperature spots</span>
-<span class="n">m</span> <span class="o">=</span> <span class="n">add_spherical_harmonic_spot</span><span class="p">(</span>
+<span class="n">m_harm_spot</span> <span class="o">=</span> <span class="n">add_spherical_harmonic_spot</span><span class="p">(</span>
     <span class="n">m</span><span class="p">,</span> <span class="c1"># Model instance</span>
     <span class="mi">4</span><span class="p">,</span> <span class="c1"># m order</span>
     <span class="mi">4</span><span class="p">,</span> <span class="c1"># n degree</span>
@@ -459,9 +471,10 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 </pre></div>
 </div>
 <p>which should produce a temperature map like this:</p>
-<a class="reference internal image-reference" href="_images/temp_harmonic.png"><img alt="3D visualization of a temperature map for harmonic series spots" src="_images/temp_harmonic.png" style="width: 600px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/temp_harmonic.png"><img alt="3D visualization of a temperature map for harmonic series spots" class="only-light" src="_images/temp_harmonic.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/temp_harmonic_dark.png"><img alt="3D visualization of a temperature map for harmonic series spots" class="only-dark" src="_images/temp_harmonic_dark.png" style="width: 600px;" /></a>
 <p>Similarly to pulsation, you can tilt the spot by specifying the <cite>tilt_axis</cite> and <cite>tilt_degree</cite> parameters:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">m</span> <span class="o">=</span> <span class="n">add_spherical_harmonic_spot</span><span class="p">(</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">m_harm_spot_tilted</span> <span class="o">=</span> <span class="n">add_spherical_harmonic_spot</span><span class="p">(</span>
     <span class="n">m</span><span class="p">,</span> <span class="c1"># Model instance</span>
     <span class="mi">4</span><span class="p">,</span> <span class="c1"># m order</span>
     <span class="mi">4</span><span class="p">,</span> <span class="c1"># n degree</span>
@@ -472,11 +485,12 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 <span class="p">)</span>
 </pre></div>
 </div>
-<a class="reference internal image-reference" href="_images/tilted_temperature_spot.png"><img alt="3D visualization of a temperature map for harmonic series spots" src="_images/tilted_temperature_spot.png" style="width: 600px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/tilted_temperature_spot.png"><img alt="3D visualization of a temperature map for harmonic series spots" class="only-light" src="_images/tilted_temperature_spot.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/tilted_temperature_spot_dark.png"><img alt="3D visualization of a temperature map for harmonic series spots" class="only-dark" src="_images/tilted_temperature_spot_dark.png" style="width: 600px;" /></a>
 <p>or add it as a circular spot:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.models.spots</span> <span class="kn">import</span> <span class="n">add_spot</span>
 
-<span class="n">m</span> <span class="o">=</span> <span class="n">add_spot</span><span class="p">(</span>
+<span class="n">m_spot</span> <span class="o">=</span> <span class="n">add_spot</span><span class="p">(</span>
     <span class="n">mesh</span><span class="o">=</span><span class="n">m</span><span class="p">,</span> <span class="c1"># Model instance</span>
     <span class="n">spot_center_theta</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="c1"># spot center in spherical coordinates, in radians</span>
     <span class="n">spot_center_phi</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="c1"># spot center in spherical coordinates, in radians</span>
@@ -490,24 +504,30 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 </pre></div>
 </div>
 <p>which should produce a temperature map like this:</p>
-<a class="reference internal image-reference" href="_images/temp_spot.png"><img alt="3D visualization of a temperature map for a circular spot" src="_images/temp_spot.png" style="width: 600px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/temp_spot.png"><img alt="3D visualization of a temperature map for a circular spot" class="only-light" src="_images/temp_spot.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/temp_spot_dark.png"><img alt="3D visualization of a temperature map for a circular spot" class="only-dark" src="_images/temp_spot_dark.png" style="width: 600px;" /></a>
 <p>In both cases, you can also add multiple spots to the mesh. Either by adding two spherical harmonic modes:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">m</span> <span class="o">=</span> <span class="n">add_spherical_harmonic_spots</span><span class="p">(</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.models.spots</span> <span class="kn">import</span> <span class="n">add_spherical_harmonic_spots</span>
+
+<span class="n">m_harm_spots</span> <span class="o">=</span> <span class="n">add_spherical_harmonic_spots</span><span class="p">(</span>
     <span class="n">mesh</span><span class="o">=</span><span class="n">m</span><span class="p">,</span>
     <span class="n">m_orders</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">2</span><span class="p">,</span> <span class="mf">3.</span><span class="p">]),</span>
     <span class="n">n_degrees</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">2</span><span class="p">,</span> <span class="mf">3.</span><span class="p">]),</span>
     <span class="n">param_deltas</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1000</span><span class="p">,</span> <span class="mf">1000.</span><span class="p">]),</span>
-    <span class="n">param_indices</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]),</span>
+    <span class="n">param_indices</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">])</span>
 <span class="p">)</span>
 </pre></div>
 </div>
 <p>which will produce a temperature map like this:</p>
-<a class="reference internal image-reference" href="_images/temp_2_2_3_3.png"><img alt="3D visualization of a temperature map for two spots" src="_images/temp_2_2_3_3.png" style="width: 600px;" /></a>
-<p>A comparison of two separate harmonic modes: left is m=2 and n=2, right is m=3 and n=3.</p>
-<a class="reference internal image-reference" href="_images/temp_2_2.png"><img alt="3D visualization of a temperature map for harmonic series spot m=2, n=2" class="align-left" src="_images/temp_2_2.png" style="width: 300px;" /></a>
-<a class="reference internal image-reference" href="_images/temp_3_3.png"><img alt="3D visualization of a temperature map for harmonic series spot m=3, n=3" class="align-right" src="_images/temp_3_3.png" style="width: 300px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/temp_2_2_3_3.png"><img alt="3D visualization of a temperature map for two spots" class="only-light" src="_images/temp_2_2_3_3.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/temp_2_2_3_3_dark.png"><img alt="3D visualization of a temperature map for two spots" class="only-dark" src="_images/temp_2_2_3_3_dark.png" style="width: 600px;" /></a>
+<p>A comparison of two separate harmonic modes:</p>
+<a class="only-light reference internal image-reference" href="_images/temp_2_2_3_3_comparison.png"><img alt="3D visualization of a temperature map for harmonic series spot m=2, n=2" class="only-light align-left" src="_images/temp_2_2_3_3_comparison.png" style="width: 1000px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/temp_2_2_3_3_comparison_dark.png"><img alt="3D visualization of a temperature map for harmonic series spot m=2, n=2" class="only-dark align-left" src="_images/temp_2_2_3_3_comparison_dark.png" style="width: 1000px;" /></a>
 <p>or by adding two circular spots:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">m</span> <span class="o">=</span> <span class="n">add_spots</span><span class="p">(</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.models.spots</span> <span class="kn">import</span> <span class="n">add_spots</span>
+
+<span class="n">m_spots</span> <span class="o">=</span> <span class="n">add_spots</span><span class="p">(</span>
     <span class="n">mesh</span><span class="o">=</span><span class="n">m</span><span class="p">,</span> <span class="c1"># Model instance</span>
     <span class="n">spot_center_thetas</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">1.5</span><span class="p">]),</span> <span class="c1"># spot center in spherical coordinates, in radians</span>
     <span class="n">spot_center_phis</span><span class="o">=</span><span class="n">jnp</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.</span><span class="p">]),</span> <span class="c1"># spot center in spherical coordinates, in radians</span>
@@ -519,8 +539,8 @@ Again, note that the amplitude is given in percent of the original radius.</p>
 </pre></div>
 </div>
 <p>This exampe adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.</p>
-<a class="reference internal image-reference" href="_images/temp_two_spots.png"><img alt="3D visualization of a temperature map for two spots" src="_images/temp_two_spots.png" style="width: 600px;" /></a>
-<p>These examples demonstrate the basic usage of the SPICE library for creating and modifying icosphere models. You can combine these techniques to create complex stellar surface models with various features like rotation, pulsation, and temperature spots.</p>
+<a class="only-light reference internal image-reference" href="_images/temp_two_spots.png"><img alt="3D visualization of a temperature map for two spots" class="only-light" src="_images/temp_two_spots.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/temp_two_spots_dark.png"><img alt="3D visualization of a temperature map for two spots" class="only-dark" src="_images/temp_two_spots_dark.png" style="width: 600px;" /></a>
 </section>
 </section>
 
