@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" />
 
-    <!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
+    <link rel="shortcut icon" href="_static/spice_pink-cropped.png"/><!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
         <title>Synthetic Photometry - SPICE 1.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=354aac6f" />
@@ -18,18 +18,24 @@
   body {
     --color-code-background: #f8f8f8;
   --color-code-foreground: black;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
   }
   @media not print {
     body[data-theme="dark"] {
       --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
     }
     @media (prefers-color-scheme: dark) {
       body:not([data-theme="light"]) {
         --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
       }
     }
@@ -189,6 +195,9 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
   
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="_static/spice_pink.svg" alt="Logo"/>
+  </div>
   
   <span class="sidebar-brand-text">SPICE 1.0 documentation</span>
   
@@ -204,6 +213,7 @@
 <li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a></li>
 <li class="toctree-l1"><a class="reference internal" href="transformer_payne_integration.html">TransformerPayne Integration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="korg_interpolator.html">Korg.jl Interpolator</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
 </ul>
