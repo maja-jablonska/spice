@@ -49,3 +49,14 @@ templates_path = ['_templates']
 epub_show_urls = 'footnote'
 
 html_theme = 'furo'
+
+# -- Post process ------------------------------------------------------------
+import collections
+def remove_namedtuple_attrib_docstring(app, what, name, obj, skip, options):
+    if type(obj) is collections._tuplegetter:
+        return True
+    return skip
+
+
+def setup(app):
+    app.connect('autodoc-skip-member', remove_namedtuple_attrib_docstring)
