@@ -1,3 +1,19 @@
-.wy-side-nav-search, .wy-nav-top {
-    background: #0b750a;
+/* Link colors */
+a {
+    color: #ff7ce4;
+}
+
+a:hover {
+    color: #ff7ce4;
+    text-decoration: underline;
+}
+
+a:visited {
+    color: #87255B;
+}
+
+@media (prefers-color-scheme: dark) {
+    a:visited {
+        color: #EFF8E2;
+    }
 }
