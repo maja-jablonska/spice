@@ -9,6 +9,22 @@ author = 'Maya Jablonska'
 release = '1.0'
 version = '1.0'
 
+html_logo = "../img/spice_pink.svg"
+html_favicon = '../img/spice_pink-cropped.png'
+
+html_static_path = ['_static']
+
+html_theme_options = {
+    "light_css_variables": {
+        "color-brand-primary": "#ff7ce4",
+        "color-brand-content": "#ff7ce4",
+    },
+    "dark_css_variables": {
+        "color-brand-primary": "#ff7ce4",
+        "color-brand-content": "#ff7ce4",
+    }
+}
+
 # -- General configuration
 
 extensions = [
