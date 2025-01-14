@@ -3,7 +3,7 @@
   <head><meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1"/>
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" /><link rel="next" title="Troubleshooting" href="troubleshooting.html" /><link rel="prev" title="Korg.jl Interpolator" href="korg_interpolator.html" />
+<link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" />
 
     <link rel="shortcut icon" href="_static/spice_pink-cropped.png"/><!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
         <title>SPICE: API - SPICE 1.0 documentation</title>
@@ -207,14 +207,13 @@
   <input type="hidden" name="area" value="default">
 </form>
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
-  <ul class="current">
+  <ul>
 <li class="toctree-l1"><a class="reference internal" href="introduction.html">Introduction</a></li>
 <li class="toctree-l1"><a class="reference internal" href="mesh.html">Creating a Mesh Model</a></li>
 <li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a></li>
 <li class="toctree-l1"><a class="reference internal" href="transformer_payne_integration.html">TransformerPayne Integration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="korg_interpolator.html">Korg.jl Interpolator</a></li>
-<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">SPICE: API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">Troubleshooting</a></li>
 </ul>
 
@@ -236,7 +235,7 @@
         </a>
         <div class="content-icon-container">
           <div class="view-this-page">
-  <a class="muted-link" href="_sources/api.rst.txt" title="View this page">
+  <a class="muted-link" href="_sources/api_mesh_model.rst.txt" title="View this page">
     <svg><use href="#svg-eye"></use></svg>
     <span class="visually-hidden">View this page</span>
   </a>
@@ -515,268 +514,6 @@ It also handles the calculation of surface gravity (log g) values if required.</
 
 </section>
 </section>
-<section id="mesh-transformations">
-<h2>Mesh Transformations<a class="headerlink" href="#mesh-transformations" title="Link to this heading">¶</a></h2>
-<section id="transform-functions">
-<h3>Transform Functions<a class="headerlink" href="#transform-functions" title="Link to this heading">¶</a></h3>
-<dl class="py function">
-<dt class="sig sig-object py" id="transform">
-<span class="sig-name descname"><span class="pre">transform</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">vector</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'3'</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#transform" title="Link to this definition">¶</a></dt>
-<dd><p>Transform the position of a mesh model based on a given vector.</p>
-<p>This function applies a transformation to the mesh model’s position by updating its center
-with the provided vector. PHOEBE models are considered read-only within SPICE.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mesh</strong> – The mesh model to be transformed</p></li>
-<li><p><strong>vector</strong> – The vector by which the mesh’s position is to be updated</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The transformed mesh model with its position updated</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If the mesh model is an instance of PhoebeModel</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="update_parameter">
-<span class="sig-name descname"><span class="pre">update_parameter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><span class="pre">int</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">ArrayLike</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_mesh_elements</span> <span class="pre">n_parameters'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#update_parameter" title="Link to this definition">¶</a></dt>
-<dd><p>Update a specific parameter or set of parameters in the mesh model.</p>
-<p>This function allows updating one or multiple parameters of the mesh model. It can handle
-parameter specification by name (string), index (integer), or an array-like of indices.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mesh</strong> – The mesh model to be updated</p></li>
-<li><p><strong>parameter</strong> – The parameter(s) to update - can be name, index or array of indices</p></li>
-<li><p><strong>parameter_values</strong> – The new value(s) for the specified parameter(s)</p></li>
-<li><p><strong>parameter_names</strong> – List of parameter names used for the model</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The updated mesh model</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If parameter name not found or mesh is PhoebeModel</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="update_parameters">
-<span class="sig-name descname"><span class="pre">update_parameters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_values</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_mesh_elements</span> <span class="pre">n_parameters'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parameter_names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#update_parameters" title="Link to this definition">¶</a></dt>
-<dd><p>Update multiple parameters in the mesh model simultaneously.</p>
-<p>More efficient than calling update_parameter multiple times when updating several parameters at once.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mesh</strong> – The mesh model to be updated</p></li>
-<li><p><strong>parameters</strong> – List of parameter names or indices to update</p></li>
-<li><p><strong>parameter_values</strong> – New values for the specified parameters</p></li>
-<li><p><strong>parameter_names</strong> – List of parameter names used for the model</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The updated mesh model</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If parameter names not found or mesh is PhoebeModel</p>
-</dd>
-</dl>
-</dd></dl>
-
-</section>
-<section id="rotation-functions">
-<h3>Rotation Functions<a class="headerlink" href="#rotation-functions" title="Link to this heading">¶</a></h3>
-<dl class="py function">
-<dt class="sig sig-object py" id="evaluate_rotation">
-<span class="sig-name descname"><span class="pre">evaluate_rotation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">t</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#evaluate_rotation" title="Link to this definition">¶</a></dt>
-<dd><p>Evaluate the rotation of a mesh model at a specific time.</p>
-<p>Updates the mesh model’s rotation parameters based on the given time.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mesh</strong> – The mesh model to evaluate rotation for</p></li>
-<li><p><strong>t</strong> – The time at which to evaluate the rotation (seconds)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The mesh model with updated rotation parameters</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If mesh is PhoebeModel</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="evaluate_body_orbit">
-<span class="sig-name descname"><span class="pre">evaluate_body_orbit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">orbital_velocity</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#evaluate_body_orbit" title="Link to this definition">¶</a></dt>
-<dd><p>Evaluate the effects of an orbit on a mesh model.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>m</strong> – Mesh model of an orbiting body</p></li>
-<li><p><strong>orbital_velocity</strong> – Orbital velocity in km/s</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Mesh model with updated parameters</p>
-</dd>
-</dl>
-</dd></dl>
-
-</section>
-<section id="pulsation-functions">
-<h3>Pulsation Functions<a class="headerlink" href="#pulsation-functions" title="Link to this heading">¶</a></h3>
-<dl class="py function">
-<dt class="sig sig-object py" id="add_pulsations">
-<span class="sig-name descname"><span class="pre">add_pulsations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">m_orders</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_pulsations'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_degrees</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_pulsations'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">periods</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_pulsations'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fourier_series_parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_pulsations</span> <span class="pre">n_terms</span> <span class="pre">2'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pulsation_axes</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_pulsations</span> <span class="pre">3'</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pulsation_angles</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_pulsations'</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#add_pulsations" title="Link to this definition">¶</a></dt>
-<dd><p>Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>m</strong> – The mesh model to add pulsation effects to</p></li>
-<li><p><strong>m_orders</strong> – Array of orders (m) of the spherical harmonics</p></li>
-<li><p><strong>n_degrees</strong> – Array of degrees (n) of the spherical harmonics</p></li>
-<li><p><strong>periods</strong> – Array of pulsation periods in seconds</p></li>
-<li><p><strong>fourier_series_parameters</strong> – Array of dynamic parameters for the Fourier series</p></li>
-<li><p><strong>pulsation_axes</strong> – Array of pulsation axes (defaults to rotation axis)</p></li>
-<li><p><strong>pulsation_angles</strong> – Array of pulsation angles (defaults to zero)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The mesh model with updated pulsation parameters</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If mesh is PhoebeModel or input arrays have inconsistent lengths</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="reset_pulsations">
-<span class="sig-name descname"><span class="pre">reset_pulsations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#reset_pulsations" title="Link to this definition">¶</a></dt>
-<dd><p>Resets the pulsation parameters of a mesh model to non-pulsating model values.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>m</strong> – The mesh model to reset pulsation parameters for</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The mesh model with pulsation parameters reset</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If mesh is PhoebeModel</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="evaluate_pulsations">
-<span class="sig-name descname"><span class="pre">evaluate_pulsations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">t</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><span class="pre">float</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#evaluate_pulsations" title="Link to this definition">¶</a></dt>
-<dd><p>Evaluates and updates the mesh model with pulsation effects at a specific time.</p>
-<p>Calculates pulsation effects using Fourier series parameters for both static and dynamic components.
-Updates the mesh with calculated offsets and velocities.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>m</strong> – The mesh model to evaluate pulsations for</p></li>
-<li><p><strong>t</strong> – The time at which to evaluate the pulsations</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>The mesh model updated with pulsation effects</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.13)"><strong>ValueError</strong></a> – If mesh is PhoebeModel</p>
-</dd>
-</dl>
-</dd></dl>
-
-</section>
-</section>
-<section id="mesh-view">
-<h2>Mesh View<a class="headerlink" href="#mesh-view" title="Link to this heading">¶</a></h2>
-<section id="mesh-view-functions">
-<h3>Mesh View Functions<a class="headerlink" href="#mesh-view-functions" title="Link to this heading">¶</a></h3>
-<dl class="py function">
-<dt class="sig sig-object py" id="get_grid_spans">
-<span class="sig-name descname"><span class="pre">get_grid_spans</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">m2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_cells_array</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ArrayLike</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">ArrayLike</span></span></span><a class="headerlink" href="#get_grid_spans" title="Link to this definition">¶</a></dt>
-<dd><p>Calculate grid cell spans for different grid sizes.</p>
-<p>For each number of cells in n_cells_array, calculates the span (width/height) of grid cells
-that would cover the projected area of both meshes. Returns the minimum of x and y spans
-to ensure square grid cells.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>m1</strong> – First mesh model with cast_vertices and faces</p></li>
-<li><p><strong>m2</strong> – Second mesh model with cast_vertices and faces</p></li>
-<li><p><strong>n_cells_array</strong> – Array of different grid cell counts to try</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Array of grid cell spans corresponding to each n_cells value</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="get_mesh_view">
-<span class="sig-name descname"><span class="pre">get_mesh_view</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">los_vector</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'3'</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#get_mesh_view" title="Link to this definition">¶</a></dt>
-<dd><p>Cast 3D vectors of centers and center velocities to the line-of-sight.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>mesh</strong> – Properties to be cast (n, 3)</p></li>
-<li><p><strong>los_vector</strong> – LOS vector (3,)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>mesh with updated los_vector, mus, and los_velocities</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="visible_area">
-<span class="sig-name descname"><span class="pre">visible_area</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">vertices1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_vertices</span> <span class="pre">3'</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vertices2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_vertices</span> <span class="pre">3'</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Float</span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'n_vertices'</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#visible_area" title="Link to this definition">¶</a></dt>
-<dd><p>Calculate visible area between two sets of vertices.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>vertices1</strong> – First set of vertices</p></li>
-<li><p><strong>vertices2</strong> – Second set of vertices</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>Area of visible region</p>
-</dd>
-</dl>
-</dd></dl>
-
-<dl class="py function">
-<dt class="sig sig-object py" id="resolve_occlusion">
-<span class="sig-name descname"><span class="pre">resolve_occlusion</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">m1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">m2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">grid</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Grid</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#spice.models.mesh_model.MeshModel" title="spice.models.mesh_model.MeshModel"><span class="pre">MeshModel</span></a></span></span><a class="headerlink" href="#resolve_occlusion" title="Link to this definition">¶</a></dt>
-<dd><p>Calculate the occlusion of m1 by m2.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>m1</strong> – occluded mesh model</p></li>
-<li><p><strong>m2</strong> – occluding mesh model</p></li>
-<li><p><strong>grid</strong> – grid for calculation optimization</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>m1 with updated visible areas</p>
-</dd>
-</dl>
-</dd></dl>
-
-</section>
-</section>
 </section>
 
         </article>
@@ -784,26 +521,8 @@ to ensure square grid cells.</p>
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="troubleshooting.html">
-              <div class="page-info">
-                <div class="context">
-                  <span>Next</span>
-                </div>
-                <div class="title">Troubleshooting</div>
-              </div>
-              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
-            </a>
-          <a class="prev-page" href="korg_interpolator.html">
-              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
-              <div class="page-info">
-                <div class="context">
-                  <span>Previous</span>
-                </div>
-                
-                <div class="title">Korg.jl Interpolator</div>
-                
-              </div>
-            </a>
+          
+          
         </div>
         <div class="bottom-of-page">
           <div class="left-details">
@@ -883,36 +602,6 @@ to ensure square grid cells.</p>
 </li>
 <li><a class="reference internal" href="#helper-functions">Helper Functions</a><ul>
 <li><a class="reference internal" href="#calculate_log_gs"><code class="docutils literal notranslate"><span class="pre">calculate_log_gs()</span></code></a></li>
-</ul>
-</li>
-</ul>
-</li>
-<li><a class="reference internal" href="#mesh-transformations">Mesh Transformations</a><ul>
-<li><a class="reference internal" href="#transform-functions">Transform Functions</a><ul>
-<li><a class="reference internal" href="#transform"><code class="docutils literal notranslate"><span class="pre">transform()</span></code></a></li>
-<li><a class="reference internal" href="#update_parameter"><code class="docutils literal notranslate"><span class="pre">update_parameter()</span></code></a></li>
-<li><a class="reference internal" href="#update_parameters"><code class="docutils literal notranslate"><span class="pre">update_parameters()</span></code></a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#rotation-functions">Rotation Functions</a><ul>
-<li><a class="reference internal" href="#evaluate_rotation"><code class="docutils literal notranslate"><span class="pre">evaluate_rotation()</span></code></a></li>
-<li><a class="reference internal" href="#evaluate_body_orbit"><code class="docutils literal notranslate"><span class="pre">evaluate_body_orbit()</span></code></a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#pulsation-functions">Pulsation Functions</a><ul>
-<li><a class="reference internal" href="#add_pulsations"><code class="docutils literal notranslate"><span class="pre">add_pulsations()</span></code></a></li>
-<li><a class="reference internal" href="#reset_pulsations"><code class="docutils literal notranslate"><span class="pre">reset_pulsations()</span></code></a></li>
-<li><a class="reference internal" href="#evaluate_pulsations"><code class="docutils literal notranslate"><span class="pre">evaluate_pulsations()</span></code></a></li>
-</ul>
-</li>
-</ul>
-</li>
-<li><a class="reference internal" href="#mesh-view">Mesh View</a><ul>
-<li><a class="reference internal" href="#mesh-view-functions">Mesh View Functions</a><ul>
-<li><a class="reference internal" href="#get_grid_spans"><code class="docutils literal notranslate"><span class="pre">get_grid_spans()</span></code></a></li>
-<li><a class="reference internal" href="#get_mesh_view"><code class="docutils literal notranslate"><span class="pre">get_mesh_view()</span></code></a></li>
-<li><a class="reference internal" href="#visible_area"><code class="docutils literal notranslate"><span class="pre">visible_area()</span></code></a></li>
-<li><a class="reference internal" href="#resolve_occlusion"><code class="docutils literal notranslate"><span class="pre">resolve_occlusion()</span></code></a></li>
 </ul>
 </li>
 </ul>
