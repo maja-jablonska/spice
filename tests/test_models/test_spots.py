@@ -2,8 +2,10 @@ import pickle
 
 import pytest
 import jax.numpy as jnp
-from spice.models.spots import add_spot, add_spherical_harmonic_spots, add_spherical_harmonic_spot
+from spice.models.spots import add_spot, add_spherical_harmonic_spots, add_spherical_harmonic_spot, add_spots
 from tests.test_models.utils import default_icosphere
+
+import chex
 
 
 @pytest.fixture
@@ -165,3 +167,67 @@ class TestSpotFunctions:
         )
 
         assert not jnp.allclose(modified_mesh_x.parameters, modified_mesh_y.parameters)
+
+    def test_spot_dimensions(self, mock_mesh):
+        """Test dimensions of spot function outputs"""
+        spot_center_theta = 0.5
+        spot_center_phi = 1.0
+        spot_radius = 0.3
+        param_delta = 100.0
+        param_index = 0
+        smoothness = 1.0
+
+        # Test add_spot
+        spotted = add_spot(mock_mesh, spot_center_theta, spot_center_phi, 
+                          spot_radius, param_delta, param_index, smoothness)
+        
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        chex.assert_shape(spotted.parameters, mock_mesh.parameters.shape)
+
+    def test_spherical_harmonic_spot_dimensions(self, mock_mesh):
+        """Test dimensions of spherical harmonic spot function outputs"""
+        m_order = 2
+        n_degree = 2
+        param_delta = 100.0
+        param_index = 0
+        tilt_axis = jnp.array([0., 1., 0.])
+        tilt_degree = 45.0
+
+        # Test add_spherical_harmonic_spot
+        spotted = add_spherical_harmonic_spot(mock_mesh, m_order, n_degree,
+                                            param_delta, param_index,
+                                            tilt_axis, tilt_degree)
+
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        chex.assert_shape(spotted.parameters, mock_mesh.parameters.shape)
+
+    def test_multiple_spots_dimensions(self, mock_mesh):
+        """Test dimensions of multiple spots function outputs"""
+        spot_center_thetas = jnp.array([0.5, 1.0, 1.5])
+        spot_center_phis = jnp.array([0.0, 1.0, 2.0])
+        spot_radii = jnp.array([0.2, 0.3, 0.4])
+        param_deltas = jnp.array([100.0, 200.0, 300.0])
+        param_indices = jnp.array([0, 0, 0])
+        smoothness = jnp.array([1.0, 1.0, 1.0])
+
+        # Test add_spots
+        spotted = add_spots(mock_mesh, spot_center_thetas, spot_center_phis,
+                          spot_radii, param_deltas, param_indices, smoothness)
+
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        chex.assert_shape(spotted.parameters, mock_mesh.parameters.shape)
+
+    def test_multiple_spherical_harmonic_spots_dimensions(self, mock_mesh):
+        """Test dimensions of multiple spherical harmonic spots function outputs"""
+        m_orders = jnp.array([2, 3])
+        n_degrees = jnp.array([2, 3])
+        param_deltas = jnp.array([100.0, 200.0])
+        param_indices = jnp.array([0, 0])
+        tilt_axes = jnp.array([[0., 1., 0.], [1., 0., 0.]])
+        tilt_angles = jnp.array([45.0, 30.0])
+
+        # Test add_spherical_harmonic_spots
+        spotted = add_spherical_harmonic_spots(mock_mesh, m_orders, n_degrees,
+                                             param_deltas, param_indices, tilt_angles=tilt_angles, tilt_axes=tilt_axes)
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        chex.assert_shape(spotted.parameters, mock_mesh.parameters.shape)

@@ -11,6 +11,7 @@ try:
     import jax.numpy as jnp
     from jax.typing import ArrayLike
     import jax
+    from jaxtyping import Array, Float, Int
 
 except ImportError:
     raise ImportError("Please install JAX to use SPICE.")
@@ -25,9 +26,35 @@ def _filter_responses(wavelengths: ArrayLike,
 
 class Filter(ABC):
     def __init__(self,
-                 transmission_curve: ArrayLike,
+                 transmission_curve: Float[Array, "2 n_samples"],
                  ab_zeropoint: float = 3.631 * 1e-20,
                  name: Optional[str] = None):
+        """A class representing an astronomical filter with its transmission curve and properties.
+
+        The Filter class provides functionality to handle astronomical filters, including their
+        transmission curves in both wavelength and frequency space, and methods to apply the
+        filter response to spectral data.
+
+        Args:
+            transmission_curve (Float[Array, "2 n_samples"]): A 2xN array containing wavelengths
+                and corresponding transmission values. First row should be wavelengths in Angstroms,
+                second row should be transmission values between 0 and 1.
+            ab_zeropoint (float, optional): The AB magnitude system zero point in erg/s/cm^2/Hz.
+                Defaults to 3.631e-20 (standard AB system zero point).
+            name (Optional[str], optional): Name of the filter. If None, will be derived from class name.
+                Defaults to None.
+
+        Properties:
+            transmission_curve_wavelengths: The transmission curve in wavelength space
+            transmission_curve_frequencies: The transmission curve in frequency space
+            ab_zeropoint: The AB magnitude system zero point
+            name: The name of the filter
+
+        Methods:
+            filter_responses_for_wavelengths: Get filter response values for given wavelengths
+            filter_responses_for_frequencies: Get filter response values for given frequencies
+            plot_filter_responses_for_wavelengths: Plot filter response curve with input spectrum
+        """
         self.__transmission_curve = transmission_curve
 
         tc_freq = wavelengths_to_frequencies(transmission_curve[0])
@@ -57,17 +84,17 @@ class Filter(ABC):
     def __str__(self):
         return self.name
 
-    def filter_responses_for_wavelengths(self, wavelengths: ArrayLike) -> ArrayLike:
+    def filter_responses_for_wavelengths(self, wavelengths: Float[Array, "n_wavelengths"]) -> Float[Array, "n_wavelengths"]:
         return _filter_responses(wavelengths, self.transmission_curve_wavelengths[0],
                                  self.transmission_curve_wavelengths[1])
 
-    def filter_responses_for_frequencies(self, wavelengths: ArrayLike) -> ArrayLike:
+    def filter_responses_for_frequencies(self, wavelengths: Float[Array, "n_wavelengths"]) -> Float[Array, "n_wavelengths"]:
         return _filter_responses(wavelengths, self.transmission_curve_frequencies[0],
                                  self.transmission_curve_frequencies[1])
 
     def plot_filter_responses_for_wavelengths(self,
-                                              wavelengths: ArrayLike,
-                                              intensities: ArrayLike,
+                                              wavelengths: Float[Array, "n_wavelengths"],
+                                              intensities: Float[Array, "n_wavelengths"],
                                               plot_kwargs: Optional[dict] = None):
         plot_kwargs = plot_kwargs or {}
         if "label" not in plot_kwargs:
@@ -81,8 +108,8 @@ class Filter(ABC):
         plt.legend()
 
     def plot_filter_responses_for_frequencies(self,
-                                              frequencies: ArrayLike,
-                                              intensities: ArrayLike,
+                                              frequencies: Float[Array, "n_wavelengths"],
+                                              intensities: Float[Array, "n_wavelengths"],
                                               plot_kwargs: Optional[dict] = None):
         plot_kwargs = plot_kwargs or {}
         if "label" not in plot_kwargs:
