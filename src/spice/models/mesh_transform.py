@@ -10,15 +10,14 @@ import numpy as np
 from .mesh_generation import face_center
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
 from spice.models.phoebe_model import PhoebeModel
-from .utils import (mesh_polar_vertices,
-                    rotation_matrix, rotation_matrix_prim,
+from .utils import (rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
                     calculate_axis_radii,
                     evaluate_many_fouriers_for_value,
                     evaluate_many_fouriers_prim_for_value,
-                    spherical_harmonic, spherical_harmonic_with_tilt)
+                    spherical_harmonic_with_tilt)
 
-import astropy.units as u
+from jaxtyping import Array, Float
 
 
 def _is_arraylike(x):
@@ -30,7 +29,7 @@ def _transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
     return mesh._replace(center=vector)
 
 
-def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
+def transform(mesh: MeshModel, vector: Float[Array, "3"]) -> MeshModel:
     """
         Transform the position of a mesh model based on a given vector.
 
@@ -55,11 +54,11 @@ def transform(mesh: MeshModel, vector: ArrayLike) -> MeshModel:
 
 
 @jax.jit
-def _update_parameter(mesh: MeshModel, parameter_index: ArrayLike, parameter_values: ArrayLike) -> MeshModel:
+def _update_parameter(mesh: MeshModel, parameter_index: int, parameter_values: Float[Array, "n_mesh_elements n_parameters"]) -> MeshModel:
     return mesh._replace(parameters=mesh.parameters.at[:, parameter_index].set(parameter_values))
 
 
-def update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], parameter_values: ArrayLike, parameter_names: List[str] = None) -> MeshModel:
+def update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], parameter_values: Float[Array, "n_mesh_elements n_parameters"], parameter_names: List[str] = None) -> MeshModel:
     """
     Update a specific parameter or set of parameters in the mesh model.
 
@@ -72,7 +71,7 @@ def update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], par
             - A string representing the parameter name.
             - An integer representing the parameter index.
             - An array-like of integers representing multiple parameter indices.
-        parameter_values (ArrayLike): The new value(s) for the specified parameter(s).
+        parameter_values (Float[Array, "n_mesh_elements n_parameters"]): The new value(s) for the specified parameter(s).
             Should match the shape of the parameter specification.
         parameter_names (List[str]): A list of parameter names used for the model while constructing the mesh.
 
@@ -121,7 +120,7 @@ def _update_parameters(mesh: MeshModel, parameter_indices: ArrayLike, parameter_
     return mesh._replace(parameters=updated_parameters)
 
 
-def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], parameter_values: ArrayLike, parameter_names: List[str] = None) -> MeshModel:
+def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], parameter_values: Float[Array, "n_mesh_elements n_parameters"], parameter_names: List[str] = None) -> MeshModel:
     """
     Update multiple parameters in the mesh model simultaneously.
 
@@ -133,7 +132,7 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
         parameters (Union[List[str], List[int]]): The parameters to update. Can be:
             - A list of strings representing parameter names.
             - A list of integers representing parameter indices.
-        parameter_values (ArrayLike): The new values for the specified parameters.
+        parameter_values (Float[Array, "n_mesh_elements n_parameters"]): The new values for the specified parameters.
             Should be an array-like with the same length as the parameters list.
         parameter_names (List[str]): A list of parameter names used for the model while constructing the mesh.
 
@@ -178,8 +177,8 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
 
 @jax.jit
 def _add_rotation(mesh: MeshModel,
-                  rotation_velocity: ArrayLike,
-                  rotation_axis: ArrayLike = DEFAULT_ROTATION_AXIS) -> MeshModel:
+                  rotation_velocity: float,
+                  rotation_axis: Float[Array, "3"] = DEFAULT_ROTATION_AXIS) -> MeshModel:
     rot_matrix = rotation_matrix(rotation_axis)
     rot_matrix_grad = rotation_matrix_prim(rotation_axis)
 
@@ -190,8 +189,8 @@ def _add_rotation(mesh: MeshModel,
 
 
 def add_rotation(mesh: MeshModel,
-                 rotation_velocity: ArrayLike,
-                 rotation_axis: ArrayLike = DEFAULT_ROTATION_AXIS) -> MeshModel:
+                 rotation_velocity: float,
+                 rotation_axis: Float[Array, "3"] = DEFAULT_ROTATION_AXIS) -> MeshModel:
     """
     Adds rigid rotation to a mesh model based on specified velocity and axis.
 
@@ -201,8 +200,8 @@ def add_rotation(mesh: MeshModel,
 
     Args:
         mesh (MeshModel): The mesh model to add rotation to.
-        rotation_velocity (ArrayLike): The velocity of the rotation.
-        rotation_axis (ArrayLike): The axis of the rotation. Defaults to the global DEFAULT_ROTATION_AXIS.
+        rotation_velocity (float): The velocity of the rotation.
+        rotation_axis (Float[Array, "3"]): The axis of the rotation. Defaults to the global [0., 0., 1.].
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.
@@ -218,31 +217,19 @@ def add_rotation(mesh: MeshModel,
 
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
-    jax.debug.print("entering func")
     rotation_velocity_km_s = mesh.rotation_velocity
-    jax.debug.print("rotation velocity km/s: {}", rotation_velocity_km_s)
     theta = (rotation_velocity_km_s * t) / mesh.radius / 695700.0
-    jax.debug.print("theta: {}", theta)
     
-    jax.debug.print("rotation matrix")
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
     
-    jax.debug.print("rotation matrix prim")
     t_rotation_matrix_prim = evaluate_rotation_matrix_prim(mesh.rotation_matrix_prim, theta)
     
-    jax.debug.print("d_vertices shape: {}", mesh.d_vertices.shape)
-    jax.debug.print("t_rotation_matrix shape: {}", t_rotation_matrix.shape)
     rotated_vertices = jnp.matmul(mesh.d_vertices, t_rotation_matrix)
     
-    jax.debug.print("d_centers shape: {}", mesh.d_centers.shape) 
-    jax.debug.print("t_rotation_matrix shape: {}", t_rotation_matrix.shape)
     rotated_centers = jnp.matmul(mesh.d_centers, t_rotation_matrix)
     
-    jax.debug.print("d_centers shape: {}", mesh.d_centers.shape)
-    jax.debug.print("t_rotation_matrix_prim shape: {}", t_rotation_matrix_prim.shape)
     rotated_centers_vel = rotation_velocity_km_s * jnp.matmul(mesh.d_centers, t_rotation_matrix_prim)
 
-    jax.debug.print("rotated_centers shape: {}", rotated_centers.shape)
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
     return mesh._replace(d_vertices=rotated_vertices,
                          d_centers=rotated_centers,
@@ -250,7 +237,7 @@ def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
                          axis_radii=new_axis_radii)
 
 
-def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
+def evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel:
     """
     Evaluate the rotation of a mesh model over a specified time.
 
@@ -261,7 +248,7 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
 
     Args:
         mesh (MeshModel): The mesh model to evaluate rotation for.
-        t (ArrayLike): The time at which to evaluate the rotation. [seconds]
+        t (float): The time at which to evaluate the rotation. [seconds]
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.
@@ -269,7 +256,6 @@ def evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only.
     """
-    print("evaluating rotation")
     if isinstance(mesh, PhoebeModel):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
@@ -308,9 +294,9 @@ def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
     )
 
 
-def add_pulsation(m: MeshModel, m_order: ArrayLike, n_degree: ArrayLike,
-                  period: float, fourier_series_parameters: ArrayLike,
-                  pulsation_axes: ArrayLike = None, pulsation_angles: ArrayLike = None) -> MeshModel:
+def add_pulsation(m: MeshModel, m_order: Float, n_degree: Float,
+                  period: Float, fourier_series_parameters: Float[Array, "n_terms 2"],
+                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None) -> MeshModel:
     """
     Adds pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -320,14 +306,14 @@ def add_pulsation(m: MeshModel, m_order: ArrayLike, n_degree: ArrayLike,
 
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
-        m_order (ArrayLike): The order (m) of the spherical harmonics.
-        n_degree (ArrayLike): The degree (n) of the spherical harmonics.
-        period (float): Pulsation period in seconds.
-        fourier_series_parameters (ArrayLike): Dynamic parameters for the Fourier series that define the
+        m_order (Float): The order (m) of the spherical harmonics.
+        n_degree (Float): The degree (n) of the spherical harmonics.
+        period (Float): Pulsation period in seconds.
+        fourier_series_parameters (Float[Array, "n_terms 2"]): Dynamic parameters for the Fourier series that define the
             time-varying aspect of the pulsation. Shape should be (N, 2) where N is the number of terms,
             and each row contains [amplitude, phase] for that term.
-        pulsation_axes (ArrayLike): Axes of the pulsation. Defaults to the rotation axis of the mesh model.
-        pulsation_angles (ArrayLike): Angles of the pulsation. Defaults to zero.
+        pulsation_axes (Float[Array, "3"]): Axes of the pulsation. Defaults to the rotation axis of the mesh model.
+        pulsation_angles (Float): Angles of the pulsation. Defaults to zero.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -390,9 +376,9 @@ def _add_pulsations(m: MeshModel,
     return updated_m
 
 
-def add_pulsations(m: MeshModel, m_orders: ArrayLike, n_degrees: ArrayLike,
-                   periods: ArrayLike, fourier_series_parameters: ArrayLike,
-                   pulsation_axes: ArrayLike = None, pulsation_angles: ArrayLike = None) -> MeshModel:
+def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degrees: Float[Array, "n_pulsations"],
+                   periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"],
+                   pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel:
     """
     Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -401,14 +387,14 @@ def add_pulsations(m: MeshModel, m_orders: ArrayLike, n_degrees: ArrayLike,
 
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
-        m_orders (ArrayLike): Array of orders (m) of the spherical harmonics.
-        n_degrees (ArrayLike): Array of degrees (n) of the spherical harmonics.
-        periods (ArrayLike): Array of pulsation periods in seconds.
-        fourier_series_parameters (ArrayLike): Array of dynamic parameters for the Fourier series that define the
+        m_orders (Float[Array, "n_pulsations"]): Array of orders (m) of the spherical harmonics.
+        n_degrees (Float[Array, "n_pulsations"]): Array of degrees (n) of the spherical harmonics.
+        periods (Float[Array, "n_pulsations"]): Array of pulsation periods in seconds.
+        fourier_series_parameters (Float[Array, "n_pulsations n_terms 2"]): Array of dynamic parameters for the Fourier series that define the
             time-varying aspect of the pulsations. Shape should be (K, N, 2) where K is the number of pulsations,
             N is the number of terms for each pulsation, and each inner array contains [amplitude, phase] for that term.
-        pulsation_axes (ArrayLike): Array of pulsation axes. Defaults to the rotation axis of the mesh model.
-        pulsation_angles (ArrayLike): Array of pulsation angles. Defaults to zero.
+        pulsation_axes (Float[Array, "n_pulsations 3"]): Array of pulsation axes. Defaults to the rotation axis of the mesh model.
+        pulsation_angles (Float[Array, "n_pulsations"]): Array of pulsation angles. Defaults to zero.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.

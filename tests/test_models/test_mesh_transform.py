@@ -6,6 +6,8 @@ from src.spice.models.mesh_transform import add_pulsations, transform, add_rotat
     evaluate_pulsations, update_parameters
 from tests.test_models.utils import default_icosphere
 
+import chex
+
 
 class TestMeshTransformations:
     @pytest.fixture
@@ -195,3 +197,59 @@ class TestMeshTransformations:
                 f"Pulsation axis for pulsation {i} should be correctly set"
             assert jnp.isclose(pulsated_mesh.pulsation_angles[harmonic_ind], pulsation_angles[i]), \
                 f"Pulsation angle for pulsation {i} should be correctly set"
+
+    def test_transform_dimensions(self, mesh_model):
+        """Test dimensions of transform function outputs"""
+        vector = jnp.array([1.0, 2.0, 3.0])
+        
+        # Test unjitted version
+        transformed = transform(mesh_model, vector)
+        chex.assert_shape(transformed.center, (3,))
+        chex.assert_equal_shape([transformed.d_vertices, mesh_model.d_vertices])
+        chex.assert_equal_shape([transformed.d_centers, mesh_model.d_centers])
+
+    def test_rotation_dimensions(self, mesh_model):
+        """Test dimensions of rotation function outputs"""
+        rotation_velocity = 10.0
+        rotation_axis = jnp.array([0., 0., 1.])
+        t = 1800.0
+
+        # Test add_rotation
+        rotated = add_rotation(mesh_model, rotation_velocity, rotation_axis)
+        chex.assert_shape(rotated.rotation_axis, (3,))
+        chex.assert_shape(rotated.rotation_matrix, (3, 3))
+        chex.assert_shape(rotated.rotation_matrix_prim, (3, 3))
+        
+        # Test evaluate_rotation
+        evaluated = evaluate_rotation(rotated, t)
+        chex.assert_equal_shape([evaluated.d_vertices, mesh_model.d_vertices])
+        chex.assert_equal_shape([evaluated.d_centers, mesh_model.d_centers])
+        chex.assert_equal_shape([evaluated.rotation_velocities, mesh_model.d_centers])
+
+    def test_pulsation_dimensions(self, mesh_model):
+        """Test dimensions of pulsation function outputs"""
+        m_order = 1
+        n_degree = 1
+        period = 3600.0
+        fourier_params = jnp.array([[0.1, 0.0]])
+        pulsation_axis = jnp.array([0., 1., 0.])
+        pulsation_angle = 45.0
+        t = 1800.0
+
+        # Test add_pulsation
+        pulsated = add_pulsation(mesh_model, m_order, n_degree, period, 
+                                fourier_params, pulsation_axis, pulsation_angle)
+        
+        max_ind = m_order + mesh_model.max_pulsation_mode * n_degree
+        chex.assert_shape(pulsated.pulsation_axes[max_ind], (3,))
+        chex.assert_shape(pulsated.fourier_series_parameters[max_ind], 
+                         (mesh_model.max_fourier_order, 2))
+
+        # Test evaluate_pulsations  
+        evaluated = evaluate_pulsations(pulsated, t)
+        chex.assert_equal_shape([evaluated.vertices_pulsation_offsets, 
+                                mesh_model.d_vertices])
+        chex.assert_equal_shape([evaluated.center_pulsation_offsets,
+                                mesh_model.d_centers])
+        chex.assert_equal_shape([evaluated.pulsation_velocities,
+                                mesh_model.d_centers])
