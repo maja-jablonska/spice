@@ -10,6 +10,8 @@ from functools import partial
 from spice.spectrum.utils import ERG_S_TO_W
 from spice.spectrum.filter import Filter
 
+from jaxtyping import Array, Float
+
 DEFAULT_CHUNK_SIZE: int = 1024
 C: float = 299792.458  # km/s
 SOL_RAD_CM = 69570000000.0
@@ -41,9 +43,11 @@ def __spectrum_flash_sum(intensity_fn,
     n_parameters = parameters.shape[-1]
 
     v_intensity = jax.vmap(intensity_fn, in_axes=(0, 0, 0))
+    
+    n = math.ceil(n_areas / chunk_size)
 
     @partial(jax.checkpoint, prevent_cse=False)
-    def chunk_scanner(carries, _):
+    def chunk_scanner(carries, x):
         chunk_idx, atmo_sum = carries
 
         k_chunk_sizes = min(chunk_size, n_areas)
@@ -93,14 +97,14 @@ def __spectrum_flash_sum(intensity_fn,
 
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)
 
-        return (chunk_idx + k_chunk_sizes, new_atmo_sum), None
+        return (chunk_idx + k_chunk_sizes, new_atmo_sum), chunk_idx+k_chunk_sizes
 
     # Return (2, n_vertices) for continuum and spectrum with lines
     (_, out), _ = lax.scan(
         chunk_scanner,
         init=(0, jnp.zeros((log_wavelengths.shape[-1], 2))),
         xs=None,
-        length=math.ceil(n_areas / chunk_size))
+        length=n)
     return out
 
 
@@ -141,17 +145,35 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     return jnp.concatenate([x, jnp.zeros((chunk_size - x.shape[0] % chunk_size, *x.shape[1:]))], axis=0)
 
 
-# Observed flux * distance
-# TODO: change name to observed flux or something else that will be more descriptive
-# The distance should go in here, probably.
 @partial(jax.jit, static_argnums=(0, 4, 5))
-def simulate_observed_flux(intensity_fn: Callable[[ArrayLike, float, ArrayLike], ArrayLike],
+def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"], float, Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                            m: MeshModel,
-                           log_wavelengths: ArrayLike,
-                           distance: float = 10,
+                           log_wavelengths: Float[Array, "n_wavelengths"],
+                           distance: float = 10.0,
                            chunk_size: int = DEFAULT_CHUNK_SIZE,
                            wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
-                           disable_doppler_shift: bool = False):
+                           disable_doppler_shift: bool = False) -> Float[Array, "n_wavelengths 2"]:
+    """Simulate the observed flux from a mesh model.
+
+    This function calculates the observed flux from a mesh model by combining the intensity function,
+    mesh geometry, and radiative transfer effects. It accounts for visible areas, viewing angles (mu),
+    line-of-sight velocities, and distance effects.
+
+    Args:
+        intensity_fn (Callable): Function that computes intensity given wavelengths, mu and parameters
+        m (MeshModel): The mesh model containing geometry and physical parameters
+        log_wavelengths (Float[Array, "n_wavelengths"]): Log of wavelength points to evaluate
+        distance (float, optional): Distance to object in parsecs. Defaults to 10.0.
+        chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
+        wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
+        disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
+
+    Returns:
+        Float[Array, "n_wavelengths 2"]: Array containing the computed flux at each wavelength point.
+        The second dimension contains [flux, flux_error].
+        Units are erg/s/cm^2/Å.
+    """
+    
     return jnp.nan_to_num(__spectrum_flash_sum_with_padding(intensity_fn,
                                                log_wavelengths,
                                                _adjust_dim(m.visible_cast_areas, chunk_size),
@@ -176,10 +198,6 @@ def __flux_flash_sum(flux_fn,
                      parameters,
                      chunk_size: int,
                      disable_doppler_shift: bool = False):
-    '''
-    Each surface element has a vector of parameters (mu, LOS velocity, etc)
-    Some of these parameters are the flux model's input
-    '''
 
     # Just the 1D case for now
     n_areas = areas.shape[0]
@@ -275,12 +293,32 @@ def __flux_flash_sum_with_padding(intensity_fn,
 
 
 @partial(jax.jit, static_argnums=(0, 3, 4))
-def simulate_monochromatic_luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
+def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                                       m: MeshModel,
-                                      log_wavelengths: ArrayLike,
+                                      log_wavelengths: Float[Array, "n_wavelengths"],
                                       chunk_size: int = DEFAULT_CHUNK_SIZE,
                                       wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
-                                      disable_doppler_shift: bool = False):
+                                      disable_doppler_shift: bool = False) -> Float[Array, "n_wavelengths 2"]:
+    """Simulate the monochromatic luminosity from a mesh model.
+
+    This function calculates the monochromatic luminosity from a mesh model by combining the flux function,
+    mesh geometry, and radiative transfer effects. It accounts for visible areas, line-of-sight velocities,
+    and radius effects.
+
+    Args:
+        flux_fn (Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]]): 
+            Function that computes flux given wavelengths and parameters
+        m (MeshModel): The mesh model containing geometry and physical parameters
+        log_wavelengths (Float[Array, "n_wavelengths"]): Log of wavelength points to evaluate
+        chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
+        wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
+        disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
+
+    Returns:
+        Float[Array, "n_wavelengths 2"]: Array containing the computed luminosity at each wavelength point.
+        The second dimension contains [luminosity, luminosity_error].
+        Units are erg/s/Å.
+    """
     return jnp.nan_to_num(__flux_flash_sum_with_padding(flux_fn,
                                            log_wavelengths,
                                            _adjust_dim(m.areas, chunk_size),
@@ -292,21 +330,26 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], 
 
 
 @partial(jax.jit, static_argnums=(0, 3, 4))
-def luminosity(flux_fn: Callable[[ArrayLike, ArrayLike], ArrayLike],
+def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                model: MeshModel,
-               wavelengths: ArrayLike,
+               wavelengths: Float[Array, "n_wavelengths"],
                chunk_size: int = DEFAULT_CHUNK_SIZE,
-               wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE) -> ArrayLike:
-    """Calculate the bolometric luminsity of the model.
+               wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE) -> float:
+    """Calculate the bolometric luminosity of the model.
+
+    This function computes the total bolometric luminosity by integrating the monochromatic luminosity
+    over all wavelengths. It uses the trapezoidal rule for numerical integration.
 
     Args:
-        flux_fn (Callable[[ArrayLike, ArrayLike], ArrayLike]):
-        model (MeshModel):
-        wavelengths (ArrayLike): wavelengths [Angstrom]
-        chunk_size (int, optional): size of the chunk in the GPU memory. Defaults to 1024.
-        wavelengths_chunk_size (int, optional): size of the chunk in the wavelengths. Defaults to 1024.
+        flux_fn (Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]]):
+            Function that computes flux given wavelengths and parameters
+        model (MeshModel): The mesh model containing geometry and physical parameters
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points to evaluate [Angstrom]
+        chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
+        wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
+
     Returns:
-        ArrayLike: _description_
+        float: Total bolometric luminosity [erg/s]
     """
     flux = simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size, wavelengths_chunk_size)
     return trapezoid(y=flux[:, 0], x=wavelengths * 1e-8)
@@ -319,17 +362,21 @@ def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, samp
 
 @partial(jax.jit, static_argnums=(0,))
 def AB_passband_luminosity(filter: Filter,
-                           wavelengths: ArrayLike,
-                           observed_flux: ArrayLike) -> ArrayLike:
-    """Return the passband luminosity in a given filter.
+                           wavelengths: Float[Array, "n_wavelengths"],
+                           observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the AB magnitude in a given filter passband.
+
+    This function computes the AB magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the AB magnitude zero point.
 
     Args:
-        filter (Filter):
-        wavelengths (ArrayLike): wavelengths [Angstrom]
-        observed_flux (ArrayLike): observed flux [erg/s/cm^3]
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
 
     Returns:
-        ArrayLike: passband luminosity [mag]
+        float: AB magnitude in the filter passband [mag]
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     return -2.5 * jnp.log10(
@@ -340,17 +387,21 @@ def AB_passband_luminosity(filter: Filter,
 
 @partial(jax.jit, static_argnums=(0,))
 def ST_passband_luminosity(filter: Filter,
-                           wavelengths: ArrayLike,
-                           observed_flux: ArrayLike) -> ArrayLike:
-    """Return the passband luminosity in a given filter.
+                           wavelengths: Float[Array, "n_wavelengths"],
+                           observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the ST magnitude in a given filter passband.
+
+    This function computes the ST magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the AB magnitude zero point.
 
     Args:
-        filter (Filter):
-        wavelengths (ArrayLike): wavelengths [Angstrom]
-        observed_flux (ArrayLike): observed flux [erg/s/cm^3]
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
 
     Returns:
-        ArrayLike: passband luminosity [mag]
+        float: ST magnitude in the filter passband [mag]
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     return -2.5 * jnp.log10(
@@ -360,13 +411,17 @@ def ST_passband_luminosity(filter: Filter,
 
 
 @jax.jit
-def absolute_bol_luminosity(luminosity: ArrayLike) -> ArrayLike:
-    """Calculate bolometric absolute luminosity
+def absolute_bol_luminosity(luminosity: float) -> float:
+    """Calculate the absolute bolometric magnitude from a given luminosity.
+
+    This function converts a bolometric luminosity in erg/s to an absolute bolometric
+    magnitude using the standard formula M_bol = -2.5 * log10(L) + M_bol,⊙, where
+    M_bol,⊙ = 71.1974 is the zero point calibrated to the Sun's bolometric magnitude.
 
     Args:
-        luminosity (ArrayLike): total bolometric luminosity [erg/s]
+        luminosity (float): Total bolometric luminosity [erg/s]
 
     Returns:
-        ArrayLike: absolute luminosity [mag]
+        float: Absolute bolometric magnitude [mag]
     """
     return -2.5 * jnp.log10(luminosity * ERG_S_TO_W) + 71.1974
