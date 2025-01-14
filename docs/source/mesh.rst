@@ -18,7 +18,7 @@ To create a basic icosphere model, you can use the `IcosphereModel.construct()` 
 
     # Create an icosphere model
     m = IcosphereModel.construct(
-        10000,  # Minimal number of vertices
+        1000,  # Minimal number of vertices
         1.,     # Radius in solar radii
         1.,     # Mass in solar masses
         bb.to_parameters(),  # Parameters for the spectrum model
@@ -100,8 +100,7 @@ Here's an example of how to visualize a mesh with rotation:
 
     fig, axes = plot_3D(
         rotated_mesh,
-        'los_velocities', # property to be mapped - can be either a string or an integer
-        cmap='magma'
+        'los_velocities' # property to be mapped - can be either a string or an integer
     )
 
 This will create a 3D plot of your mesh, colored by the 'los_velocities' property (which represents the line-of-sight velocities).
@@ -111,6 +110,12 @@ Here's an example of what the output should look like:
 .. image:: ../img/rotated_mesh.png
    :width: 600
    :alt: 3D visualization of a rotated mesh
+   :class: only-light
+
+.. image:: ../img/rotated_mesh_dark.png
+   :width: 600
+   :alt: 3D visualization of a rotated mesh
+   :class: only-dark
 
 In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight, and the black arrow shows the rotation axis.
 
@@ -160,6 +165,12 @@ This example pulsation will look like this:
 .. image:: ../img/pulsated_mesh.png
    :width: 600
    :alt: 3D visualization of a pulsation
+   :class: only-light
+
+.. image:: ../img/pulsated_mesh_dark.png
+   :width: 600
+   :alt: 3D visualization of a pulsation
+   :class: only-dark
 
 Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.
 
@@ -209,10 +220,10 @@ This will create a pulsation with its axis tilted 45 degrees around the y-axis. 
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10), subplot_kw={'projection': '3d'})
 
-    plot_3D(untilted_pulsated_m, property='los_velocities', cmap='magma', axes=(fig, ax1))
+    plot_3D(untilted_pulsated_m, property='los_velocities', axes=(fig, ax1))
     ax1.set_title('Untilted Pulsation')
 
-    plot_3D(tilted_pulsated_m, property='los_velocities', cmap='magma', axes=(fig, ax2))
+    plot_3D(tilted_pulsated_m, property='los_velocities', axes=(fig, ax2))
     ax2.set_title('Tilted Pulsation')
 
     plt.tight_layout()
@@ -223,6 +234,12 @@ This will produce a visualization showing the difference between untilted and ti
 .. image:: ../img/pulsation_with_tilt.png
    :width: 800
    :alt: Comparison of untilted and tilted pulsations
+   :class: only-light
+
+.. image:: ../img/pulsation_with_tilt_dark.png
+   :width: 800
+   :alt: Comparison of untilted and tilted pulsations
+   :class: only-dark
 
 
 Adding Temperature Spots
@@ -238,7 +255,7 @@ You can add temperature spots to your model using spherical harmonics:
     spot_temp = 15000
 
     # Add temperature spots
-    m = add_spherical_harmonic_spot(
+    m_harm_spot = add_spherical_harmonic_spot(
         m, # Model instance
         4, # m order
         4, # n degree
@@ -251,12 +268,18 @@ which should produce a temperature map like this:
 .. image:: ../img/temp_harmonic.png
    :width: 600
    :alt: 3D visualization of a temperature map for harmonic series spots
+   :class: only-light
+
+.. image:: ../img/temp_harmonic_dark.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for harmonic series spots
+   :class: only-dark
 
 Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and `tilt_degree` parameters:
 
 .. code-block:: python
 
-    m = add_spherical_harmonic_spot(
+    m_harm_spot_tilted = add_spherical_harmonic_spot(
         m, # Model instance
         4, # m order
         4, # n degree
@@ -269,6 +292,12 @@ Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and 
 .. image:: ../img/tilted_temperature_spot.png
    :width: 600
    :alt: 3D visualization of a temperature map for harmonic series spots
+   :class: only-light
+
+.. image:: ../img/tilted_temperature_spot_dark.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for harmonic series spots
+   :class: only-dark
 
 or add it as a circular spot:
 
@@ -276,7 +305,7 @@ or add it as a circular spot:
 
     from spice.models.spots import add_spot
 
-    m = add_spot(
+    m_spot = add_spot(
         mesh=m, # Model instance
         spot_center_theta=0.5, # spot center in spherical coordinates, in radians
         spot_center_phi=0.5, # spot center in spherical coordinates, in radians
@@ -293,17 +322,25 @@ which should produce a temperature map like this:
 .. image:: ../img/temp_spot.png
    :width: 600
    :alt: 3D visualization of a temperature map for a circular spot
+   :class: only-light
+
+.. image:: ../img/temp_spot_dark.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for a circular spot
+   :class: only-dark
 
 In both cases, you can also add multiple spots to the mesh. Either by adding two spherical harmonic modes:
 
 .. code-block:: python
 
-    m = add_spherical_harmonic_spots(
+    from spice.models.spots import add_spherical_harmonic_spots
+
+    m_harm_spots = add_spherical_harmonic_spots(
         mesh=m,
         m_orders=jnp.array([2, 3.]),
         n_degrees=jnp.array([2, 3.]),
         param_deltas=jnp.array([1000, 1000.]),
-        param_indices=jnp.array([0, 0]),  
+        param_indices=jnp.array([0, 0])
     )
 
 which will produce a temperature map like this:
@@ -311,26 +348,35 @@ which will produce a temperature map like this:
 .. image:: ../img/temp_2_2_3_3.png
    :width: 600
    :alt: 3D visualization of a temperature map for two spots
+   :class: only-light
 
-A comparison of two separate harmonic modes: left is m=2 and n=2, right is m=3 and n=3.
+.. image:: ../img/temp_2_2_3_3_dark.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for two spots
+   :class: only-dark
 
+A comparison of two separate harmonic modes:
 
-.. image:: ../img/temp_2_2.png
-   :width: 300
+.. image:: ../img/temp_2_2_3_3_comparison.png
+   :width: 1000
    :alt: 3D visualization of a temperature map for harmonic series spot m=2, n=2
    :align: left
+   :class: only-light
 
-.. image:: ../img/temp_3_3.png
-   :width: 300
-   :alt: 3D visualization of a temperature map for harmonic series spot m=3, n=3
-   :align: right
+.. image:: ../img/temp_2_2_3_3_comparison_dark.png
+   :width: 1000
+   :alt: 3D visualization of a temperature map for harmonic series spot m=2, n=2
+   :align: left
+   :class: only-dark
 
 
 or by adding two circular spots:
 
 .. code-block:: python
 
-    m = add_spots(
+    from spice.models.spots import add_spots
+
+    m_spots = add_spots(
         mesh=m, # Model instance
         spot_center_thetas=jnp.array([0.5, 1.5]), # spot center in spherical coordinates, in radians
         spot_center_phis=jnp.array([0.5, 0.]), # spot center in spherical coordinates, in radians
@@ -345,5 +391,9 @@ This exampe adds two spots to the mesh. The spots are defined by their center in
 .. image:: ../img/temp_two_spots.png
    :width: 600
    :alt: 3D visualization of a temperature map for two spots
+   :class: only-light
 
-These examples demonstrate the basic usage of the SPICE library for creating and modifying icosphere models. You can combine these techniques to create complex stellar surface models with various features like rotation, pulsation, and temperature spots.
+.. image:: ../img/temp_two_spots_dark.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for two spots
+   :class: only-dark
