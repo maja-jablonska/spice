@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" /><link rel="next" title="SPICE: API" href="api.html" /><link rel="prev" title="PHOEBE Integration" href="phoebe_integration.html" />
 
-    <!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
+    <link rel="shortcut icon" href="_static/spice_pink-cropped.png"/><!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
         <title>Korg.jl Interpolator - SPICE 1.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=354aac6f" />
@@ -18,18 +18,24 @@
   body {
     --color-code-background: #f8f8f8;
   --color-code-foreground: black;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
   }
   @media not print {
     body[data-theme="dark"] {
       --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
     }
     @media (prefers-color-scheme: dark) {
       body:not([data-theme="light"]) {
         --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
       }
     }
@@ -189,6 +195,9 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
   
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="_static/spice_pink.svg" alt="Logo"/>
+  </div>
   
   <span class="sidebar-brand-text">SPICE 1.0 documentation</span>
   
@@ -270,6 +279,7 @@
 <p>The interpolator can be used to generate synthetic spectra based on a mesh model, just like other spectrum models in SPICE.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.models</span> <span class="kn">import</span> <span class="n">IcosphereModel</span>
 <span class="kn">from</span> <span class="nn">spice.spectrum</span> <span class="kn">import</span> <span class="n">simulate_observed_flux</span>
+<span class="kn">import</span> <span class="nn">jax.numpy</span> <span class="k">as</span> <span class="nn">jnp</span>
 
 <span class="n">base_temp</span> <span class="o">=</span> <span class="mi">5700</span>
 <span class="n">wavelengths</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">5650</span><span class="p">,</span> <span class="mi">5910</span><span class="p">,</span> <span class="mi">10000</span><span class="p">)</span>
@@ -278,7 +288,8 @@
 </pre></div>
 </div>
 <p>This code snipped will produce a synthetic spectrum for a 5700 K star, without any rotational effects.</p>
-<a class="reference internal image-reference" href="_images/korg_non_rotating_spec.png"><img alt="a synthetic spectrum without rotational effects" src="_images/korg_non_rotating_spec.png" style="width: 600px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/korg_non_rotating_spec.png"><img alt="a synthetic spectrum without rotational effects" class="only-light" src="_images/korg_non_rotating_spec.png" style="width: 600px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/korg_non_rotating_spec_dark.png"><img alt="a synthetic spectrum without rotational effects" class="only-dark" src="_images/korg_non_rotating_spec_dark.png" style="width: 600px;" /></a>
 <p>To add rotational effects, we can use the <code class="docutils literal notranslate"><span class="pre">add_rotation</span></code> function from the <code class="docutils literal notranslate"><span class="pre">spice.models.mesh_transform</span></code> module.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">spice.models.mesh_transform</span> <span class="kn">import</span> <span class="n">add_rotation</span><span class="p">,</span> <span class="n">evaluate_rotation</span>
 
@@ -288,7 +299,8 @@
 </pre></div>
 </div>
 <p>This code snipped will produce a synthetic spectrum for a 5700 K star, with a rotation velocity of 10 km/s.</p>
-<a class="reference internal image-reference" href="_images/korg_rotating_spec.png"><img alt="a synthetic spectrum with rotational effects" src="_images/korg_rotating_spec.png" style="width: 1000px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/korg_rotating_spec.png"><img alt="a synthetic spectrum with rotational effects" class="only-light" src="_images/korg_rotating_spec.png" style="width: 1000px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/korg_rotating_spec_dark.png"><img alt="a synthetic spectrum with rotational effects" class="only-dark" src="_images/korg_rotating_spec_dark.png" style="width: 1000px;" /></a>
 </section>
 <section id="parameters">
 <h2>Parameters<a class="headerlink" href="#parameters" title="Link to this heading">¶</a></h2>
@@ -329,10 +341,13 @@
 </table>
 </div>
 <p>The grid is sampled as follows:</p>
-<a class="reference internal image-reference" href="_images/small_grid_params.png"><img alt="small grid parameter space" src="_images/small_grid_params.png" style="width: 1000px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/small_grid_params.png"><img alt="small grid parameter space" class="only-light" src="_images/small_grid_params.png" style="width: 1000px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/small_grid_params_dark.png"><img alt="small grid parameter space" class="only-dark" src="_images/small_grid_params_dark.png" style="width: 1000px;" /></a>
 <p>Some example spectra and continua are shown below:</p>
-<a class="reference internal image-reference" href="_images/small_grid_spectra.png"><img alt="synthetic spectra in the small grid" src="_images/small_grid_spectra.png" style="width: 1000px;" /></a>
-<a class="reference internal image-reference" href="_images/small_grid_continua.png"><img alt="synthetic continua in the small grid" src="_images/small_grid_continua.png" style="width: 1000px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/small_grid_spectra.png"><img alt="synthetic spectra in the small grid" class="only-light" src="_images/small_grid_spectra.png" style="width: 1000px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/small_grid_spectra_dark.png"><img alt="synthetic spectra in the small grid" class="only-dark" src="_images/small_grid_spectra_dark.png" style="width: 1000px;" /></a>
+<a class="only-light reference internal image-reference" href="_images/small_grid_continua.png"><img alt="synthetic continua in the small grid" class="only-light" src="_images/small_grid_continua.png" style="width: 1000px;" /></a>
+<a class="only-dark reference internal image-reference" href="_images/small_grid_continua_dark.png"><img alt="synthetic continua in the small grid" class="only-dark" src="_images/small_grid_continua_dark.png" style="width: 1000px;" /></a>
 </section>
 </section>
 
