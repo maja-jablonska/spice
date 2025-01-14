@@ -1,21 +1,18 @@
-from typing import Union
+from typing import Optional, Union
 
 import jax
 import jax.numpy as jnp
-from PIL.ImageOps import scale
 from jax import Array
 from jax.typing import ArrayLike
 from spice.models.phoebe_model import PhoebeModel
 from .mesh_model import MeshModel
-from .utils import mesh_polar_vertices, spherical_harmonic, spherical_harmonic_with_tilt
+from .utils import spherical_harmonic, spherical_harmonic_with_tilt
+
+from jaxtyping import Array, Int, Float
 
 
 def _is_arraylike(x):
     return hasattr(x, '__array__') or hasattr(x, '__array_interface__')
-
-
-def __cos_law_distance(theta1, phi1, theta2, phi2):
-    return jnp.arccos(jnp.sin(theta1) * jnp.sin(theta2) + jnp.cos(theta1) * jnp.cos(theta2) * jnp.cos(phi1 - phi2))
 
 
 def __spherical_to_cartesian(theta: float, phi: float, radius: float) -> tuple[Array, Array, Array]:
@@ -38,13 +35,13 @@ def sigmoid(x: float, smoothness: float) -> Array:
 
 
 @jax.jit
-def generate_spherical_spot(d_centers: ArrayLike,
+def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
                             mesh_radius: float,
                             spot_center_theta: float,
                             spot_center_phi: float,
                             spot_radius: float,
                             parameter_diff: float,
-                            smoothness: float = 1.0):
+                            smoothness: float = 1.0) -> Float[Array, "n_mesh_elements 3"]:
     """
     Generate a differential parameter array based on the location of points on a sphere relative to a specified
     spherical spot.
@@ -55,7 +52,7 @@ def generate_spherical_spot(d_centers: ArrayLike,
     at the spot's edge.
 
     Args:
-        d_centers (Array): Cartesian coordinates of the centers of the mesh elements
+        Float[Array, "n_mesh_elements 3"] (Array): Cartesian coordinates of the centers of the mesh elements
         mesh_radius (float): Radius of the mesh
         spot_center_theta (float): Theta value (inclination) of the spot center.
         spot_center_phi (float): Phi value (azimuth) of the spot center.
@@ -103,46 +100,48 @@ def _add_spherical_harmonic_spot_with_tilt(mesh: MeshModel,
                                  param_delta: float,
                                  param_index: int,
                                  tilt_axis: ArrayLike = jnp.array([0., 0., 1.]),
-                                 tilt_degree: float = 0.) -> MeshModel:
-    spot_parameters = spherical_harmonic_with_tilt(m, n, mesh.centers, tilt_axis, tilt_degree) * param_delta
+                                 tilt_angle: float = 0.) -> MeshModel:
+    spot_parameters = spherical_harmonic_with_tilt(m, n, mesh.centers, tilt_axis, tilt_angle) * param_delta
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
 
 
 def add_spherical_harmonic_spot(mesh: MeshModel,
-                                m_order: Union[int, ArrayLike],
-                                n_degree: Union[int, ArrayLike],
-                                param_delta: Union[float, ArrayLike],
-                                param_index: Union[int, ArrayLike],
-                                tilt_axis: ArrayLike = None,
-                                tilt_degree: float = None) -> MeshModel:
+                                m_order: Union[Int, Float],
+                                n_degree: Union[Int, Float],
+                                param_delta: Float,
+                                param_index: Float,
+                                tilt_axis: Float[Array, "3"] = None,
+                                tilt_degree: Float = None) -> MeshModel:
     """
     Add a spherical harmonic variation to a parameter of the mesh model, effectively creating a spot-like feature.
 
     This function applies a spherical harmonic function to modify a specific parameter of the mesh model,
     creating a pattern that can represent various surface features like spots or temperature variations.
+    The spherical harmonic function Y_n^m(θ,φ) is used to create the variation pattern on the stellar surface.
 
     Args:
         mesh (MeshModel): The mesh model to which the spherical harmonic variation will be applied.
-        m_order (Union[int, ArrayLike]): The order (m) of the spherical harmonic. Determines the number of
-                                         longitudinal nodes in the pattern.
-        n_degree (Union[int, ArrayLike]): The degree (n) of the spherical harmonic. Determines the total
-                                          number of nodes in the pattern.
-        param_delta (Union[float, ArrayLike]): The maximum amplitude of the parameter variation. Represents
-                                               the difference between the peak of the variation and the
-                                               background value.
-        param_index (Union[int, ArrayLike]): The index of the parameter in the mesh model's parameter array
-                                             that will be modified by this variation.
-        tilt_axis (ArrayLike, optional): The axis of tilt for the harmonic series. Defaults to None (no tilt).
-        tilt_degree (float, optional): The degree of tilt for the harmonic series. Defaults to None (no tilt).
+            Must not be a PhoebeModel as those are read-only.
+        m_order (Union[Int, Float]): The order (m) of the spherical harmonic. Must be less than or equal 
+            to n_degree. Determines the number of longitudinal nodes in the pattern.
+        n_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
+            to m_order. Determines the total number of nodes in the pattern.
+        param_delta (Float): The maximum amplitude of the parameter variation. Represents the difference 
+            between the peak of the variation and the background value.
+        param_index (Float): The index of the parameter in the mesh model's parameter array that will be 
+            modified by this variation.
+        tilt_axis (Float[Array, "3"], optional): The axis around which to tilt the spherical harmonic pattern.
+            Defaults to None (no tilt).
+        tilt_degree (Float, optional): The angle in degrees to tilt the spherical harmonic pattern around
+            tilt_axis. Only used if tilt_axis is provided. Defaults to None (no tilt).
 
     Returns:
         MeshModel: A new mesh model with the specified parameter modified according to the spherical
-                   harmonic variation.
+            harmonic variation.
 
-    Note:
-        The spherical harmonic function Y_n^m(θ,φ) is used to create the variation pattern on the stellar surface.
-        The combination of m_order and n_degree determines the complexity and shape of the resulting pattern.
+    Raises:
+        ValueError: If mesh is a PhoebeModel, or if m_order > n_degree.
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
@@ -212,12 +211,12 @@ def add_spot(mesh: MeshModel,
 
 
 def add_spots(mesh: MeshModel,
-              spot_center_thetas: ArrayLike,
-              spot_center_phis: ArrayLike,
-              spot_radii: ArrayLike,
-              parameter_deltas: ArrayLike,
-              parameter_indices: ArrayLike,
-              smoothness: ArrayLike = None) -> MeshModel:
+              spot_center_thetas: Float[Array, "n_spots"],
+              spot_center_phis: Float[Array, "n_spots"],
+              spot_radii: Float[Array, "n_spots"],
+              parameter_deltas: Float[Array, "n_spots"],
+              parameter_indices: Int[Array, "n_spots"],
+              smoothness: Float[Array, "n_spots"] = None) -> MeshModel:
     """
     Add multiple spots to a mesh model based on spherical coordinates and smoothness parameters.
 
@@ -227,12 +226,12 @@ def add_spots(mesh: MeshModel,
 
     Args:
         mesh (MeshModel): The mesh model to which the spots will be added. Must not be a PHOEBE model, as they are read-only.
-        spot_center_thetas (ArrayLike): An array of theta (inclination) coordinates of the spots' centers, in radians.
-        spot_center_phis (ArrayLike): An array of phi (azimuthal) coordinates of the spots' centers, in radians.
-        spot_radii (ArrayLike): An array of angular radii of the spots, in degrees.
-        parameter_deltas (ArrayLike): An array of differences in the parameter values to be applied within the spots.
-        parameter_indices (ArrayLike): An array of indices of the parameters in the mesh model that will be modified by the spots.
-        smoothness (ArrayLike, optional): An array of factors controlling the smoothness of the spots' edges. Defaults to None.
+        spot_center_thetas (Float[Array, "n_spots"]): An array of theta (inclination) coordinates of the spots' centers, in radians.
+        spot_center_phis (Float[Array, "n_spots"]): An array of phi (azimuthal) coordinates of the spots' centers, in radians. 
+        spot_radii (Float[Array, "n_spots"]): An array of angular radii of the spots, in radians.
+        parameter_deltas (Float[Array, "n_spots"]): An array of differences in the parameter values to be applied within the spots.
+        parameter_indices (Int[Array, "n_spots"]): An array of indices of the parameters in the mesh model that will be modified by the spots.
+        smoothness (Float[Array, "n_spots"], optional): An array of factors controlling the smoothness of the spots' edges. Higher values result in smoother transitions. Defaults to None.
 
     Returns:
         MeshModel: The modified mesh model with the spots applied.
@@ -281,44 +280,60 @@ def _add_spherical_harmonic_spots_with_tilt(mesh: MeshModel,
                                   tilt_axes: ArrayLike,
                                   tilt_angles: ArrayLike) -> MeshModel:
     def scan(carry, params):
+        # Extract tilt axis from params[4:7] since it's 3 components
+        tilt_axis = params[4:7]
         return _add_spherical_harmonic_spot_with_tilt(
             carry, m=params[0].astype(int), n=params[1].astype(int),
             param_delta=params[2], param_index=params[3].astype(int),
-            tilt_axis=params[4], tilt_angle=params[5]
+            tilt_axis=tilt_axis, tilt_angle=params[7]
         ), params
 
-    updated_mesh, _ = jax.lax.scan(scan, mesh, jnp.vstack([m, n, param_deltas, param_indices, tilt_axes, tilt_angles]).T)
+    # Reshape tilt_axes to flatten the last dimension
+    tilt_axes_flat = tilt_axes.reshape(-1)
+    
+    # Stack parameters, handling the flattened tilt axes
+    params = jnp.vstack([
+        m, n, param_deltas, param_indices,
+        tilt_axes_flat[0::3],  # x components
+        tilt_axes_flat[1::3],  # y components 
+        tilt_axes_flat[2::3],  # z components
+        tilt_angles
+    ]).T
+
+    updated_mesh, _ = jax.lax.scan(scan, mesh, params)
     return updated_mesh
 
 
 def add_spherical_harmonic_spots(mesh: MeshModel,
-                                 m_orders: ArrayLike, n_degrees: ArrayLike,
-                                 param_deltas: ArrayLike,
-                                 param_indices: ArrayLike,
-                                 tilt_axes: ArrayLike = None,
-                                 tilt_angles: ArrayLike = None) -> MeshModel:
+                                 m_orders: Float[Array, "n_orders"],
+                                 n_degrees: Float[Array, "n_orders"],
+                                 param_deltas: Float[Array, "n_orders"],
+                                 param_indices: Float[Array, "n_orders"],
+                                 tilt_axes: Optional[Float[Array, "n_orders 3"]] = None,
+                                 tilt_angles: Optional[Float[Array, "n_orders"]] = None) -> MeshModel:
     """
     Add multiple spherical harmonic spots to a mesh model.
 
     This function iteratively applies spherical harmonic modifications to a mesh model based on the provided parameters.
-    Each spot is defined by spherical harmonic indices (m, n), a parameter delta indicating the modification strength,
+    Each spot is defined by spherical harmonic indices (m_order, n_degree), a parameter delta indicating the modification strength,
     and a parameter index specifying which parameter of the mesh model is modified. The function checks if the mesh model
     is not a PHOEBE model, as they are read-only, and raises an error if it is.
 
     Args:
         mesh (MeshModel): The mesh model to which the spots will be added.
-        m (ArrayLike): An array of m indices for the spherical harmonics.
-        n (ArrayLike): An array of n indices for the spherical harmonics.
-        param_deltas (ArrayLike): An array of deltas specifying the strength of the modification for each spot.
-        param_indices (ArrayLike): An array of parameter indices specifying which parameter of the mesh is modified by each spot.
-        tilt_axes (ArrayLike, optional): An array of tilt axes for each spot. Defaults to None (no tilt).
-        tilt_angles (ArrayLike, optional): An array of tilt angles for each spot. Defaults to None (no tilt).
+        m_orders (Float[Array, "n_orders"]): An array of m indices (orders) for the spherical harmonics.
+        n_degrees (Float[Array, "n_orders"]): An array of n indices (degrees) for the spherical harmonics.
+        param_deltas (Float[Array, "n_orders"]): An array of deltas specifying the strength of the modification for each spot.
+        param_indices (Float[Array, "n_orders"]): An array of parameter indices specifying which parameter of the mesh is modified by each spot.
+        tilt_axes (Optional[Float[Array, "n_orders 3"]], optional): An array of tilt axes for each spot. Shape should be (n_orders, 3). Defaults to None (no tilt).
+        tilt_angles (Optional[Float[Array, "n_orders"]], optional): An array of tilt angles in radians for each spot. Defaults to None (no tilt).
 
     Returns:
         MeshModel: The modified mesh model with all spherical harmonic spots applied.
 
     Raises:
         ValueError: If the input mesh model is a PHOEBE model, as modifications are not supported.
+        ValueError: If tilt_axes is provided without tilt_angles or vice versa.
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")

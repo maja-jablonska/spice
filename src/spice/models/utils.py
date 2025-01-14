@@ -2,9 +2,10 @@ import jax.numpy as jnp
 import jax
 from jax.typing import ArrayLike
 from typing import Tuple
-from jax.scipy.spatial.transform import Rotation
 
-def vertex_to_polar(v: ArrayLike) -> ArrayLike:
+from jaxtyping import Array, Int, Float
+
+def vertex_to_polar(v: Float[Array, "3"]) -> Float[Array, "2"]:
     v += 1e-5
     r = jnp.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2) + 1e-5
     return jnp.nan_to_num(
@@ -16,7 +17,7 @@ def vertex_to_polar(v: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def mesh_polar_vertices(vertices: ArrayLike) -> ArrayLike:
+def mesh_polar_vertices(vertices: Float[Array, "n_vertices 3"]) -> Float[Array, "n_vertices 2"]:
     return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))
 
 @jax.jit
@@ -31,7 +32,7 @@ def spherical_harmonic(m, n, coordinates):
                                       n_max=10).real
 
 
-#@jax.jit
+@jax.jit
 def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0., 1.]), tilt_angle=0.):
     # Normalize tilt axis
     tilt_axis = tilt_axis / jnp.linalg.norm(tilt_axis)
@@ -42,13 +43,13 @@ def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0.,
     return spherical_harmonic(m, n, rotated_coords)
 
 
-def evaluate_fourier_for_value(P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> Float[Array, "1 n_orders"]:
     """
     Args:
         d0 (float): amplitude D_0
         P (float): period P
-        d (ArrayLike): amplitudes [1, n]
-        phi (ArrayLike): phases [1, n]
+        d (Float[Array, "1 n_orders"]): amplitudes [1, n]
+        phi (Float[Array, "1 n_orders"]): phases [1, n]
         timestamp (float): timestamps
 
     Returns:
@@ -58,13 +59,13 @@ def evaluate_fourier_for_value(P: float, d: ArrayLike, phi: ArrayLike, timestamp
     return jnp.nan_to_num(jnp.sum(d * jnp.cos(2 * jnp.pi * n / P * timestamp - phi)))
 
 
-def evaluate_fourier_prim_for_value(P: float, d: ArrayLike, phi: ArrayLike, timestamp: float) -> ArrayLike:
+def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> Float[Array, "1 n_orders"]:
     """
     Args:
         d0 (float): amplitude D_0
         P (float): period P
-        d (ArrayLike): amplitudes [1, n]
-        phi (ArrayLike): phases [1, n]
+        d (Float[Array, "1 n_orders"]): amplitudes [1, n]
+        phi (Float[Array, "1 n_orders"]): phases [1, n]
         timestamp (float): timestamps
 
     Returns:
@@ -79,7 +80,7 @@ evaluate_many_fouriers_prim_for_value = jax.jit(jax.vmap(evaluate_fourier_prim_f
 
 
 @jax.jit
-def rotation_matrix(rotation_axis: ArrayLike) -> ArrayLike:
+def rotation_matrix(rotation_axis: Float[Array, "3"]) -> Float[Array, "3 3"]:
     a_norm = rotation_axis / jnp.linalg.norm(rotation_axis)
     a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
                        [a_norm[2], 0., -a_norm[0]],
@@ -88,13 +89,13 @@ def rotation_matrix(rotation_axis: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def evaluate_rotation_matrix(rotation_matrix: ArrayLike, theta: ArrayLike) -> ArrayLike:
+def evaluate_rotation_matrix(rotation_matrix: Float[Array, "3 3"], theta: float) -> Float[Array, "3 3"]:
     return jnp.eye(3) + jnp.sin(theta) * rotation_matrix + (1 - jnp.cos(theta)) * jnp.matmul(rotation_matrix,
                                                                                              rotation_matrix)
 
 
 @jax.jit
-def rotation_matrix_prim(rotation_axis: ArrayLike) -> ArrayLike:
+def rotation_matrix_prim(rotation_axis: Float[Array, "3"]) -> Float[Array, "3 3"]:
     a_norm = rotation_axis / jnp.linalg.norm(rotation_axis)
     a_hat = jnp.array([[0., -a_norm[2], a_norm[1]],
                        [a_norm[2], 0., -a_norm[0]],
@@ -103,18 +104,18 @@ def rotation_matrix_prim(rotation_axis: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def evaluate_rotation_matrix_prim(rotation_matrix_grad: ArrayLike, theta: ArrayLike) -> ArrayLike:
+def evaluate_rotation_matrix_prim(rotation_matrix_grad: Float[Array, "3 3"], theta: float) -> Float[Array, "3 3"]:
     return jnp.cos(theta) * rotation_matrix_grad + jnp.sin(theta) * jnp.matmul(rotation_matrix_grad,
                                                                                rotation_matrix_grad)
 
 
 @jax.jit
-def cast_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
+def cast_to_los(vectors: Float[Array, "batch 3"], los_vector: Float[Array, "3"]) -> Float[Array, "batch"]:
     """Cast 3D vectors to the line-of-sight
 
     Args:
-        vectors (ArrayLike): Properties to be casted (n, 3)
-        los_vector (ArrayLike): LOS vector (3,)
+        vectors (Float[Array, "batch 3"]): Properties to be casted (n, 3)
+        los_vector (Float[Array, "3"]): LOS vector (3,)
 
     Returns:
         ArrayLike: Casted vectors (n, 1)
@@ -123,12 +124,12 @@ def cast_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
 
 
 @jax.jit
-def cast_to_normal_plane(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
+def cast_to_normal_plane(vectors: Float[Array, "batch 3"], los_vector: Float[Array, "3"]) -> Float[Array, "batch 2"]:
     """Cast 3D vectors to a 2D plane determined by a normal vector
 
     Args:
-        vectors (ArrayLike): Properties to be casted (n, 3)
-        los_vector (ArrayLike): LOS vector (3,)
+        vectors (Float[Array, "batch 3"]): Properties to be casted (n, 3)
+        los_vector (Float[Array, "3"]): LOS vector (3,)
 
     Returns:
         ArrayLike: Casted vectors (n, 2)
@@ -150,12 +151,12 @@ def cast_to_normal_plane(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike
 
 
 @jax.jit
-def cast_normalized_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLike:
+def cast_normalized_to_los(vectors: Float[Array, "batch 3"], los_vector: Float[Array, "3"]) -> Float[Array, "batch"]:
     """Cast 3D vectors to the line-of-sight
 
     Args:
-        vectors (ArrayLike): Properties to be casted (n, 3)
-        los_vector (ArrayLike): LOS vector (3,)
+        vectors (Float[Array, "batch 3"]): Properties to be casted (n, 3)
+        los_vector (Float[Array, "3"]): LOS vector (3,)
 
     Returns:
         ArrayLike: Casted vectors (n, 1)
@@ -166,7 +167,7 @@ def cast_normalized_to_los(vectors: ArrayLike, los_vector: ArrayLike) -> ArrayLi
 
 
 @jax.jit
-def calculate_axis_radii(centers: ArrayLike, axis: ArrayLike) -> ArrayLike:
+def calculate_axis_radii(centers: Float[Array, "n_mesh_elements 3"], axis: Float[Array, "3"]) -> Float[Array, "n_mesh_elements"]:
     norm_axis = len(centers.shape) - 1
     return jnp.linalg.norm(jnp.cross(axis, -centers),
                            axis=norm_axis) / jnp.linalg.norm(axis)

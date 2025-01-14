@@ -2,6 +2,8 @@ from spice.models import IcosphereModel
 import jax.numpy as jnp
 
 from jax import config
+import chex
+
 config.update('jax_platform_name', 'cpu')
 config.update("jax_enable_x64", True)
 
@@ -98,3 +100,42 @@ class TestIcosphere:
 
         assert jnp.all(jnp.isclose(model.parameters,
                                    0.5*jnp.ones_like(model.areas)))
+
+    def test_icosphere_dimensions(self):
+        model = IcosphereModel.construct(
+            n_vertices=1000,
+            radius=1.,
+            mass=1., 
+            parameters=[5777., 0.5],
+            parameter_names=['teff', 'logg']
+        )
+
+        # Test vertices dimensions
+        chex.assert_shape(model.vertices, (model.d_vertices.shape[0], 3))
+        chex.assert_shape(model.d_vertices, (model.vertices.shape[0], 3))
+
+        # Test centers dimensions 
+        chex.assert_shape(model.centers, (model.d_centers.shape[0], 3))
+        chex.assert_shape(model.d_centers, (model.centers.shape[0], 3))
+
+        # Test faces dimensions
+        chex.assert_rank(model.faces, 2)
+        chex.assert_shape(model.faces, (model.faces.shape[0], 3))
+
+        # Test areas dimensions
+        chex.assert_rank(model.areas, 1)
+        chex.assert_shape(model.areas, (model.faces.shape[0],))
+
+        # Test parameters dimensions
+        chex.assert_rank(model.parameters, 2)
+        chex.assert_shape(model.parameters, (model.faces.shape[0], 2))
+
+        # Test velocities dimensions
+        chex.assert_shape(model.velocities, (model.faces.shape[0], 3))
+        chex.assert_shape(model.rotation_velocities, (model.faces.shape[0], 3))
+        chex.assert_shape(model.pulsation_velocities, (model.faces.shape[0], 3))
+
+        # Test pulsation offsets dimensions
+        chex.assert_shape(model.vertices_pulsation_offsets, model.vertices.shape)
+        chex.assert_shape(model.center_pulsation_offsets, model.centers.shape)
+        chex.assert_shape(model.area_pulsation_offsets, model.areas.shape)
