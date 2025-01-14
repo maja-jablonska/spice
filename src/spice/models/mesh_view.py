@@ -5,9 +5,11 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 from .mesh_model import MeshModel
 from spice.geometry import clip, polygon_area
-from spice.geometry.utils import get_cast_areas, cast_indexes, append_value_to_last_nan
+from spice.geometry.utils import append_value_to_last_nan
 from functools import partial
 from jax.tree_util import register_pytree_node_class
+
+from jaxtyping import Array, Float
 
 
 @register_pytree_node_class
@@ -107,12 +109,12 @@ def get_grid_spans(m1, m2, n_cells_array):
 
 
 @jax.jit
-def get_mesh_view(mesh: MeshModel, los_vector: ArrayLike) -> MeshModel:
+def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
     """Cast 3D vectors of centers and center velocities to the line-of-sight
 
     Args:
         mesh (MeshModel): Properties to be cast (n, 3)
-        los_vector (ArrayLike): LOS vector (3,)
+        los_vector (Float[Array, "3"]): LOS vector (3,)
 
     Returns:
         MeshModel: mesh with updated los_vector, mus, and los_velocities
@@ -123,7 +125,7 @@ def get_mesh_view(mesh: MeshModel, los_vector: ArrayLike) -> MeshModel:
 
 
 @jax.jit
-def visible_area(vertices1: ArrayLike, vertices2: ArrayLike) -> ArrayLike:
+def visible_area(vertices1: Float[Array, "n_vertices 3"], vertices2: Float[Array, "n_vertices 3"]) -> Float[Array, "n_vertices"]:
     clipped = jnp.nan_to_num(clip(vertices1, vertices2))
     return polygon_area(clipped[:, 0], clipped[:, 1])
 
