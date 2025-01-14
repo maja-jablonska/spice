@@ -5,7 +5,7 @@
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="index" title="Index" href="genindex.html" /><link rel="search" title="Search" href="search.html" /><link rel="prev" title="SPICE: API" href="api.html" />
 
-    <!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
+    <link rel="shortcut icon" href="_static/spice_pink-cropped.png"/><!-- Generated with Sphinx 7.4.7 and Furo 2024.08.06 -->
         <title>Troubleshooting - SPICE 1.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=354aac6f" />
@@ -18,18 +18,24 @@
   body {
     --color-code-background: #f8f8f8;
   --color-code-foreground: black;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
   }
   @media not print {
     body[data-theme="dark"] {
       --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
     }
     @media (prefers-color-scheme: dark) {
       body:not([data-theme="light"]) {
         --color-code-background: #202020;
   --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #ff7ce4;
+  --color-brand-content: #ff7ce4;
   
       }
     }
@@ -189,6 +195,9 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
   
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo" src="_static/spice_pink.svg" alt="Logo"/>
+  </div>
   
   <span class="sidebar-brand-text">SPICE 1.0 documentation</span>
   
@@ -204,6 +213,7 @@
 <li class="toctree-l1"><a class="reference internal" href="binaries.html">Binaries</a></li>
 <li class="toctree-l1"><a class="reference internal" href="transformer_payne_integration.html">TransformerPayne Integration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="phoebe_integration.html">PHOEBE Integration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="korg_interpolator.html">Korg.jl Interpolator</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api.html">SPICE: API</a></li>
 <li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Troubleshooting</a></li>
 </ul>
@@ -254,6 +264,20 @@
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">t</span> <span class="o">=</span> <span class="n">TransformerPayne</span><span class="o">.</span><span class="n">download</span><span class="p">()</span>
 
 <span class="n">flux</span> <span class="o">=</span> <span class="n">simulate_observed_flux</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">intensity</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">wavelengths</span><span class="p">),</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">128</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="buffer-comparator-difference">
+<h2>Buffer Comparator Difference<a class="headerlink" href="#buffer-comparator-difference" title="Link to this heading">¶</a></h2>
+<p>If you run into a similiar error:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">E0112</span> <span class="mi">21</span><span class="p">:</span><span class="mi">13</span><span class="p">:</span><span class="mf">14.359553</span>  <span class="mi">650420</span> <span class="n">buffer_comparator</span><span class="o">.</span><span class="n">cc</span><span class="p">:</span><span class="mi">157</span><span class="p">]</span> <span class="n">Difference</span> <span class="n">at</span> <span class="mi">41</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="n">expected</span> <span class="mf">4.13377</span>
+</pre></div>
+</div>
+<p>2025-01-12 21:13:14.359561: E external/xla/xla/service/gpu/autotuning/gemm_fusion_autotuner.cc:1175] Results do not match the reference. This is likely a bug/unexpected loss of precision.</p>
+<p>Usually, this can be fixed by updating the JAX config:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">jax</span>
+
+<span class="n">jax</span><span class="o">.</span><span class="n">config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="s2">&quot;jax_default_matmul_precision&quot;</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
@@ -308,6 +332,7 @@
             <ul>
 <li><a class="reference internal" href="#">Troubleshooting</a><ul>
 <li><a class="reference internal" href="#resource-exhaustion">Resource Exhaustion</a></li>
+<li><a class="reference internal" href="#buffer-comparator-difference">Buffer Comparator Difference</a></li>
 </ul>
 </li>
 </ul>
