@@ -34,6 +34,7 @@ The interpolator can be used to generate synthetic spectra based on a mesh model
 
     from spice.models import IcosphereModel
     from spice.spectrum import simulate_observed_flux
+    import jax.numpy as jnp
 
     base_temp = 5700
     wavelengths = jnp.linspace(5650, 5910, 10000)
@@ -45,6 +46,12 @@ This code snipped will produce a synthetic spectrum for a 5700 K star, without a
 .. image:: ../img/korg_non_rotating_spec.png
    :width: 600
    :alt: a synthetic spectrum without rotational effects
+   :class: only-light
+
+.. image:: ../img/korg_non_rotating_spec_dark.png
+   :width: 600
+   :alt: a synthetic spectrum without rotational effects
+   :class: only-dark
 
 To add rotational effects, we can use the ``add_rotation`` function from the ``spice.models.mesh_transform`` module.
 
@@ -61,6 +68,13 @@ This code snipped will produce a synthetic spectrum for a 5700 K star, with a ro
 .. image:: ../img/korg_rotating_spec.png
    :width: 1000
    :alt: a synthetic spectrum with rotational effects
+   :class: only-light
+
+.. image:: ../img/korg_rotating_spec_dark.png
+   :width: 1000
+   :alt: a synthetic spectrum with rotational effects
+   :class: only-dark
+
 
 Parameters
 ---------
@@ -96,13 +110,31 @@ The grid is sampled as follows:
 .. image:: ../img/small_grid_params.png
    :width: 1000
    :alt: small grid parameter space
+   :class: only-light
+
+.. image:: ../img/small_grid_params_dark.png
+   :width: 1000
+   :alt: small grid parameter space
+   :class: only-dark
 
 Some example spectra and continua are shown below:
 
 .. image:: ../img/small_grid_spectra.png
    :width: 1000
    :alt: synthetic spectra in the small grid
+   :class: only-light
+
+.. image:: ../img/small_grid_spectra_dark.png
+   :width: 1000
+   :alt: synthetic spectra in the small grid
+   :class: only-dark
 
 .. image:: ../img/small_grid_continua.png
    :width: 1000
    :alt: synthetic continua in the small grid
+   :class: only-light
+
+.. image:: ../img/small_grid_continua_dark.png
+   :width: 1000
+   :alt: synthetic continua in the small grid
+   :class: only-dark
