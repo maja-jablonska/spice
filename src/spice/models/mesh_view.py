@@ -126,8 +126,23 @@ def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
 
 @jax.jit
 def visible_area(vertices1: Float[Array, "n_vertices 3"], vertices2: Float[Array, "n_vertices 3"]) -> Float[Array, "n_vertices"]:
-    clipped = jnp.nan_to_num(clip(vertices1, vertices2))
-    return polygon_area(clipped[:, 0], clipped[:, 1])
+    clipped = clip(vertices1, vertices2)
+    
+    # Create mask for valid vertices (1=valid, 0=NaN)
+    mask = ~jnp.any(jnp.isnan(clipped), axis=1)
+    
+    # Replace NaN values with zeros for safe calculations
+    clipped_safe = jnp.where(jnp.isnan(clipped), 0.0, clipped)
+    
+    # Get coordinates and handle wrap-around
+    x = clipped_safe[:, 0]
+    y = clipped_safe[:, 1]
+    next_idx = jnp.roll(jnp.arange(x.shape[0]), -1)  # Circular next index
+    
+    # Calculate contribution for each edge pair, masked by validity
+    terms = (x * y[next_idx] - x[next_idx] * y) * mask * mask[next_idx]
+    
+    return 0.5 * jnp.abs(jnp.sum(terms))
 
 
 total_visible_area = jax.jit(jax.vmap(visible_area, in_axes=(None, 0)))
