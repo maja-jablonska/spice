@@ -22,7 +22,7 @@ def sort_xy(points: ArrayLike) -> ArrayLike:
 
     mask = jnp.argsort(angles)
 
-    return points[mask, :]
+    return points[mask[::-1], :] # clockwise order
 
 
 
@@ -37,7 +37,8 @@ def inside(p1: ArrayLike, p2: ArrayLike, q: ArrayLike) -> bool:
     Returns:
         bool: Point is inside polygon
     """
-    return (p2[0]-p1[0])*(q[1]-p1[1])-(p2[1]-p1[1])*(q[0]-p1[0])>=0
+    cross = (p2[0]-p1[0])*(q[1]-p1[1]) - (p2[1]-p1[1])*(q[0]-p1[0])
+    return cross <= 0  # clockwise
 
 
 def last_non_nan_arg(arr: ArrayLike) -> ArrayLike:
