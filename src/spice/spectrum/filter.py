@@ -27,7 +27,6 @@ def _filter_responses(wavelengths: ArrayLike,
 class Filter(ABC):
     def __init__(self,
                  transmission_curve: Float[Array, "2 n_samples"],
-                 ab_zeropoint: float = 3.631 * 1e-20,
                  name: Optional[str] = None,
                  non_photonic: bool = False,
                  AB_zeropoint: float = -22.40788262039795,
@@ -67,7 +66,6 @@ class Filter(ABC):
         self.__transmission_curve_freq = jnp.vstack([tc_freq[tc_freq_mask],
                                                      transmission_curve[1][tc_freq_mask]])
 
-        self.__ab_zeropoint = ab_zeropoint
         self.__name = name or re.sub(r"([A-Z])", r" \1", type(self).__name__).split()
         self.__non_photonic = non_photonic
         self.__AB_zeropoint = AB_zeropoint
@@ -155,7 +153,7 @@ class JohnsonCousinsU(Filter):
              0.813, 0.885, 0.940, 0.980, 1.000, 1.000, 0.974, 0.918, 0.802,
              0.590, 0.355, 0.194, 0.107, 0.046, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins U', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Johnson-Cousins U', AB_zeropoint=-22.40788262039795+0.771-0.01, ST_zeropoint=-21.10-0.142)
 
 
 class JohnsonCousinsB(Filter):
@@ -168,7 +166,7 @@ class JohnsonCousinsB(Filter):
              0.802, 0.682, 0.577, 0.474, 0.369, 0.278, 0.198, 0.125, 0.078,
              0.036, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins B', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Johnson-Cousins B', AB_zeropoint=-22.40788262039795-0.138+0.008, ST_zeropoint=-21.10-0.625)
 
 
 class JohnsonCousinsV(Filter):
@@ -183,7 +181,7 @@ class JohnsonCousinsV(Filter):
              0.041, 0.022, 0.014, 0.011, 0.008, 0.006, 0.004, 0.002, 0.001,
              0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins V', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Johnson-Cousins V', AB_zeropoint=-22.40788262039795-0.023+0.003, ST_zeropoint=-21.10-0.019)
 
 
 class JohnsonCousinsR(Filter):
@@ -200,7 +198,7 @@ class JohnsonCousinsR(Filter):
              0.066, 0.051, 0.039, 0.030, 0.021, 0.014, 0.008, 0.006, 0.003,
              0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins R', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Johnson-Cousins R', AB_zeropoint=-22.40788262039795+0.16+0.003, ST_zeropoint=-21.10+0.538)
 
 
 class JohnsonCousinsI(Filter):
@@ -213,7 +211,7 @@ class JohnsonCousinsI(Filter):
              0.973, 0.970, 0.958, 0.932, 0.904, 0.860, 0.810, 0.734, 0.590,
              0.392, 0.203, 0.070, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins I', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Johnson-Cousins I', AB_zeropoint=-22.40788262039795+0.402+0.002, ST_zeropoint=-21.10+1.220)
 
 
 class HipparcosHp(Filter):
@@ -234,7 +232,7 @@ class HipparcosHp(Filter):
              0.068, 0.054, 0.042, 0.032, 0.024, 0.018, 0.014, 0.010, 0.006,
              0.002, 0.000]
         ])
-        super().__init__(transmission_curve, name='Hipparcos Hp', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Hipparcos Hp', AB_zeropoint=-22.40788262039795-0.022-0.008, ST_zeropoint=-21.10-0.074)
 
 
 class TychoBT(Filter):
@@ -249,7 +247,7 @@ class TychoBT(Filter):
              0.969, 0.852, 0.674, 0.479, 0.309, 0.196, 0.131, 0.097, 0.077,
              0.056, 0.035, 0.015, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Tycho BT', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Tycho BT', AB_zeropoint=-22.40788262039795-0.09-0.01, ST_zeropoint=-21.10-0.672)
         
 
 class TychoVT(Filter):
@@ -266,40 +264,40 @@ class TychoVT(Filter):
              0.324, 0.282, 0.245, 0.209, 0.178, 0.152, 0.129, 0.108, 0.092,
              0.078, 0.066, 0.055, 0.044, 0.036, 0.027, 0.017, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Tycho VT', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Tycho VT', AB_zeropoint=-22.40788262039795-0.044+0.007, ST_zeropoint=-21.10-0.115)
 
 
 # # J/A+A/649/A3     Gaia Early Data Release 3 photometric passbands (Riello+, 2021)
 
-# class GaiaG(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
-#         zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
-#         transmission_curve[transmission_curve == 99.99] = 0.
-#         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia G', AB_zeropoint=zp[0])
+class GaiaG(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
+        zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
+        transmission_curve[transmission_curve == 99.99] = 0.
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia G', AB_zeropoint=zp[0])
 
 
-# class GaiaBP(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
-#         zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
-#         transmission_curve[transmission_curve == 99.99] = 0.
-#         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[3]]), name='Gaia BP', AB_zeropoint=zp[2])
+class GaiaBP(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
+        zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
+        transmission_curve[transmission_curve == 99.99] = 0.
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[3]]), name='Gaia BP', AB_zeropoint=zp[2])
 
 
-# class GaiaRP(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
-#         zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
-#         transmission_curve[transmission_curve == 99.99] = 0.
-#         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[5]]), name='Gaia RP', AB_zeropoint=zp[4])
+class GaiaRP(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
+        zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
+        transmission_curve[transmission_curve == 99.99] = 0.
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[5]]), name='Gaia RP', AB_zeropoint=zp[4])
         
         
-# # Sartoretti et al. (2022)
-# class GaiaRVS(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) /'grvsfilter.csv'), skiprows=1, delimiter=',')
-#         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia RVS', AB_zeropoint=21.317)
+# Sartoretti et al. (2022)
+class GaiaRVS(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) /'grvsfilter.csv'), skiprows=1, delimiter=',')
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia RVS', AB_zeropoint=21.317)
 
 # Doi et al. (2010)
 
@@ -331,27 +329,27 @@ sdss_z = jnp.array([
 
 class SDSSu(Filter):
     def __init__(self):
-        super().__init__(sdss_u, name='SDSS u', AB_zeropoint=-21.10)
+        super().__init__(sdss_u, name='SDSS u')
 
 
 class SDSSg(Filter):
     def __init__(self):
-        super().__init__(sdss_g, name='SDSS g', AB_zeropoint=-21.10)
+        super().__init__(sdss_g, name='SDSS g')
 
 
 class SDSSr(Filter):
     def __init__(self):
-        super().__init__(sdss_r, name='SDSS r', AB_zeropoint=-21.10)
+        super().__init__(sdss_r, name='SDSS r')
 
 
 class SDSSi(Filter):
     def __init__(self):
-        super().__init__(sdss_i, name='SDSS i', AB_zeropoint=-21.10)
+        super().__init__(sdss_i, name='SDSS i')
 
 
 class SDSSz(Filter):
     def __init__(self):
-        super().__init__(sdss_z, name='SDSS z', AB_zeropoint=-21.10)
+        super().__init__(sdss_z, name='SDSS z')
 
 
 # class TWOMASSJ(Filter):
@@ -376,54 +374,55 @@ class SDSSz(Filter):
 # https://cosmos.astro.caltech.edu/page/filterset
 
 
-# class GALEXFUV(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GALEXFUV.dat')).T
-#         super().__init__(transmission_curve, name='GALEX FUV')
+class GALEXFUV(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GALEXFUV.dat')).T
+        super().__init__(transmission_curve, name='GALEX FUV')
 
 
-# class GALEXNUV(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GALEXNUV.dat')).T
-#         super().__init__(transmission_curve, name='GALEX NUV')
+class GALEXNUV(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GALEXNUV.dat')).T
+        super().__init__(transmission_curve, name='GALEX NUV')
 
 
 # https://github.com/lsst/throughputs/blob/main/baseline/README.md
+# Just assume photonic with AB definition
 
-# class LSSTu(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTu.dat')).T
-#         super().__init__(transmission_curve, name='LSST u')
-
-
-# class LSSTg(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTg.dat')).T
-#         super().__init__(transmission_curve, name='LSST g')
+class LSSTu(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTu.dat')).T
+        super().__init__(transmission_curve, name='LSST u')
 
 
-# class LSSTr(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTr.dat')).T
-#         super().__init__(transmission_curve, name='LSST r')
+class LSSTg(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTg.dat')).T
+        super().__init__(transmission_curve, name='LSST g')
 
 
-# class LSSTi(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTi.dat')).T
-#         super().__init__(transmission_curve, name='LSST i')
+class LSSTr(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTr.dat')).T
+        super().__init__(transmission_curve, name='LSST r')
 
 
-# class LSSTz(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTz.dat')).T
-#         super().__init__(transmission_curve, name='LSST z')
+class LSSTi(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTi.dat')).T
+        super().__init__(transmission_curve, name='LSST i')
 
 
-# class LSSTy(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTy.dat')).T
-#         super().__init__(transmission_curve, name='LSST y')
+class LSSTz(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTz.dat')).T
+        super().__init__(transmission_curve, name='LSST z')
+
+
+class LSSTy(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTy.dat')).T
+        super().__init__(transmission_curve, name='LSST y')
 
 
 # http://ipp.ifa.hawaii.edu/ps1.filters/
@@ -432,43 +431,43 @@ class SDSSz(Filter):
 class PANSTARRS_PS1_g(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.g.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 g', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 g', non_photonic=True)
 
 
 class PANSTARRS_PS1_i(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.i.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 i', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 i', non_photonic=True)
 
 
 class PANSTARRS_PS1_r(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.r.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 r', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 r', non_photonic=True)
 
 
 class PANSTARRS_PS1_w(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.w.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 w', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 w', non_photonic=True)
 
 
 class PANSTARRS_PS1_y(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.y.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 y', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 y', non_photonic=True)
 
 
 class PANSTARRS_PS1_z(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.z.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 z', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 z', non_photonic=True)
 
 
 class PANSTARRS_PS1_open(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'PAN-STARRS_PS1.open.dat')).T
-        super().__init__(transmission_curve, name='PANSTARRS PS1 open', non_photonic=True, AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='PANSTARRS PS1 open', non_photonic=True)
 
 # Source: Bessel (2011)
 
@@ -478,7 +477,7 @@ class Stromgrenu(Filter):
             [3150., 3175., 3200., 3225., 3250., 3275., 3300., 3325., 3350., 3375., 3400., 3425., 3450., 3475., 3500., 3525., 3550., 3575., 3600., 3625., 3650., 3675., 3700., 3725., 3750., 3775., 3800., 3825., 3850.],
             [0.000, 0.004, 0.050, 0.122, 0.219, 0.341, 0.479, 0.604, 0.710, 0.809, 0.886, 0.939, 0.976, 1.000, 0.995, 0.981, 0.943, 0.880, 0.782, 0.659, 0.525, 0.370, 0.246, 0.151, 0.071, 0.030, 0.014, 0.000, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren u', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Stromgren u')
 
 
 class Stromgrenv(Filter):
@@ -487,7 +486,7 @@ class Stromgrenv(Filter):
             [3750., 3775., 3800., 3825., 3850., 3875., 3900., 3925., 3950., 3975., 4000., 4025., 4050., 4075., 4100., 4125., 4150., 4175., 4200., 4225., 4250., 4275., 4300., 4325., 4350., 4375., 4400., 4425., 4450.],
             [0.000, 0.003, 0.006, 0.016, 0.029, 0.044, 0.060, 0.096, 0.157, 0.262, 0.404, 0.605, 0.810, 0.958, 1.000, 0.973, 0.882, 0.755, 0.571, 0.366, 0.224, 0.134, 0.079, 0.053, 0.039, 0.027, 0.014, 0.006, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren v', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Stromgren v')
 
 
 class Stromgrenb(Filter):
@@ -496,7 +495,7 @@ class Stromgrenb(Filter):
             [4350., 4375., 4400., 4425., 4450., 4475., 4500., 4525., 4550., 4575., 4600., 4625., 4650., 4675., 4700., 4725., 4750., 4775., 4800., 4825., 4850., 4875., 4900., 4925., 4950., 4975., 5000., 5025., 5050.],
             [0.000, 0.010, 0.023, 0.039, 0.056, 0.086, 0.118, 0.188, 0.287, 0.457, 0.681, 0.896, 0.998, 1.000, 0.942, 0.783, 0.558, 0.342, 0.211, 0.130, 0.072, 0.045, 0.027, 0.021, 0.015, 0.011, 0.007, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren b', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Stromgren b')
 
 
 class Stromgreny(Filter):
@@ -505,7 +504,7 @@ class Stromgreny(Filter):
             [5150., 5175., 5200., 5225., 5250., 5275., 5300., 5325., 5350., 5375., 5400., 5425., 5450., 5475., 5500., 5525., 5550., 5575., 5600., 5625., 5650., 5675., 5700., 5725., 5750., 5775., 5800., 5825., 5850.],
             [0.000, 0.022, 0.053, 0.082, 0.116, 0.194, 0.274, 0.393, 0.579, 0.782, 0.928, 0.985, 0.999, 1.000, 0.997, 0.938, 0.789, 0.574, 0.388, 0.232, 0.143, 0.090, 0.054, 0.031, 0.016, 0.010, 0.009, 0.004, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren y', AB_zeropoint=-21.10)
+        super().__init__(transmission_curve, name='Stromgren y')
 
 
 class Bolometric(Filter):
@@ -520,11 +519,11 @@ class Bolometric(Filter):
 FILTERS = [
     JohnsonCousinsU, JohnsonCousinsB, JohnsonCousinsV, JohnsonCousinsR, JohnsonCousinsI,
     TychoBT, TychoVT,
-    # GaiaG, GaiaRP, GaiaBP,
+    GaiaG, GaiaRP, GaiaBP,
     SDSSu, SDSSg, SDSSr, SDSSi, SDSSz,
     # TWOMASSJ, TWOMASSH, TWOMASSKs,
-    # GALEXFUV, GALEXNUV,
-    # LSSTu, LSSTg, LSSTr, LSSTi, LSSTz, LSSTy,
+    GALEXFUV, GALEXNUV,
+    LSSTu, LSSTg, LSSTr, LSSTi, LSSTz, LSSTy,
     PANSTARRS_PS1_g, PANSTARRS_PS1_i, PANSTARRS_PS1_r, PANSTARRS_PS1_w, PANSTARRS_PS1_y, PANSTARRS_PS1_z, PANSTARRS_PS1_open,
     HipparcosHp,
     Stromgrenu, Stromgrenv, Stromgrenb, Stromgreny,

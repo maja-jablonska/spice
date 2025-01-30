@@ -487,7 +487,7 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude
         new_centers - m.d_centers), (radius * magnitude_prim * center_harmonic_mags * center_direction_vectors)
 
 
-def evaluate_pulsations(m: MeshModel, t: ArrayLike):
+def evaluate_pulsations(m: MeshModel, t: float):
     """
     Evaluates and updates the mesh model with pulsation effects at a specific time.
 
@@ -501,7 +501,7 @@ def evaluate_pulsations(m: MeshModel, t: ArrayLike):
 
     Args:
         m (MeshModel): The mesh model to evaluate pulsations for.
-        t (ArrayLike): The time at which to evaluate the pulsations.
+        t (float): The time at which to evaluate the pulsations.
 
     Returns:
         MeshModel: The mesh model updated with pulsation effects.
