@@ -405,11 +405,15 @@ def __AB_passband_luminosity_photonic_gaia(filter: Filter,
         float: AB magnitude in the filter passband [mag]
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    # Montegriffo (2023)
     # P_A/(10^9 h*c) * int(lambda * f_lambda * T_zeta dlambda)
-    # where P_A = 3.66383004e+10 is the absolute flux calibration constant
-    return -2.5 * jnp.log10(3.66383004e+10 * 
-            trapezoid(x=wavelengths * 1e-8, y=wavelengths * 1e-8 * observed_flux * transmission_responses)
-        ) + filter.AB_zeropoint
+    
+    nm_lambda = wavelengths/10.
+    watt_flux = 1e-10*observed_flux
+
+    return -2.5 * jnp.log10(3663830098681164.5* 
+            trapezoid(x=nm_lambda, y=nm_lambda * watt_flux * transmission_responses)
+    ) + filter.AB_zeropoint
 
 @partial(jax.jit, static_argnums=(0,))
 def __AB_passband_luminosity_non_photonic(filter: Filter,
