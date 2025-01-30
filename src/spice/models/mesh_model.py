@@ -10,6 +10,8 @@ from .model import Model, T
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
+from jaxtyping import Array, Int, Float
+
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 
@@ -48,7 +50,7 @@ MeshModelNamedTuple = namedtuple("MeshModel",
 
 class MeshModel(Model, MeshModelNamedTuple):
     # Stellar properties
-    center: ArrayLike
+    center: Float[Array, "3"]
 
     # Solar radii
     radius: float
@@ -58,64 +60,64 @@ class MeshModel(Model, MeshModelNamedTuple):
     # Mesh properties
     # vertices and centers in the reference frame of centered on the center vector
     # Radius
-    d_vertices: ArrayLike
-    faces: ArrayLike
-    d_centers: ArrayLike
+    d_vertices: Float[Array, "n_vertices 3"]
+    faces: Float[Array, "n_faces 3"]
+    d_centers: Float[Array, "n_mesh_elements 3"]
     # Sphere area
-    base_areas: ArrayLike
+    base_areas: Float[Array, "n_mesh_elements"]
 
-    parameters: ArrayLike
+    parameters: Float[Array, "n_mesh_elements n_parameters"]
     log_g_index: Optional[int]
 
     # Motion properties per-triangle
     # km/s
-    rotation_velocities: ArrayLike
+    rotation_velocities: Float[Array, "n_mesh_elements 3"]
 
     # Pulsations
     # km/s
-    vertices_pulsation_offsets: ArrayLike
+    vertices_pulsation_offsets: Float[Array, "n_vertices 3"]
     # km/s
-    center_pulsation_offsets: ArrayLike
+    center_pulsation_offsets: Float[Array, "n_mesh_elements 3"]
     # Sphere area
-    area_pulsation_offsets: ArrayLike
+    area_pulsation_offsets: Float[Array, "n_mesh_elements"]
 
     # Per center
     # km/s
-    pulsation_velocities: ArrayLike
+    pulsation_velocities: Float[Array, "n_mesh_elements 3"]
 
     # Rotation
-    rotation_axis: ArrayLike
-    rotation_matrix: ArrayLike
-    rotation_matrix_prim: ArrayLike
-    axis_radii: ArrayLike
+    rotation_axis: Float[Array, "3"]
+    rotation_matrix: Float[Array, "3 3"]
+    rotation_matrix_prim: Float[Array, "3 3"]
+    axis_radii: Float[Array, "n_mesh_elements"]
     # km/s
-    rotation_velocity: ArrayLike
+    rotation_velocity: float
 
     # km/s
     orbital_velocity: float
 
     # Occlusions
-    occluded_areas: ArrayLike
+    occluded_areas: Float[Array, "n_mesh_elements"]
 
     # Mesh LOS properties
-    los_vector: ArrayLike
+    los_vector: Float[Array, "3"]
     # Pulsation properties
     max_pulsation_mode: int
     max_fourier_order: int
 
-    spherical_harmonics_parameters: ArrayLike
-    pulsation_periods: ArrayLike
-    fourier_series_parameters: ArrayLike
+    spherical_harmonics_parameters: Float[Array, "n_puls_orders 2"]
+    pulsation_periods: Float[Array, "n_puls_orders"]
+    fourier_series_parameters: Float[Array, "n_puls_orders n_fourier_orders 2"]
     
-    pulsation_axes: ArrayLike
-    pulsation_angles: ArrayLike
+    pulsation_axes: Float[Array, "n_puls_orders 3"]
+    pulsation_angles: Float[Array, "n_puls_orders"]
     
     @property
-    def areas(self) -> ArrayLike:
+    def areas(self) -> Float[Array, "n_mesh_elements"]:
         return self.base_areas + self.area_pulsation_offsets
 
     @property
-    def log_gs(self) -> ArrayLike:
+    def log_gs(self) -> Float[Array, "n_mesh_elements"]:
         return calculate_log_gs(
             self.mass,
             self.centers - self.center,
@@ -123,7 +125,7 @@ class MeshModel(Model, MeshModelNamedTuple):
         )
 
     @property
-    def vertices(self) -> ArrayLike:
+    def vertices(self) -> Float[Array, "n_vertices 3"]:
         if len(self.d_vertices.shape) == 2:
             return self.d_vertices + self.center + self.vertices_pulsation_offsets
         else:
@@ -131,11 +133,11 @@ class MeshModel(Model, MeshModelNamedTuple):
                 (self.d_vertices.shape[0], *([1] * (len(self.d_vertices.shape) - 2)), self.d_vertices.shape[-1]))
 
     @property
-    def mesh_elements(self) -> ArrayLike:
+    def mesh_elements(self) -> Float[Array, "n_faces 3 3"]:
         return self.vertices[self.faces.astype(int)]
 
     @property
-    def centers(self) -> ArrayLike:
+    def centers(self) -> Float[Array, "n_mesh_elements 3"]:
         if len(self.d_centers.shape) == 2:
             return self.d_centers + self.center + self.center_pulsation_offsets
         else:
@@ -144,39 +146,39 @@ class MeshModel(Model, MeshModelNamedTuple):
                                                          self.d_centers.shape[-1])) + self.center_pulsation_offsets
 
     @property
-    def velocities(self) -> ArrayLike:
+    def velocities(self) -> Float[Array, "n_mesh_elements 3"]:
         return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
 
     @property
-    def mus(self) -> ArrayLike:
+    def mus(self) -> Float[Array, "n_mesh_elements"]:
         return cast_normalized_to_los(self.d_centers, self.los_vector)
 
     @property
-    def los_velocities(self) -> ArrayLike:
+    def los_velocities(self) -> Float[Array, "n_mesh_elements"]:
         return cast_to_los(self.velocities, self.los_vector)
 
     @property
-    def los_z(self) -> ArrayLike:
+    def los_z(self) -> Float[Array, "n_mesh_elements"]:
         return cast_to_los(self.centers, self.los_vector)
 
     @property
-    def radii(self) -> T:
+    def radii(self) -> Float[Array, "n_mesh_elements"]:
         return jnp.linalg.norm(self.d_centers+self.center_pulsation_offsets, axis=1)
 
     @property
-    def cast_vertices(self) -> ArrayLike:
+    def cast_vertices(self) -> Float[Array, "n_vertices 2"]:
         return cast_to_normal_plane(self.vertices, self.los_vector)
 
     @property
-    def cast_centers(self) -> ArrayLike:
+    def cast_centers(self) -> Float[Array, "n_mesh_elements 2"]:
         return cast_to_normal_plane(self.centers, self.los_vector)
 
     @property
-    def cast_areas(self) -> ArrayLike:
+    def cast_areas(self) -> Float[Array, "n_mesh_elements"]:
         return get_cast_areas(self.cast_vertices[self.faces.astype(int)])
     
     @property
-    def visible_cast_areas(self) -> ArrayLike:
+    def visible_cast_areas(self) -> Float[Array, "n_mesh_elements"]:
         return jnp.where(self.mus > 0, self.cast_areas - self.occluded_areas, 0.)
 
 
@@ -186,7 +188,7 @@ class IcosphereModel(MeshModel):
     def construct(cls, n_vertices: int,
                   radius: float,
                   mass: float,
-                  parameters: Union[float, ArrayLike],
+                  parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]],
                   parameter_names: List[str],
                   max_pulsation_mode: int = DEFAULT_MAX_PULSATION_MODE_PARAMETER,
                   max_fourier_order: int = DEFAULT_FOURIER_ORDER,
@@ -203,7 +205,7 @@ class IcosphereModel(MeshModel):
             n_vertices (int): Number of vertices for the icosphere mesh.
             radius (float): Radius of the icosphere.
             mass (float): Mass of the stellar object.
-            parameters (Union[float, ArrayLike]): Parameters for the model, can be a single value or an array.
+            parameters (Union[float, Float[Array, "n_mesh_elements n_parameters"]]): Parameters for the model, can be a single value or an array.
             parameter_names (List[str]): Names of the parameters, used for identifying log g parameter.
             max_pulsation_mode (int, optional): Maximum pulsation mode for the model. Defaults to a predefined value.
             max_fourier_order (int, optional): Maximum order of Fourier series for pulsation calculation. Defaults to a predefined value.
