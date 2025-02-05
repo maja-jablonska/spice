@@ -187,9 +187,6 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
                                       distance ** 2))[:len(log_wavelengths), :]
 
 
-# -> erg/s/cm^2/A
-# /sr by sie bral z pol powierzchni podzielonych przez odleglosc
-
 @partial(jax.jit, static_argnums=(0, 5))
 def __flux_flash_sum(flux_fn,
                      log_wavelengths,
@@ -436,10 +433,9 @@ def __AB_passband_luminosity_non_photonic(filter: Filter,
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
 
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths * 1e-8, y=1e-8 * observed_flux * transmission_responses) /
-            (trapezoid(x=wavelengths * 1e-8, y=transmission_responses / 1e-8))
-        ) + filter.AB_zeropoint
-
+            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
+            trapezoid(x=wavelengths, y=transmission_responses)
+    ) + filter.AB_zeropoint
 
 def AB_passband_luminosity(filter: Filter,
                            wavelengths: Float[Array, "n_wavelengths"],
@@ -473,7 +469,7 @@ def __ST_passband_luminosity_non_photonic(filter: Filter,
     """Calculate the ST magnitude in a given filter passband.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
-    the filter transmission function and comparing to the AB magnitude zero point.
+    the filter transmission function and comparing to the ST magnitude zero point.
 
     Args:
         filter (Filter): Filter object containing the transmission curve
@@ -499,7 +495,7 @@ def __ST_passband_luminosity_photonic(filter: Filter,
     """Calculate the ST magnitude in a given filter passband.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
-    the filter transmission function and comparing to the AB magnitude zero point.
+    the filter transmission function and comparing to the ST magnitude zero point.
 
     Args:
         filter (Filter): Filter object containing the transmission curve
@@ -516,15 +512,15 @@ def __ST_passband_luminosity_photonic(filter: Filter,
             trapezoid(x=wavelengths, y=wavelengths * observed_flux / 1e8 * transmission_responses) /
             trapezoid(x=wavelengths, y=wavelengths * transmission_responses)
         ) + filter.ST_zeropoint
-
-
+    
+    
 def ST_passband_luminosity(filter: Filter,
                            wavelengths: Float[Array, "n_wavelengths"],
                            observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
     """Calculate the ST magnitude in a given filter passband.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
-    the filter transmission function and comparing to the AB magnitude zero point.
+    the filter transmission function and comparing to the ST magnitude zero point.
 
     Args:
         filter (Filter): Filter object containing the transmission curve
@@ -535,10 +531,121 @@ def ST_passband_luminosity(filter: Filter,
     Returns:
         float: ST magnitude in the filter passband [mag]
     """
+    if 'gaia' in filter.name.lower():
+        raise ValueError("Gaia filters are not supported for ST magnitude calculations.")
     if filter.non_photonic:
         return __ST_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
     else:
         return __ST_passband_luminosity_photonic(filter, wavelengths, observed_flux)
+
+
+@partial(jax.jit, static_argnums=(0,))
+def __Vega_passband_luminosity_photonic_gaia(filter: Filter,
+                                             wavelengths: Float[Array, "n_wavelengths"],
+                                             observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the Vega magnitude in a given filter passband.
+
+    This function computes the Vega magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the Vega magnitude zero point.
+
+    Args:
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
+
+    Returns:
+        float: AB magnitude in the filter passband [mag]
+    """
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    # Montegriffo (2023)
+    # P_A/(10^9 h*c) * int(lambda * f_lambda * T_zeta dlambda)
+    
+    nm_lambda = wavelengths/10.
+    watt_flux = 1e-10*observed_flux
+
+    return -2.5 * jnp.log10(3663830098681164.5* 
+            trapezoid(x=nm_lambda, y=nm_lambda * watt_flux * transmission_responses)
+    ) + filter.Vega_zeropoint
+
+    
+@partial(jax.jit, static_argnums=(0,))
+def __Vega_passband_luminosity_non_photonic(filter: Filter,
+                                            wavelengths: Float[Array, "n_wavelengths"],
+                                            observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the Vega magnitude in a given filter passband.
+
+    This function computes the Vega magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the Vega magnitude zero point.
+
+    Args:
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
+
+    Returns:
+        float: ST magnitude in the filter passband [mag]
+    """
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    
+    return -2.5 * jnp.log10(
+            trapezoid(x=wavelengths, y=observed_flux / 1e8 * transmission_responses) /
+            trapezoid(x=wavelengths, y=transmission_responses)
+        ) + filter.Vega_zeropoint
+
+@partial(jax.jit, static_argnums=(0,))
+def __Vega_passband_luminosity_photonic(filter: Filter,
+                                        wavelengths: Float[Array, "n_wavelengths"],
+                                        observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the Vega magnitude in a given filter passband.
+
+    This function computes the Vega magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the Vega magnitude zero point.
+
+    Args:
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
+
+    Returns:
+        float: ST magnitude in the filter passband [mag]
+    """
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    
+    return -2.5 * jnp.log10(
+            trapezoid(x=wavelengths, y=wavelengths * observed_flux / 1e8 * transmission_responses) /
+            trapezoid(x=wavelengths, y=wavelengths * transmission_responses)
+        ) + filter.Vega_zeropoint
+
+
+def Vega_passband_luminosity(filter: Filter,
+                             wavelengths: Float[Array, "n_wavelengths"],
+                             observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the Vega magnitude in a given filter passband.
+
+    This function computes the Vega magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the Vega magnitude zero point.
+
+    Args:
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
+
+    Returns:
+        float: AB magnitude in the filter passband [mag]
+    """
+    if filter.Vega_zeropoint is None:
+        raise ValueError("Vega zeropoint is not set for this filter.")
+    
+    if 'gaia' in filter.name.lower():
+        return __Vega_passband_luminosity_photonic_gaia(filter, wavelengths, observed_flux)
+    elif filter.non_photonic:
+        return __Vega_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
+    else:
+        return __Vega_passband_luminosity_photonic(filter, wavelengths, observed_flux)
 
 
 @jax.jit
