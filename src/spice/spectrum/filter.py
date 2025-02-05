@@ -30,7 +30,8 @@ class Filter(ABC):
                  name: Optional[str] = None,
                  non_photonic: bool = False,
                  AB_zeropoint: float = -22.40788262039795,
-                 ST_zeropoint: float = -21.10):
+                 ST_zeropoint: float = -21.10,
+                 Vega_zeropoint: Optional[float] = None):
         """A class representing an astronomical filter with its transmission curve and properties.
 
         The Filter class provides functionality to handle astronomical filters, including their
@@ -48,6 +49,7 @@ class Filter(ABC):
             non_photonic (bool, optional): Whether the filter is non-photonic and a different form of synthetic photometry equation is used. Defaults to False.
             AB_zeropoint (float, optional): The zeropoint of the filter in magnitudes in the AB system. Defaults to -22.407 (-2.5 log10(3.631 * 1e-20 * c [km/s] * 1e5)).
             ST_zeropoint (float, optional): The zeropoint of the filter in magnitudes in the ST system. Defaults to -21.10.
+            Vega_zeropoint (float, optional): The zeropoint of the filter in magnitudes in the Vega system. Defaults to None.
         Properties:
             transmission_curve_wavelengths: The transmission curve in wavelength space
             transmission_curve_frequencies: The transmission curve in frequency space
@@ -70,7 +72,7 @@ class Filter(ABC):
         self.__non_photonic = non_photonic
         self.__AB_zeropoint = AB_zeropoint
         self.__ST_zeropoint = ST_zeropoint
-
+        self.__Vega_zeropoint = Vega_zeropoint
     @property
     def transmission_curve_wavelengths(self) -> ArrayLike:
         return self.__transmission_curve
@@ -86,6 +88,10 @@ class Filter(ABC):
     @property
     def ST_zeropoint(self) -> float:
         return self.__ST_zeropoint
+    
+    @property
+    def Vega_zeropoint(self) -> float:
+        return self.__Vega_zeropoint
 
     @property
     def name(self) -> str:
@@ -153,7 +159,7 @@ class JohnsonCousinsU(Filter):
              0.813, 0.885, 0.940, 0.980, 1.000, 1.000, 0.974, 0.918, 0.802,
              0.590, 0.355, 0.194, 0.107, 0.046, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins U', AB_zeropoint=-22.40788262039795+0.771-0.01, ST_zeropoint=-21.10-0.142)
+        super().__init__(transmission_curve, name='Johnson-Cousins U', AB_zeropoint=-22.40788262039795-0.771+0.01, ST_zeropoint=-21.10+0.142)
 
 
 class JohnsonCousinsB(Filter):
@@ -166,7 +172,7 @@ class JohnsonCousinsB(Filter):
              0.802, 0.682, 0.577, 0.474, 0.369, 0.278, 0.198, 0.125, 0.078,
              0.036, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins B', AB_zeropoint=-22.40788262039795-0.138+0.008, ST_zeropoint=-21.10-0.625)
+        super().__init__(transmission_curve, name='Johnson-Cousins B', AB_zeropoint=-22.40788262039795+0.138-0.008, ST_zeropoint=-21.10+0.625)
 
 
 class JohnsonCousinsV(Filter):
@@ -181,7 +187,7 @@ class JohnsonCousinsV(Filter):
              0.041, 0.022, 0.014, 0.011, 0.008, 0.006, 0.004, 0.002, 0.001,
              0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins V', AB_zeropoint=-22.40788262039795-0.023+0.003, ST_zeropoint=-21.10-0.019)
+        super().__init__(transmission_curve, name='Johnson-Cousins V', AB_zeropoint=-22.40788262039795+0.023-0.003, ST_zeropoint=-21.10+0.019)
 
 
 class JohnsonCousinsR(Filter):
@@ -198,7 +204,7 @@ class JohnsonCousinsR(Filter):
              0.066, 0.051, 0.039, 0.030, 0.021, 0.014, 0.008, 0.006, 0.003,
              0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins R', AB_zeropoint=-22.40788262039795+0.16+0.003, ST_zeropoint=-21.10+0.538)
+        super().__init__(transmission_curve, name='Johnson-Cousins R', AB_zeropoint=-22.40788262039795-0.16-0.003, ST_zeropoint=-21.10-0.538)
 
 
 class JohnsonCousinsI(Filter):
@@ -211,7 +217,7 @@ class JohnsonCousinsI(Filter):
              0.973, 0.970, 0.958, 0.932, 0.904, 0.860, 0.810, 0.734, 0.590,
              0.392, 0.203, 0.070, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins I', AB_zeropoint=-22.40788262039795+0.402+0.002, ST_zeropoint=-21.10+1.220)
+        super().__init__(transmission_curve, name='Johnson-Cousins I', AB_zeropoint=-22.40788262039795-0.402-0.002, ST_zeropoint=-21.10-1.220)
 
 
 class HipparcosHp(Filter):
@@ -232,7 +238,7 @@ class HipparcosHp(Filter):
              0.068, 0.054, 0.042, 0.032, 0.024, 0.018, 0.014, 0.010, 0.006,
              0.002, 0.000]
         ])
-        super().__init__(transmission_curve, name='Hipparcos Hp', AB_zeropoint=-22.40788262039795-0.022-0.008, ST_zeropoint=-21.10-0.074)
+        super().__init__(transmission_curve, name='Hipparcos Hp', AB_zeropoint=-22.40788262039795+0.022+0.008, ST_zeropoint=-21.10+0.074)
 
 
 class TychoBT(Filter):
@@ -247,7 +253,7 @@ class TychoBT(Filter):
              0.969, 0.852, 0.674, 0.479, 0.309, 0.196, 0.131, 0.097, 0.077,
              0.056, 0.035, 0.015, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Tycho BT', AB_zeropoint=-22.40788262039795-0.09-0.01, ST_zeropoint=-21.10-0.672)
+        super().__init__(transmission_curve, name='Tycho BT', AB_zeropoint=-22.40788262039795+0.09+0.01, ST_zeropoint=-21.10+0.672)
         
 
 class TychoVT(Filter):
@@ -264,7 +270,7 @@ class TychoVT(Filter):
              0.324, 0.282, 0.245, 0.209, 0.178, 0.152, 0.129, 0.108, 0.092,
              0.078, 0.066, 0.055, 0.044, 0.036, 0.027, 0.017, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Tycho VT', AB_zeropoint=-22.40788262039795-0.044+0.007, ST_zeropoint=-21.10-0.115)
+        super().__init__(transmission_curve, name='Tycho VT', AB_zeropoint=-22.40788262039795+0.044-0.007, ST_zeropoint=-21.10+0.115)
 
 
 # # J/A+A/649/A3     Gaia Early Data Release 3 photometric passbands (Riello+, 2021)
@@ -274,7 +280,7 @@ class GaiaG(Filter):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
         zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
         transmission_curve[transmission_curve == 99.99] = 0.
-        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia G', AB_zeropoint=zp[0])
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia G', AB_zeropoint=zp[1, 0], Vega_zeropoint=zp[0, 0])
 
 
 class GaiaBP(Filter):
@@ -282,7 +288,7 @@ class GaiaBP(Filter):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
         zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
         transmission_curve[transmission_curve == 99.99] = 0.
-        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[3]]), name='Gaia BP', AB_zeropoint=zp[2])
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[3]]), name='Gaia BP', AB_zeropoint=zp[1, 2], Vega_zeropoint=zp[0, 2])
 
 
 class GaiaRP(Filter):
@@ -290,7 +296,7 @@ class GaiaRP(Filter):
         transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
         zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
         transmission_curve[transmission_curve == 99.99] = 0.
-        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[5]]), name='Gaia RP', AB_zeropoint=zp[4])
+        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[5]]), name='Gaia RP', AB_zeropoint=zp[1, 4], Vega_zeropoint=zp[0, 4])
         
         
 # Sartoretti et al. (2022)
@@ -352,22 +358,22 @@ class SDSSz(Filter):
         super().__init__(sdss_z, name='SDSS z')
 
 
-# class TWOMASSJ(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSJ.dat')).T
-#         super().__init__(transmission_curve, name='2MASS J')
+class TWOMASSJ(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSJ.dat')).T
+        super().__init__(transmission_curve, name='2MASS J')
 
 
-# class TWOMASSH(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSH.dat')).T
-#         super().__init__(transmission_curve, name='2MASS H')
+class TWOMASSH(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSH.dat')).T
+        super().__init__(transmission_curve, name='2MASS H')
 
 
-# class TWOMASSKs(Filter):
-#     def __init__(self):
-#         transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSKs.dat')).T
-#         super().__init__(transmission_curve, name='2MASS Ks')
+class TWOMASSKs(Filter):
+    def __init__(self):
+        transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSK.dat')).T
+        super().__init__(transmission_curve, name='2MASS Ks')
 
 
 # Morrissey et. al. (2004)
@@ -477,7 +483,7 @@ class Stromgrenu(Filter):
             [3150., 3175., 3200., 3225., 3250., 3275., 3300., 3325., 3350., 3375., 3400., 3425., 3450., 3475., 3500., 3525., 3550., 3575., 3600., 3625., 3650., 3675., 3700., 3725., 3750., 3775., 3800., 3825., 3850.],
             [0.000, 0.004, 0.050, 0.122, 0.219, 0.341, 0.479, 0.604, 0.710, 0.809, 0.886, 0.939, 0.976, 1.000, 0.995, 0.981, 0.943, 0.880, 0.782, 0.659, 0.525, 0.370, 0.246, 0.151, 0.071, 0.030, 0.014, 0.000, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren u')
+        super().__init__(transmission_curve, name='Stromgren u', AB_zeropoint=-22.40788262039795+0.308)
 
 
 class Stromgrenv(Filter):
@@ -486,7 +492,7 @@ class Stromgrenv(Filter):
             [3750., 3775., 3800., 3825., 3850., 3875., 3900., 3925., 3950., 3975., 4000., 4025., 4050., 4075., 4100., 4125., 4150., 4175., 4200., 4225., 4250., 4275., 4300., 4325., 4350., 4375., 4400., 4425., 4450.],
             [0.000, 0.003, 0.006, 0.016, 0.029, 0.044, 0.060, 0.096, 0.157, 0.262, 0.404, 0.605, 0.810, 0.958, 1.000, 0.973, 0.882, 0.755, 0.571, 0.366, 0.224, 0.134, 0.079, 0.053, 0.039, 0.027, 0.014, 0.006, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren v')
+        super().__init__(transmission_curve, name='Stromgren v', AB_zeropoint=-22.40788262039795+0.327)
 
 
 class Stromgrenb(Filter):
@@ -495,7 +501,7 @@ class Stromgrenb(Filter):
             [4350., 4375., 4400., 4425., 4450., 4475., 4500., 4525., 4550., 4575., 4600., 4625., 4650., 4675., 4700., 4725., 4750., 4775., 4800., 4825., 4850., 4875., 4900., 4925., 4950., 4975., 5000., 5025., 5050.],
             [0.000, 0.010, 0.023, 0.039, 0.056, 0.086, 0.118, 0.188, 0.287, 0.457, 0.681, 0.896, 0.998, 1.000, 0.942, 0.783, 0.558, 0.342, 0.211, 0.130, 0.072, 0.045, 0.027, 0.021, 0.015, 0.011, 0.007, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren b')
+        super().__init__(transmission_curve, name='Stromgren b', AB_zeropoint=-22.40788262039795+0.187)
 
 
 class Stromgreny(Filter):
@@ -504,7 +510,7 @@ class Stromgreny(Filter):
             [5150., 5175., 5200., 5225., 5250., 5275., 5300., 5325., 5350., 5375., 5400., 5425., 5450., 5475., 5500., 5525., 5550., 5575., 5600., 5625., 5650., 5675., 5700., 5725., 5750., 5775., 5800., 5825., 5850.],
             [0.000, 0.022, 0.053, 0.082, 0.116, 0.194, 0.274, 0.393, 0.579, 0.782, 0.928, 0.985, 0.999, 1.000, 0.997, 0.938, 0.789, 0.574, 0.388, 0.232, 0.143, 0.090, 0.054, 0.031, 0.016, 0.010, 0.009, 0.004, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren y')
+        super().__init__(transmission_curve, name='Stromgren y', AB_zeropoint=-22.40788262039795+0.027)
 
 
 class Bolometric(Filter):
