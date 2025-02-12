@@ -433,8 +433,34 @@ def __AB_passband_luminosity_non_photonic(filter: Filter,
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
 
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
+            trapezoid(x=wavelengths, y=observed_flux / 1e8 * transmission_responses) /
             trapezoid(x=wavelengths, y=transmission_responses)
+    ) + filter.AB_zeropoint
+    
+    
+@partial(jax.jit, static_argnums=(0,))
+def __AB_passband_luminosity_non_photonic_panstarrs_ps1(filter: Filter,
+                                                        wavelengths: Float[Array, "n_wavelengths"],
+                                                        observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the AB magnitude in a given filter passband for PanSTARRS PS1.
+
+    This function computes the AB magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the AB magnitude zero point.
+
+    Args:
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
+
+    Returns:
+        float: AB magnitude in the filter passband [mag]
+    """
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+
+    return -2.5 * jnp.log10(
+            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
+            trapezoid(x=wavelengths, y=transmission_responses / ((wavelengths*1e-8)**2))
     ) + filter.AB_zeropoint
 
 def AB_passband_luminosity(filter: Filter,
@@ -456,6 +482,8 @@ def AB_passband_luminosity(filter: Filter,
     """
     if 'gaia' in filter.name.lower():
         return __AB_passband_luminosity_photonic_gaia(filter, wavelengths, observed_flux)
+    elif 'panstarrs' in filter.name.lower():
+        return __AB_passband_luminosity_non_photonic_panstarrs_ps1(filter, wavelengths, observed_flux)
     elif filter.non_photonic:
         return __AB_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
     else:
@@ -487,6 +515,32 @@ def __ST_passband_luminosity_non_photonic(filter: Filter,
             trapezoid(x=wavelengths, y=transmission_responses)
         ) + filter.ST_zeropoint
     
+    
+@partial(jax.jit, static_argnums=(0,))
+def __ST_passband_luminosity_non_photonic_panstarrs_ps1(filter: Filter,
+                                                        wavelengths: Float[Array, "n_wavelengths"],
+                                                        observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+    """Calculate the ST magnitude in a given filter passband for PanSTARRS PS1.
+
+    This function computes the ST magnitude by integrating the observed flux weighted by
+    the filter transmission function and comparing to the AB magnitude zero point.
+
+    Args:
+        filter (Filter): Filter object containing the transmission curve
+        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
+        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
+
+    Returns:
+        float: ST magnitude in the filter passband [mag]
+    """
+    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+
+    return -2.5 * jnp.log10(
+            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
+            trapezoid(x=wavelengths, y=transmission_responses / ((wavelengths*1e-8)**2))
+    ) + filter.ST_zeropoint
+
     
 @partial(jax.jit, static_argnums=(0,))
 def __ST_passband_luminosity_photonic(filter: Filter,
@@ -533,7 +587,9 @@ def ST_passband_luminosity(filter: Filter,
     """
     if 'gaia' in filter.name.lower():
         raise ValueError("Gaia filters are not supported for ST magnitude calculations.")
-    if filter.non_photonic:
+    elif 'panstarrs' in filter.name.lower():
+        return __ST_passband_luminosity_non_photonic_panstarrs_ps1(filter, wavelengths, observed_flux)
+    elif filter.non_photonic:
         return __ST_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
     else:
         return __ST_passband_luminosity_photonic(filter, wavelengths, observed_flux)
@@ -582,10 +638,10 @@ def __Vega_passband_luminosity_non_photonic(filter: Filter,
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
         observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
-            [erg/s/cm^2/Å]
+            [erg/s/cm^3]
 
     Returns:
-        float: ST magnitude in the filter passband [mag]
+        float: Vega magnitude in the filter passband [mag]
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
@@ -607,10 +663,10 @@ def __Vega_passband_luminosity_photonic(filter: Filter,
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
         observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
-            [erg/s/cm^2/Å]
+            [erg/s/cm^3]
 
     Returns:
-        float: ST magnitude in the filter passband [mag]
+        float: Vega magnitude in the filter passband [mag]
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
