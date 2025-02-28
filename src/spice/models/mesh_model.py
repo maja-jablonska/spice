@@ -6,11 +6,12 @@ from collections import namedtuple
 import warnings
 
 from .mesh_generation import icosphere
-from .model import Model, T
+from .model import Model
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
-from jaxtyping import Array, Int, Float
+from jaxtyping import Array, Float
+import jax
 
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
@@ -111,7 +112,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     
     pulsation_axes: Float[Array, "n_puls_orders 3"]
     pulsation_angles: Float[Array, "n_puls_orders"]
-    
+
     @property
     def areas(self) -> Float[Array, "n_mesh_elements"]:
         return self.base_areas + self.area_pulsation_offsets
