@@ -13,11 +13,14 @@ import astropy.units as u
 from .orbit_utils import get_orbit_jax
 from .mesh_view import get_grid_spans, resolve_occlusion, Grid
 from collections import namedtuple
+from jax import tree_util
+
 
 YEAR_TO_SECONDS = u.year.to(u.s)
 DAY_TO_YEAR = 0.0027378507871321013
 SOLAR_MASS_KG = 1.988409870698051e+30
 SOLAR_RAD_CM = 6.957e10
+SOLAR_RAD_M = 6.957e8
 
 class Binary(NamedTuple):
     body1: Model
@@ -54,6 +57,7 @@ class Binary(NamedTuple):
                    jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
 
 
+@tree_util.register_pytree_node_class
 class PhoebeBinary(namedtuple("PhoebeBinary",
                               ["body1", "body2", "P", "ecc", "T", "i", "omega", "Omega",
                                "evaluated_times", "body1_centers", "body2_centers", "body1_velocities",
@@ -102,10 +106,10 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
         return PhoebeBinary.__new__(cls, body1=body1, body2=body2, evaluated_times=phoebe_config.times,
                                     P=phoebe_config.get_quantity('period', component='binary') * DAY_TO_YEAR,
                                     ecc=phoebe_config.get_quantity('ecc', component='binary'),
-                                    T=phoebe_config.get_quantity('t0_ref', component='binary') * DAY_TO_YEAR,
-                                    i=phoebe_config.get_quantity('incl', component='binary'),
-                                    omega=phoebe_config.get_quantity('per0', component='binary'),
-                                    Omega=phoebe_config.get_quantity('long_an', component='binary'),
+                                    T=phoebe_config.get_quantity('t0_perpass', component='binary') * DAY_TO_YEAR,
+                                    i=phoebe_config.get_quantity('incl', component='binary') * 0.017453292519943295,
+                                    omega=phoebe_config.get_quantity('per0', component='binary')*0.017453292519943295,
+                                    Omega=phoebe_config.get_quantity('long_an', component='binary')*0.017453292519943295,
                                     body1_centers=phoebe_config.get_all_orbit_centers(str(Component.PRIMARY)),
                                     body2_centers=phoebe_config.get_all_orbit_centers(str(Component.SECONDARY)),
                                     body1_velocities=phoebe_config.get_all_orbit_velocities(str(Component.PRIMARY)),
@@ -114,6 +118,17 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
                                     parameter_labels=parameter_labels,
                                     parameter_values=parameter_values
                                     )
+        
+    def tree_flatten(self):
+        children = (self.body1, self.body2, self.P, self.ecc, self.T, self.i, self.omega, self.Omega,
+                    self.evaluated_times, self.body1_centers, self.body2_centers, self.body1_velocities,
+                    self.body2_velocities, self.phoebe_config, self.parameter_labels, self.parameter_values)
+        aux_data = {}
+        return children, aux_data
+    
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
+        
 
 
 @partial(jax.jit, static_argnums=(7,))
@@ -124,7 +139,7 @@ def _add_orbit(binary: Binary, P: float, ecc: float,
                           ecc, T, i, omega, Omega)
     return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega,
                            evaluated_times=orbit_resolution_times,
-                           body1_centers=orbit[2, :, :]/SOLAR_RAD_CM, body2_centers=orbit[4, :, :]/SOLAR_RAD_CM,
+                           body1_centers=orbit[2, :, :]/SOLAR_RAD_M, body2_centers=orbit[4, :, :]/SOLAR_RAD_M,
                            body1_velocities=orbit[3, :, :], body2_velocities=orbit[5, :, :])
 
 
@@ -163,16 +178,41 @@ def add_orbit(binary: Binary,
 
 @jax.jit
 def _interpolate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
-    interpolate_orbit = jax.jit(
-        jax.vmap(lambda x: jnp.interp(time, binary.evaluated_times, x, period=binary.P), in_axes=(0,)))
-    body1_center = interpolate_orbit(binary.body1_centers)
-    body2_center = interpolate_orbit(binary.body2_centers)
-    body1_velocity = interpolate_orbit(binary.body1_velocities)
-    body2_velocity = interpolate_orbit(binary.body2_velocities)
-    body1 = evaluate_body_orbit(transform(binary.body1, binary.body1.center + body1_center), body1_velocity)
-    body2 = evaluate_body_orbit(transform(binary.body2, binary.body2.center + body2_center), body2_velocity)
-
+    """
+    Interpolate the orbit positions and velocities at a given time.
+    
+    This function interpolates over each spatial coordinate separately.
+    """
+    # Helper function: Interpolate a 2D array of shape (n_eval, dim) along the n_eval axis.
+    # It returns an array of shape (dim,) representing the interpolated values.
+    def interp_for_array(arr):
+        # arr has shape (n_eval, dim). We want to interpolate along the first axis.
+        # Transpose so that each coordinate becomes a 1D array of length n_eval.
+        # Then vmap over each coordinate.
+        return jnp.transpose(
+            jax.vmap(lambda col: jnp.interp(time, binary.evaluated_times, col, period=binary.P))(
+                arr.T
+            )
+        )
+    
+    # Interpolate the centers and velocities for each body.
+    body1_center = interp_for_array(binary.body1_centers)
+    body2_center = interp_for_array(binary.body2_centers)
+    body1_velocity = interp_for_array(binary.body1_velocities)
+    body2_velocity = interp_for_array(binary.body2_velocities)
+    
+    # Apply the interpolated shifts to the models.
+    body1 = evaluate_body_orbit(
+        transform(binary.body1, binary.body1.center + body1_center),
+        body1_velocity
+    )
+    body2 = evaluate_body_orbit(
+        transform(binary.body2, binary.body2.center + body2_center),
+        body2_velocity
+    )
+    
     return body1, body2
+
 
 
 @partial(jax.jit, static_argnums=(2,))
@@ -196,7 +236,7 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, grid: Grid) -> Tuple[Mode
         inner_treedef=jax.tree.structure([0 for t in times]),
         pytree_to_transpose=jax.tree.map(lambda x: list(x), result_body2)
     )
-    
+
 
 def get_optimal_grid_size(m1, m2, min_cells=5, max_cells=30):
     """
