@@ -194,6 +194,7 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega):
     Rz_Omega = jnp.array([[ cos_Omega, -sin_Omega, 0],
                           [ sin_Omega,  cos_Omega, 0],
                           [       0.0,        0.0, 1]])
+    
     # Full rotation matrix.
     R = Rz_Omega @ Rx_i @ Rz_omega
 
@@ -219,12 +220,12 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega):
     # ---------------------------
     # Stack the arrays into a single output of shape (6, len(time), 3):
     orbit = jnp.stack([
-        r_inertial,  # orbit[0]: barycenter positions
-        v_inertial/1e3,  # orbit[1]: barycenter velocities
-        pos1,              # orbit[2]: displacement of body 1
-        vel1/1e3,              # orbit[3]: velocity of body 1 [km/s]
-        pos2,              # orbit[4]: displacement of body 2
-        vel2/1e3               # orbit[5]: velocity of body 2 [km/s]
+        r_inertial * jnp.array([1, 1, -1]),  # orbit[0]: barycenter positions
+        v_inertial/1e3 * jnp.array([1, 1, -1]),  # orbit[1]: barycenter velocities
+        pos1 * jnp.array([1, 1, -1]),              # orbit[2]: displacement of body 1
+        vel1/1e3 * jnp.array([1, 1, -1]),              # orbit[3]: velocity of body 1 [km/s]
+        pos2 * jnp.array([1, 1, -1]),              # orbit[4]: displacement of body 2
+        vel2/1e3 * jnp.array([1, 1, -1])               # orbit[5]: velocity of body 2 [km/s]
     ], axis=0)
     
     return orbit
