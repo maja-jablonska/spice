@@ -1,5 +1,6 @@
 from jax.typing import ArrayLike
 import jax.numpy as jnp
+import jax
 
 from typing import List, Optional, Union
 from collections import namedtuple
@@ -16,17 +17,27 @@ import jax
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 
-DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.])  # from the Y direction
-DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.])  # from the Y direction
+# Use appropriate dtype based on jax_enable_x64 flag
+float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
-NO_ROTATION_MATRIX = jnp.zeros((3, 3))
+# Log which float type is being used for debugging purposes
+import logging
+
+logger = logging.getLogger(__name__)
+logger.debug(f"Using float dtype for icosphere construction: {float_dtype}")
+
+
+DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.], dtype=float_dtype)  # from the Y direction
+DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.], dtype=float_dtype)  # from the Y direction
+
+NO_ROTATION_MATRIX = jnp.zeros((3, 3), dtype=float_dtype)
 
 DEFAULT_MAX_PULSATION_MODE_PARAMETER = 3
 DEFAULT_FOURIER_ORDER = 5
 
 
 def create_harmonics_params(n: int):
-    x, y = jnp.meshgrid(jnp.arange(0, n), jnp.arange(0, n))
+    x, y = jnp.meshgrid(jnp.arange(0, n, dtype=float_dtype), jnp.arange(0, n, dtype=float_dtype))
     return jnp.vstack([x.ravel(), y.ravel()]).T
 
 
@@ -249,25 +260,25 @@ class IcosphereModel(MeshModel):
                                  base_areas=areas,
                                  parameters=parameters,
                                  log_g_index=log_g_index,
-                                 rotation_velocities=jnp.zeros_like(centers),
-                                 vertices_pulsation_offsets=jnp.zeros_like(vertices),
-                                 center_pulsation_offsets=jnp.zeros_like(centers),
-                                 area_pulsation_offsets=jnp.zeros_like(areas),
-                                 pulsation_velocities=jnp.zeros_like(centers),
+                                 rotation_velocities=jnp.zeros_like(centers, dtype=float_dtype),
+                                 vertices_pulsation_offsets=jnp.zeros_like(vertices, dtype=float_dtype),
+                                 center_pulsation_offsets=jnp.zeros_like(centers, dtype=float_dtype),
+                                 area_pulsation_offsets=jnp.zeros_like(areas, dtype=float_dtype),
+                                 pulsation_velocities=jnp.zeros_like(centers, dtype=float_dtype),
                                  rotation_axis=DEFAULT_ROTATION_AXIS,
                                  rotation_matrix=NO_ROTATION_MATRIX,
                                  rotation_matrix_prim=NO_ROTATION_MATRIX,
                                  axis_radii=calculate_axis_radii(centers, DEFAULT_ROTATION_AXIS),
                                  rotation_velocity=0.,
                                  orbital_velocity=0.,
-                                 occluded_areas=jnp.zeros_like(areas),
+                                 occluded_areas=jnp.zeros_like(areas, dtype=float_dtype),
                                  los_vector=DEFAULT_LOS_VECTOR,
                                  max_pulsation_mode=max_pulsation_mode,
                                  max_fourier_order=max_fourier_order,
                                  spherical_harmonics_parameters=harmonics_params,
-                                 pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0]),
+                                 pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0], dtype=float_dtype),
                                  # D_0 (amplitude), period
                                  fourier_series_parameters=jnp.nan * jnp.ones(
-                                     (harmonics_params.shape[0], max_fourier_order, 2)), # D_n, phi_n
+                                     (harmonics_params.shape[0], max_fourier_order, 2), dtype=float_dtype), # D_n, phi_n
                                  pulsation_axes=DEFAULT_ROTATION_AXIS.reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
-                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1))) 
+                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=float_dtype))
