@@ -33,6 +33,10 @@ class Binary(NamedTuple):
     i: float
     omega: float
     Omega: float
+    
+    mean_anomaly: float
+    reference_time: float
+    vgamma: float
 
     evaluated_times: ArrayLike
 
@@ -52,7 +56,7 @@ class Binary(NamedTuple):
           Returns:
               Binary: a binary consisting of body1 and body2
           """
-        return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0.,
+        return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
                    jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
 
@@ -60,6 +64,7 @@ class Binary(NamedTuple):
 @tree_util.register_pytree_node_class
 class PhoebeBinary(namedtuple("PhoebeBinary",
                               ["body1", "body2", "P", "ecc", "T", "i", "omega", "Omega",
+                               "mean_anomaly", "reference_time", "vgamma",
                                "evaluated_times", "body1_centers", "body2_centers", "body1_velocities",
                                "body2_velocities", "phoebe_config", "parameter_labels", "parameter_values"])):
     body1: Model
@@ -72,6 +77,9 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
     i: float
     omega: float
     Omega: float
+    mean_anomaly: float
+    reference_time: float
+    vgamma: float
 
     evaluated_times: ArrayLike
 
@@ -110,6 +118,9 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
                                     i=phoebe_config.get_quantity('incl', component='binary') * 0.017453292519943295,
                                     omega=phoebe_config.get_quantity('per0', component='binary')*0.017453292519943295,
                                     Omega=phoebe_config.get_quantity('long_an', component='binary')*0.017453292519943295,
+                                    mean_anomaly=phoebe_config.get_quantity('mean_anom', component='binary')*0.017453292519943295,
+                                    reference_time=phoebe_config.get_quantity('t0_ref', component='binary')*DAY_TO_YEAR,
+                                    vgamma=phoebe_config.b.get_parameter('vgamma').value,
                                     body1_centers=phoebe_config.get_all_orbit_centers(str(Component.PRIMARY)),
                                     body2_centers=phoebe_config.get_all_orbit_centers(str(Component.SECONDARY)),
                                     body1_velocities=phoebe_config.get_all_orbit_velocities(str(Component.PRIMARY)),
@@ -131,16 +142,18 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
         
 
 
-@partial(jax.jit, static_argnums=(7,))
+@partial(jax.jit, static_argnums=(10,))
 def _add_orbit(binary: Binary, P: float, ecc: float,
-               T: float, i: float, omega: float, Omega: float, orbit_resolution_points: int) -> Binary:
+               T: float, i: float, omega: float, Omega: float, mean_anomaly: float,
+               reference_time: float, vgamma: float, orbit_resolution_points: int) -> Binary:
     orbit_resolution_times = jnp.linspace(0, P, orbit_resolution_points)
-    orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass, P,
-                          ecc, T, i, omega, Omega)
-    return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega,
+    orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass,
+                          P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma)
+    return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega, mean_anomaly=mean_anomaly, reference_time=reference_time,
+                           vgamma=vgamma,
                            evaluated_times=orbit_resolution_times,
-                           body1_centers=orbit[2, :, :]/SOLAR_RAD_M, body2_centers=orbit[4, :, :]/SOLAR_RAD_M,
-                           body1_velocities=orbit[3, :, :], body2_velocities=orbit[5, :, :])
+                           body1_centers=(orbit[0, :, :]+orbit[2, :, :])/SOLAR_RAD_M, body2_centers=(orbit[0, :, :]+orbit[4, :, :])/SOLAR_RAD_M,
+                           body1_velocities=(orbit[1, :, :]+orbit[3, :, :]), body2_velocities=(orbit[1, :, :]+orbit[5, :, :]))
 
 
 def add_orbit(binary: Binary,
@@ -150,6 +163,9 @@ def add_orbit(binary: Binary,
               i: float,
               omega: float,
               Omega: float,
+              mean_anomaly: float,
+              reference_time: float,
+              vgamma: float,
               orbit_resolution_points: int) -> Binary:
     """
     Add orbit information to the binary object.
@@ -165,6 +181,8 @@ def add_orbit(binary: Binary,
         i (float): Inclination of the orbit in radians.
         omega (float): Argument of periastron in radians.
         Omega (float): Longitude of the ascending node in radians.
+        mean_anomaly (float): Mean anomaly at reference time in radians.
+        reference_time (float): Reference time in years.
         orbit_resolution_points (int): Number of points to use for orbit resolution.
 
     Returns:
@@ -173,7 +191,7 @@ def add_orbit(binary: Binary,
     if isinstance(binary, PhoebeBinary):
         raise ValueError("PhoebeBinary objects are read-only - the orbit information is already added.")
     else:
-        return _add_orbit(binary, P, ecc, T, i, omega, Omega, orbit_resolution_points)
+        return _add_orbit(binary, P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma, orbit_resolution_points)
 
 
 @jax.jit
