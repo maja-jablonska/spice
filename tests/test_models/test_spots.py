@@ -99,7 +99,7 @@ class TestSpotFunctions:
             param_delta=spot_temp - base_temp,
             param_index=0, 
             tilt_axis=tilt_axis, 
-            tilt_degree=tilt_degree
+            tilt_angle=tilt_degree
         )
 
         assert not jnp.allclose(modified_mesh.parameters, mock_mesh.parameters)
@@ -128,7 +128,7 @@ class TestSpotFunctions:
             param_delta=spot_temp - base_temp,
             param_index=0, 
             tilt_axis=tilt_axis, 
-            tilt_degree=tilt_degree
+            tilt_angle=tilt_degree
         )
 
         untilted_mesh = add_spherical_harmonic_spot(
@@ -153,7 +153,7 @@ class TestSpotFunctions:
             param_delta=spot_temp - base_temp,
             param_index=0, 
             tilt_axis=jnp.array([1., 0., 0.]), 
-            tilt_degree=tilt_degree
+            tilt_angle=tilt_degree
         )
 
         modified_mesh_y = add_spherical_harmonic_spot(
@@ -163,7 +163,7 @@ class TestSpotFunctions:
             param_delta=spot_temp - base_temp,
             param_index=0, 
             tilt_axis=jnp.array([0., 1., 0.]), 
-            tilt_degree=tilt_degree
+            tilt_angle=tilt_degree
         )
 
         assert not jnp.allclose(modified_mesh_x.parameters, modified_mesh_y.parameters)
