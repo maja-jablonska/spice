@@ -72,7 +72,7 @@ def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi
         ArrayLike: values
     """
     n = jnp.arange(1, d.shape[0] + 1)
-    return jnp.sum(-2 * jnp.pi * d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
+    return jnp.nan_to_num(jnp.sum(-2 * jnp.pi * d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi)))
 
 
 evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, None)))
