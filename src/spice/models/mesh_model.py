@@ -32,7 +32,7 @@ DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.], dtype=float_dtype)
 
 NO_ROTATION_MATRIX = jnp.zeros((3, 3), dtype=float_dtype)
 
-DEFAULT_MAX_PULSATION_MODE_PARAMETER = 3
+DEFAULT_MAX_PULSATION_MODE_PARAMETER = 5
 DEFAULT_FOURIER_ORDER = 5
 
 
