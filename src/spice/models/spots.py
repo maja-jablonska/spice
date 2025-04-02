@@ -63,6 +63,8 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
     Returns: ArrayLike: An array of differential parameter values for each point, interpolated based on spot
     membership and edge smoothness.
     """
+    
+    smoothness = jnp.clip(smoothness, 0.0, 1.0)
 
     spot_center_x, spot_center_y, spot_center_z = __spherical_to_cartesian(spot_center_theta, spot_center_phi,
                                                                            mesh_radius)
@@ -75,7 +77,15 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
     distance_from_edge = jnp.deg2rad(spot_radius) * mesh_radius - distances
 
     # Apply smoothness to interpolate values at the spot's edge
-    differences = sigmoid(distance_from_edge / (0.01 * mesh_radius), smoothness) * parameter_diff
+    # Use a small fraction of mesh radius for scaling, but ensure it's not too small
+    scale_factor = jnp.maximum(0.01 * mesh_radius, 1e-6)
+    # Clip distance_from_edge to prevent numerical issues with very large negative values
+    normalized_distance = jnp.clip(distance_from_edge / scale_factor, -100.0, 100.0)
+    
+    # Invert smoothness parameter so 0.0 is sharp (high sigmoid slope) and 1.0 is smooth (low sigmoid slope)
+    # Map smoothness from [0.0, 1.0] to [10.0, 0.01] for sigmoid steepness
+    adjusted_smoothness = (1.0 - smoothness) + 0.01 * smoothness
+    differences = sigmoid(normalized_distance, adjusted_smoothness) * parameter_diff
 
     return differences
 
@@ -112,7 +122,7 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
                                 param_delta: Float,
                                 param_index: Float,
                                 tilt_axis: Float[Array, "3"] = None,
-                                tilt_degree: Float = None) -> MeshModel:
+                                tilt_angle: Float = None) -> MeshModel:
     """
     Add a spherical harmonic variation to a parameter of the mesh model, effectively creating a spot-like feature.
 
@@ -133,7 +143,7 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
             modified by this variation.
         tilt_axis (Float[Array, "3"], optional): The axis around which to tilt the spherical harmonic pattern.
             Defaults to None (no tilt).
-        tilt_degree (Float, optional): The angle in degrees to tilt the spherical harmonic pattern around
+        tilt_angle (Float, optional): The angle in degrees to tilt the spherical harmonic pattern around
             tilt_axis. Only used if tilt_axis is provided. Defaults to None (no tilt).
 
     Returns:
@@ -154,7 +164,8 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
             raise ValueError("m must be lesser or equal to n.")
         
     if tilt_axis is not None:
-        return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, n_degree, param_delta, param_index, tilt_axis, tilt_degree)
+        tilt_angle = 0.0 if tilt_angle is None else tilt_angle
+        return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, n_degree, param_delta, param_index, tilt_axis, tilt_angle)
     return _add_spherical_harmonic_spot(mesh, m_order, n_degree, param_delta, param_index)
 
 
@@ -180,7 +191,7 @@ def add_spot(mesh: MeshModel,
              spot_radius: float,
              parameter_delta: float,
              parameter_index: int,
-             smoothness: float = 1.0) -> MeshModel:
+             smoothness: float = 0.0) -> MeshModel:
     """
     Add a spot to a mesh model based on spherical coordinates and smoothness parameters.
 
@@ -195,7 +206,7 @@ def add_spot(mesh: MeshModel,
         spot_radius (float): The angular radius of the spot, in radians.
         parameter_delta (float): The difference in the parameter value to be applied within the spot.
         parameter_index (int): The index of the parameter in the mesh model that will be modified by the spot.
-        smoothness (float, optional): A parameter controlling the smoothness of the spot's edge. Higher values result in smoother transitions. Defaults to 1.0.
+        smoothness (float, optional): A parameter controlling the smoothness of the spot's edge. Higher values result in smoother transitions. Defaults to 0.0.
 
     Returns:
         MeshModel: The modified mesh model with the spot applied.
@@ -326,7 +337,7 @@ def add_spherical_harmonic_spots(mesh: MeshModel,
         param_deltas (Float[Array, "n_orders"]): An array of deltas specifying the strength of the modification for each spot.
         param_indices (Float[Array, "n_orders"]): An array of parameter indices specifying which parameter of the mesh is modified by each spot.
         tilt_axes (Optional[Float[Array, "n_orders 3"]], optional): An array of tilt axes for each spot. Shape should be (n_orders, 3). Defaults to None (no tilt).
-        tilt_angles (Optional[Float[Array, "n_orders"]], optional): An array of tilt angles in radians for each spot. Defaults to None (no tilt).
+        tilt_angles (Optional[Float[Array, "n_orders"]], optional): An array of tilt angles in degrees for each spot. Defaults to None (no tilt).
 
     Returns:
         MeshModel: The modified mesh model with all spherical harmonic spots applied.
