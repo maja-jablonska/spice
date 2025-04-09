@@ -372,9 +372,11 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: Optional[
                [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
     else:
         optimal_size = get_optimal_grid_size(binary.body1, binary.body2)
+        print("Optimal grid size: ", optimal_size)
         if n_cells is None:
             n_cells = int(optimal_size)
         else:
+            print("n_cells: ", n_cells)
             span_size = get_grid_spans(binary.body1, binary.body2, jnp.array([n_cells]))
             if span_size < 1.5 * jnp.maximum(
                 jnp.max(binary.body1.cast_areas[binary.body1.mus>0]),

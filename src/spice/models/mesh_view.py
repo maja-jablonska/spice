@@ -230,7 +230,7 @@ v_resolve_occlusion_for_face = jax.jit(jax.vmap(resolve_occlusion_for_face, in_a
                                        static_argnums=(3,))
 
 
-#@partial(jax.jit, static_argnums=(2,))
+@partial(jax.jit, static_argnums=(2,))
 def resolve_occlusion(m1: MeshModel, m2: MeshModel, grid: Grid) -> MeshModel:
     """Calculate the occlusion of m1 by m2
 
