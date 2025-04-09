@@ -112,7 +112,7 @@ def plot_3D(mesh: MeshModel,
     if mode == 'MESH':
         vs2 = mesh.mesh_elements
         face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
-        p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
+        p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black", linewidths=0.01)
         plot_ax.add_collection(p)
         mappable.set_array([])
     else:
@@ -282,7 +282,7 @@ def plot_3D_sequence(meshes: List[MeshModel],
         if mode == 'MESH':
             vs2 = mesh.vertices[mesh.faces.astype(int)]
             face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
-            p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black")
+            p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black", linewidth=0.1)
             plot_ax.add_collection(p)
             if timestamps is not None:
                 plot_ax.set_title("Time: {ts:.2f} {timestamp_label}".format(ts=timestamps[i], timestamp_label=timestamp_label), pad=1.0)
@@ -350,7 +350,7 @@ def animate_mesh_and_spectra(meshes: List[MeshModel],
         if mode == 'MESH':
             vs2 = mesh.vertices[mesh.faces.astype(int)]
             face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
-            p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black", zorder=0)
+            p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black", linewidths=0.01, zorder=0)
             
             plot_ax.add_collection(p)
             plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
