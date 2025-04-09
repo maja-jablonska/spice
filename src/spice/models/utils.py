@@ -3,7 +3,8 @@ import jax
 from jax.typing import ArrayLike
 from typing import Tuple
 
-from jaxtyping import Array, Int, Float
+from jaxtyping import Array, Float
+
 
 def vertex_to_polar(v: Float[Array, "3"]) -> Float[Array, "2"]:
     v += 1e-5
@@ -14,6 +15,58 @@ def vertex_to_polar(v: Float[Array, "3"]) -> Float[Array, "2"]:
             jnp.arctan2(v[1], v[0])
         ])
     )
+
+
+def lat_to_theta(lat_deg: float) -> float:
+    """
+    Convert latitude in degrees to theta (inclination) in radians.
+    
+    Args:
+        lat_deg (float): Latitude in degrees (-90 to 90)
+        
+    Returns:
+        float: Theta (inclination) in radians (0 to pi)
+    """
+    return jnp.deg2rad(90 - lat_deg)  # Convert latitude to inclination angle (0 to pi)
+
+
+def lon_to_phi(lon_deg: float) -> float:
+    """
+    Convert longitude in degrees to phi (azimuth) in radians.
+    
+    Args:
+        lon_deg (float): Longitude in degrees (-180 to 180)
+        
+    Returns:
+        float: Phi (azimuth) in radians (-pi to pi)
+    """
+    return jnp.deg2rad(lon_deg)  # Convert longitude to azimuth angle (-pi to pi)
+
+
+def theta_to_lat(theta: float) -> float:
+    """
+    Convert theta (inclination) in radians to latitude in degrees.
+    
+    Args:
+        theta (float): Inclination angle in radians (0 to pi)
+        
+    Returns:
+        float: Latitude in degrees (-90 to 90)
+    """
+    return 90 - jnp.rad2deg(theta)  # Convert inclination to latitude
+
+
+def phi_to_lon(phi: float) -> float:
+    """
+    Convert phi (azimuth) in radians to longitude in degrees.
+    
+    Args:
+        phi (float): Azimuth angle in radians (-pi to pi)
+        
+    Returns:
+        float: Longitude in degrees (-180 to 180)
+    """
+    return jnp.rad2deg(phi)  # Convert azimuth to longitude
 
 
 @jax.jit
@@ -72,7 +125,7 @@ def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi
         ArrayLike: values
     """
     n = jnp.arange(1, d.shape[0] + 1)
-    return jnp.sum(-2 * jnp.pi * d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
+    return jnp.nan_to_num(jnp.sum(-2 * jnp.pi * d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi)))
 
 
 evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, None)))
