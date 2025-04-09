@@ -145,6 +145,7 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     return jnp.concatenate([x, jnp.zeros((chunk_size - x.shape[0] % chunk_size, *x.shape[1:]))], axis=0)
 
 
+# TODO: think: change to simulate_obseved_monochromatic_flux?
 @partial(jax.jit, static_argnums=(0, 4, 5))
 def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"], float, Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                            m: MeshModel,
@@ -356,6 +357,12 @@ def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n
 def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, sample_responses: ArrayLike) -> ArrayLike:
     return jnp.interp(wavelengths, sample_wavelengths, sample_responses)
 
+
+# TODO: rename to observed passband luminosity? how to name it so that it's consistent???
+# Let's rename it to obseved_passband_flux
+# later let's have AB_observed_passband_magnitude
+
+# If we set the transmission curve to be 1.0 for all wavelengths, we get the bolometric flux (NOT MONochormatic anymore)
 
 @partial(jax.jit, static_argnums=(0,))
 def __AB_passband_luminosity_photonic(filter: Filter,
