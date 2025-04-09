@@ -69,6 +69,55 @@ def phi_to_lon(phi: float) -> float:
     return jnp.rad2deg(phi)  # Convert azimuth to longitude
 
 
+def velocity_to_period(velocity: float, radius: float) -> float:
+    """
+    Convert rotational velocity to rotation period.
+    
+    Args:
+        velocity (float): Rotational velocity at the equator in km/s.
+        radius (float): Radius of the star in solar radii.
+    
+    Returns:
+        float: Rotation period in seconds.
+    """
+    radius_km = radius * 6.957e5  # Convert solar radii to km
+    circumference = 2 * jnp.pi * radius_km  # Circumference in km
+    period_seconds = circumference / velocity  # Period in seconds
+    return period_seconds
+
+
+def period_to_velocity(period: float, radius: float) -> float:
+    """
+    Convert rotation period to rotational velocity.
+    
+    Args:
+        period (float): Rotation period in seconds.
+        radius (float): Radius of the star in solar radii.
+    
+    Returns:
+        float: Rotational velocity in km/s.
+    """
+    radius_km = radius * 6.957e5  # Convert solar radii to km
+    circumference = 2 * jnp.pi * radius_km  # Circumference in km
+    velocity = circumference / period  # Velocity in km/s
+    return velocity
+
+
+def inclination_to_los_axis(inclination: float) -> Float[Array, "3"]:
+    """
+    Convert inclination to tilt angle.
+    
+    Args:
+        inclination (float): Inclination angle in degrees (0 to 90)
+    
+    Returns:
+        float: LOS axis
+    """
+    incl_rad = jnp.deg2rad(inclination)
+    return jnp.array([0., jnp.sin(incl_rad), -jnp.cos(incl_rad)])
+
+
+
 @jax.jit
 def mesh_polar_vertices(vertices: Float[Array, "n_vertices 3"]) -> Float[Array, "n_vertices 2"]:
     return (jax.vmap(vertex_to_polar, in_axes=0)(vertices))
