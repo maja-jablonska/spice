@@ -218,7 +218,7 @@ def add_rotation(mesh: MeshModel,
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     rotation_velocity_km_s = mesh.rotation_velocity
-    theta = (rotation_velocity_km_s * t) / mesh.radius / 695700.0
+    theta = (rotation_velocity_km_s * t) / 695700.0
     
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
     
@@ -354,6 +354,9 @@ def _add_pulsations(m: MeshModel,
 
     def update_pulsation(carry, inputs):
         m, harmonic_ind, period, fourier_params, pulsation_axes, pulsation_angles = carry, *inputs
+        
+        # Use the total_pad_len parameter that was passed to the function
+        # This avoids dynamic computation inside the jitted function
         padded_fourier_params = jnp.pad(fourier_params.reshape(
             (-1, 2)), ((0, total_pad_len), (0, 0)))
 
@@ -410,14 +413,17 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degre
         raise ValueError("Input arrays must have consistent lengths.")
 
     if pulsation_axes is None:
-        pulsation_axes = mesh.rotation_axis.reshape(
+        pulsation_axes = m.rotation_axis.reshape(
             (1, 3)).repeat(len(m_orders), axis=0)
     if pulsation_angles is None:
         pulsation_angles = jnp.zeros_like(m_orders)
 
     harmonic_indices = m_orders + m.max_pulsation_mode * n_degrees
+    
+    # Fix inconsistency: fourier_series_parameters shape is (n_pulsations, n_terms, 2)
+    # We need the second dimension (n_terms) for padding calculation
     total_pad_len = int(m.max_fourier_order -
-                        fourier_series_parameters.shape[0]+1)
+                        fourier_series_parameters.shape[1] + 1)
 
     return _add_pulsations(m, periods,
                            fourier_series_parameters, harmonic_indices, total_pad_len,
@@ -501,7 +507,7 @@ def evaluate_pulsations(m: MeshModel, t: float):
 
     Args:
         m (MeshModel): The mesh model to evaluate pulsations for.
-        t (float): The time at which to evaluate the pulsations.
+        t (float): The time at which to evaluate the pulsations, in days.
 
     Returns:
         MeshModel: The mesh model updated with pulsation effects.
@@ -541,5 +547,5 @@ def evaluate_pulsations(m: MeshModel, t: float):
         center_pulsation_offsets=jnp.sum(center_offsets, axis=0),
         area_pulsation_offsets=jnp.sum(area_offsets, axis=0),
         pulsation_velocities=jnp.sum(
-            pulsation_velocities, axis=0) * 695700.0  # solRad to km/s
+            pulsation_velocities, axis=0) * 695700.0 / 86400.0  # solRad/day to km/s
     )
