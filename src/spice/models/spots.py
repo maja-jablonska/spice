@@ -203,7 +203,7 @@ def add_spot(mesh: MeshModel,
         mesh (MeshModel): The mesh model to which the spot will be added. Must not be a PHOEBE model, as they are read-only.
         spot_center_theta (float): The theta (inclination) coordinate of the spot's center, in radians.
         spot_center_phi (float): The phi (azimuthal) coordinate of the spot's center, in radians.
-        spot_radius (float): The angular radius of the spot, in radians.
+        spot_radius (float): The angular radius of the spot, in degrees.
         parameter_delta (float): The difference in the parameter value to be applied within the spot.
         parameter_index (int): The index of the parameter in the mesh model that will be modified by the spot.
         smoothness (float, optional): A parameter controlling the smoothness of the spot's edge. Higher values result in smoother transitions. Defaults to 0.0.
@@ -239,7 +239,7 @@ def add_spots(mesh: MeshModel,
         mesh (MeshModel): The mesh model to which the spots will be added. Must not be a PHOEBE model, as they are read-only.
         spot_center_thetas (Float[Array, "n_spots"]): An array of theta (inclination) coordinates of the spots' centers, in radians.
         spot_center_phis (Float[Array, "n_spots"]): An array of phi (azimuthal) coordinates of the spots' centers, in radians. 
-        spot_radii (Float[Array, "n_spots"]): An array of angular radii of the spots, in radians.
+        spot_radii (Float[Array, "n_spots"]): An array of angular radii of the spots, in degrees.
         parameter_deltas (Float[Array, "n_spots"]): An array of differences in the parameter values to be applied within the spots.
         parameter_indices (Int[Array, "n_spots"]): An array of indices of the parameters in the mesh model that will be modified by the spots.
         smoothness (Float[Array, "n_spots"], optional): An array of factors controlling the smoothness of the spots' edges. Higher values result in smoother transitions. Defaults to None.
