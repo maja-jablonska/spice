@@ -547,5 +547,5 @@ def evaluate_pulsations(m: MeshModel, t: float):
         center_pulsation_offsets=jnp.sum(center_offsets, axis=0),
         area_pulsation_offsets=jnp.sum(area_offsets, axis=0),
         pulsation_velocities=jnp.sum(
-            pulsation_velocities, axis=0) * 695700.0 / 86400.0  # solRad/day to km/s
+            pulsation_velocities, axis=0) * 695700.0  # solRad/s to km/s
     )
