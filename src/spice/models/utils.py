@@ -137,7 +137,10 @@ def spherical_harmonic(m, n, coordinates):
 @jax.jit
 def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0., 1.]), tilt_angle=0.):
     # Normalize tilt axis
-    tilt_axis = tilt_axis / jnp.linalg.norm(tilt_axis)
+    norm = jnp.linalg.norm(tilt_axis)
+    # Add epsilon to prevent division by zero
+    norm = jnp.where(norm > 1e-10, norm, 1e-10)
+    tilt_axis = tilt_axis / norm
     
     r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
     rotated_coords = jnp.matmul(coordinates, r_matrix)
@@ -145,36 +148,70 @@ def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0.,
     return spherical_harmonic(m, n, rotated_coords)
 
 
-def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> Float[Array, "1 n_orders"]:
+@jax.jit
+def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> float:
     """
+    Evaluate a Fourier series for a specific timestamp.
+    
     Args:
-        d0 (float): amplitude D_0
-        P (float): period P
-        d (Float[Array, "1 n_orders"]): amplitudes [1, n]
-        phi (Float[Array, "1 n_orders"]): phases [1, n]
-        timestamp (float): timestamps
-
+        P (float): period P in seconds
+        d (Float[Array, "1 n_orders"]): amplitudes for each order
+        phi (Float[Array, "1 n_orders"]): phases for each order
+        timestamp (float): time at which to evaluate the series
+        
     Returns:
-        ArrayLike: values
+        float: The computed Fourier series value
     """
-    n = jnp.arange(1, d.shape[0] + 1)
-    return jnp.nan_to_num(jnp.sum(d * jnp.cos(2 * jnp.pi * n / P * timestamp - phi)))
+    # Make sure we don't have NaN values in the input
+    d = jnp.nan_to_num(d)
+    phi = jnp.nan_to_num(phi)
+    
+    def compute_fourier(P, d, phi, timestamp):
+        n = jnp.arange(1, d.shape[0] + 1)
+        return jnp.sum(d * jnp.cos(2 * jnp.pi * n / P * timestamp - phi))
+    
+    def return_zero():
+        return 0.0
+    
+    # Skip computation if period is NaN or 0
+    return jax.lax.cond(
+        jnp.isnan(P) | (P == 0),
+        return_zero,
+        lambda: compute_fourier(P, d, phi, timestamp)
+    )
 
 
-def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> Float[Array, "1 n_orders"]:
+@jax.jit
+def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> float:
     """
+    Evaluate the derivative of a Fourier series for a specific timestamp.
+    
     Args:
-        d0 (float): amplitude D_0
-        P (float): period P
-        d (Float[Array, "1 n_orders"]): amplitudes [1, n]
-        phi (Float[Array, "1 n_orders"]): phases [1, n]
-        timestamp (float): timestamps
-
+        P (float): period P in seconds
+        d (Float[Array, "1 n_orders"]): amplitudes for each order
+        phi (Float[Array, "1 n_orders"]): phases for each order
+        timestamp (float): time at which to evaluate the derivative
+        
     Returns:
-        ArrayLike: values
+        float: The computed derivative value
     """
-    n = jnp.arange(1, d.shape[0] + 1)
-    return jnp.nan_to_num(jnp.sum(-2 * jnp.pi * d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi)))
+    # Make sure we don't have NaN values in the input
+    d = jnp.nan_to_num(d)
+    phi = jnp.nan_to_num(phi)
+    
+    def compute_fourier_prim(P, d, phi, timestamp):
+        n = jnp.arange(1, d.shape[0] + 1)
+        return -2 * jnp.pi * jnp.sum(d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
+    
+    def return_zero():
+        return 0.0
+    
+    # Skip computation if period is NaN or 0
+    return jax.lax.cond(
+        jnp.isnan(P) | (P == 0),
+        return_zero,
+        lambda: compute_fourier_prim(P, d, phi, timestamp)
+    )
 
 
 evaluate_many_fouriers_for_value = jax.jit(jax.vmap(evaluate_fourier_for_value, in_axes=(0, 0, 0, None)))
