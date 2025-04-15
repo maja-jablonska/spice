@@ -349,7 +349,7 @@ def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n
     Returns:
         float: Total bolometric luminosity [erg/s]
     """
-    flux = simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size, wavelengths_chunk_size)
+    flux = jnp.nan_to_num(simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size, wavelengths_chunk_size))
     return trapezoid(y=flux[:, 0], x=wavelengths * 1e-8)
 
 
