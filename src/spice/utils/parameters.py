@@ -9,54 +9,74 @@ from ..models.mesh_model import MeshModel
 T = TypeVar('T')
 
 
+def modify_mesh_parameter_from_array(
+    mesh: MeshModel,
+    parameter_index: int,
+    values: ArrayLike
+) -> MeshModel:
+    """Modify mesh parameters from an array of values.
+    
+    This function modifies the parameters of a mesh model at a specific index
+    using directly provided values. It returns a new mesh with the updated parameters.
+    
+    Args:
+        mesh: The MeshModel instance to modify.
+        parameter_index: Index of the parameter to modify in the mesh's parameters array.
+        values: Array of values to assign to the parameter at the specified index.
+            Must match the shape of the first dimension of mesh.parameters.
+            
+    Returns:
+        Modified MeshModel with updated parameter values.
+        
+    Example:
+        >>> # Set all temperature values (assuming index 0) to a constant
+        >>> temperatures = jnp.ones(mesh.parameters.shape[0]) * 5000
+        >>> new_mesh = modify_mesh_parameter_from_array(
+        ...     mesh,
+        ...     parameter_index=0,
+        ...     values=temperatures
+        ... )
+    """
+    return _modify_mesh_parameter_impl(mesh, parameter_index, values)
+
+
 def modify_mesh_parameter(
     mesh: MeshModel,
     parameter_index: int,
-    distribution_fn: Callable[[MeshModel, Optional[ArrayLike]], ArrayLike],
-    weights: Optional[ArrayLike] = None,
-    bounds: Optional[tuple[float, float]] = None,
-    clip: bool = True
+    distribution_fn: Callable[[MeshModel, Any], ArrayLike],
+    *args
 ) -> MeshModel:
     """Modify mesh parameters according to a distribution function.
     
     This function applies a distribution function to modify parameters across a mesh,
-    optionally weighted by some mesh property (e.g. area, distance from center, etc.).
+    optionally using additional arguments (e.g. area, distance from center, etc.).
     The function returns a new mesh with modified parameters.
     
     Args:
         mesh: The MeshModel instance to modify.
         parameter_index: Index of the parameter to modify in the mesh's parameters array.
-        distribution_fn: Function that takes the parameter values and optional weights and returns modified values.
+        distribution_fn: Function that takes the parameter values and optional arguments and returns modified values.
             Should be compatible with JAX transformations.
-        weights: Optional weights to apply to the distribution, shape (n_elements,).
-            If provided, the distribution will be weighted by these values.
-        bounds: Optional tuple of (min_value, max_value) to constrain the parameters.
-            If None, no bounds are applied.
-        clip: If True and bounds are provided, clip values to the bounds.
-            If False and bounds are provided, raise ValueError if values are out of bounds.
+        *args: Optional positional arguments to pass to the distribution function.
             
     Returns:
         Modified MeshModel with updated parameter values.
         
     Example:
         >>> # Create a temperature distribution that falls off with radius
-        >>> def temp_distribution(temps, radii):
-        ...     return temps * jnp.exp(-radii / scale_height)
-        >>> # Get radii from mesh centers
-        >>> radii = jnp.linalg.norm(mesh.d_centers, axis=1)
+        >>> def temp_distribution(mesh, scale_height):
+        ...     radii = jnp.linalg.norm(mesh.d_centers, axis=1)
+        ...     return mesh.parameters[:, 0] * jnp.exp(-radii / scale_height)
         >>> # Modify temperature parameter (assuming index 0)
         >>> new_mesh = modify_mesh_parameter(
         ...     mesh,
         ...     parameter_index=0,
         ...     distribution_fn=temp_distribution,
-        ...     weights=radii
+        ...     0.1  # scale_height as positional argument
         ... )
     """
-    # Apply distribution function
-    if weights is not None:
-        modified_values = distribution_fn(mesh, *weights)
-    else:
-        modified_values = distribution_fn(mesh)
+    # Apply distribution function with args
+    modified_values = distribution_fn(mesh, *args)
 
     return _modify_mesh_parameter_impl(mesh, parameter_index, modified_values)
 
@@ -72,7 +92,6 @@ def _modify_mesh_parameter_impl(
     new_parameters = mesh.parameters.at[:, parameter_index].set(modified_values)
     
     return mesh._replace(parameters=new_parameters)
-
 
 @jax.jit
 def constant_luminosity_temperature(mp, original_radius, original_teff):
@@ -108,3 +127,4 @@ def constant_luminosity_temperature(mp, original_radius, original_teff):
     scaling_factor = (original_radius / current_radius) ** 0.5
     new_teff = original_teff * scaling_factor
     return new_teff
+
