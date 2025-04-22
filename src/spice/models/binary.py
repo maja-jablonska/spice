@@ -3,17 +3,19 @@ import jax.numpy as jnp
 from functools import partial
 import jax
 from jax.typing import ArrayLike
-from typing import List, NamedTuple, Optional, Tuple, Dict
+from typing import List, NamedTuple, Optional, Tuple, Dict, Union, Any
+import numpy as np
+from jaxtyping import Float, Array
+from collections import namedtuple
+from jax import tree_util
 
 from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
 from spice.models.phoebe_utils import Component, PhoebeConfig
-from .model import Model
-from .mesh_transform import transform, evaluate_body_orbit
+from spice.models.model import Model
+from spice.models.mesh_transform import transform, evaluate_body_orbit
 import astropy.units as u
-from .orbit_utils import get_orbit_jax
-from .mesh_view import get_grid_spans, resolve_occlusion, Grid
-from collections import namedtuple
-from jax import tree_util
+from spice.models.orbit_utils import get_orbit_jax
+from spice.models.mesh_view_kdtree import get_optimal_search_radius, resolve_occlusion
 
 
 YEAR_TO_SECONDS = u.year.to(u.s)
@@ -233,18 +235,46 @@ def _interpolate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
 
 
 
-@partial(jax.jit, static_argnums=(2,))
-def _evaluate_orbit(binary: Binary, time: ArrayLike, grid: Grid) -> Tuple[Model, Model]:
+@jax.jit
+def _evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: float) -> Tuple[Model, Model]:
+    """Evaluate the orbit at a specific time.
+
+    Args:
+        binary (Binary): Binary to evaluate
+        time (ArrayLike): Time at which to evaluate the orbit
+        search_radius_factor (float): Search radius factor for KD-tree occlusion detection
+
+    Returns:
+        Tuple[Model, Model]: Updated primary and secondary models at the specified time
+    """
     body1, body2 = _interpolate_orbit(binary, time)
 
-    return jax.lax.cond(jnp.mean(body1.los_z) > jnp.mean(body2.los_z),
-                        lambda: (body1, resolve_occlusion(body2, body1, grid)),
-                        lambda: (resolve_occlusion(body1, body2, grid), body2))
+    # Resolve occlusion using KD-trees
+    body1 = resolve_occlusion(body1, body2, search_radius_factor)
+    body2 = resolve_occlusion(body2, body1, search_radius_factor)
+    
+    return body1, body2
 
 
-@partial(jax.jit, static_argnums=(2,))
-def v_evaluate_orbit(binary: Binary, times: ArrayLike, grid: Grid) -> Tuple[Model, Model]:
-    result_body1, result_body2 = jax.vmap(_evaluate_orbit, in_axes=(None, 0, None))(binary, times, grid)
+@jax.jit
+def v_evaluate_orbit(binary: Binary, times: ArrayLike, search_radius_factor: float) -> Tuple[List[Model], List[Model]]:
+    """Evaluate the orbit at multiple times.
+
+    Args:
+        binary (Binary): Binary to evaluate
+        times (ArrayLike): Times at which to evaluate the orbit
+        search_radius_factor (float): Search radius factor for KD-tree occlusion detection
+
+    Returns:
+        Tuple[List[Model], List[Model]]: Lists of updated primary and secondary models at the specified times,
+            where each element corresponds to a model at a specific time
+    """
+    # Map the evaluation function over each time point
+    result_body1, result_body2 = jax.lax.map(
+        lambda t: _evaluate_orbit(binary, t, search_radius_factor),
+        times
+    )
+    
     return jax.tree.transpose(
         outer_treedef=jax.tree.structure(binary.body1),
         inner_treedef=jax.tree.structure([0 for t in times]),
@@ -256,97 +286,73 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, grid: Grid) -> Tuple[Mode
     )
 
 
-def get_optimal_grid_size(m1, m2, min_cells=5, max_cells=30):
-    """
-    Calculate optimal grid size based on mesh cast areas and grid cell sizes.
-    
-    The function finds a grid size where the grid cell area is smaller than the 
-    average cast area of mesh faces, but not so small that it creates unnecessary 
-    computational overhead.
+def get_optimal_kdtree_params(m1, m2, min_radius_factor=1.5, max_radius_factor=5.0):
+    """Determine optimal parameters for KD-tree based occlusion detection.
     
     Args:
         m1 (MeshModel): First mesh model
-        m2 (MeshModel): Second mesh model 
-        min_cells (int): Minimum number of grid cells to try
-        max_cells (int): Maximum number of grid cells to try
+        m2 (MeshModel): Second mesh model
+        min_radius_factor (float): Minimum radius factor to consider
+        max_radius_factor (float): Maximum radius factor to consider
         
     Returns:
-        int: Optimal number of grid cells
+        float: Optimal search radius factor for KD-tree based occlusion detection
     """
-    # Get visible faces only
-    mus1 = m1.mus > 0
-    mus2 = m2.mus > 0
+    # Get visible areas of both meshes
+    m1_visible_areas = m1.cast_areas[m1.mus > 0]
+    m2_visible_areas = m2.cast_areas[m2.mus > 0]
     
-    # Calculate target area as 1.5x max of visible cast areas
-    # This provides some margin to ensure grid cells are appropriately sized
-    target_area = 1.5 * jnp.maximum(
-        jnp.max(m1.cast_areas[mus1]),
-        jnp.max(m2.cast_areas[mus2])
-    )
+    # Default to 2.0 if no visible areas
+    if m1_visible_areas.shape[0] == 0 or m2_visible_areas.shape[0] == 0:
+        return 2.0
     
-    # Calculate grid spans for range of cell counts
-    n_cells_array = jnp.arange(min_cells, max_cells)
-    spans = get_grid_spans(m1, m2, n_cells_array)
+    radius_factor = get_optimal_search_radius(m1, m2, min_radius_factor, max_radius_factor)
     
-    cell_areas = spans**2
-    valid_sizes = jnp.where(cell_areas >= target_area)[0]
-    
-    # Return first valid size, or max_cells if none found
-    if valid_sizes.size > 0:
-        return n_cells_array[valid_sizes[-1]].item()
-    return min_cells
+    print("Optimal KD-tree search radius factor:", radius_factor)
+    return radius_factor
 
 
-def evaluate_orbit(binary: Binary, time: ArrayLike, n_cells: Optional[int] = None) -> Tuple[Model, Model]:
+def evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: Optional[float] = None) -> Tuple[Model, Model]:
     """
     Evaluates the orbit of binary components at a specific time.
 
-    This function determines the positions and velocities of the binary components at a given time. If the binary
-    is a PhoebeBinary, it constructs the models for the primary and secondary components based on the PhoebeConfig
-    and the specified time. Otherwise, it calculates the orbit by interpolating positions and velocities for the
-    given time and resolving any occlusions between the components.
+    This function computes the positions and velocities of the binary components at the specified time.
+    It then resolves occlusions between the components using KD-tree based spatial search.
 
     Args:
         binary (Binary): The binary system to evaluate. Can be a general Binary or a PhoebeBinary.
-        time (ArrayLike): The time at which to evaluate the orbit. Can be a single value or an array of values.
-        n_cells (int, optional): The number of cells to use for occlusion grid construction. The grid makes the computation faster. Defaults to 20.
+        time (ArrayLike): The specific time at which to evaluate the orbit. This should be a scalar value
+            representing a point in time where the positions and velocities of the binary components are desired.
+        search_radius_factor (float, optional): The search radius factor to use for KD-tree based occlusion detection.
+            This parameter controls how far to search for potential occluders around each triangle.
+            Defaults to an optimal value determined based on the mesh properties.
 
     Returns:
-        Tuple[Model, Model]: A tuple containing the evaluated models for the primary and secondary components of the binary.
+        Tuple[Model, Model]: A tuple containing the updated models for the primary and secondary components of
+            the binary at the specified time. Each model provides the positions and velocities of the
+            corresponding binary component at the specified time, with occlusions resolved.
 
     Note:
-        If `binary` is an instance of PhoebeBinary, the function directly uses the PhoebeConfig to construct the models
-        without further orbit evaluation. For general Binary instances, it constructs an occlusion grid and evaluates
-        the orbit using interpolation and occlusion resolution.
+        This function is optimized for performance by using JAX's just-in-time (`jit`) compilation feature,
+        enabling efficient computation of the orbit evaluation.
     """
     if isinstance(binary, PhoebeBinary):
-        return (PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY),
-                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY))
+        return PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY), \
+               PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY)
     else:
-        optimal_size = get_optimal_grid_size(binary.body1, binary.body2)
-        if n_cells is None:
-            n_cells = int(optimal_size)
-        else:
-            span_size = get_grid_spans(binary.body1, binary.body2, jnp.array([n_cells]))
-            if span_size < 1.5 * jnp.maximum(
-                jnp.max(binary.body1.cast_areas[binary.body1.mus>0]),
-                jnp.max(binary.body2.cast_areas[binary.body2.mus>0])
-            ):
-                warnings.warn(f"Grid size {n_cells} is too small for the given cast areas. Optimal size is {optimal_size}.")
-            
-        if len(binary.evaluated_times) == 0:
-            raise ValueError(
-                "Binary object does not have orbit information. Please add orbit information using add_orbit.")
-        grid = Grid.construct(binary.body1, binary.body2, n_cells)
-        return _evaluate_orbit(binary, time, grid)
+        if search_radius_factor is None:
+            search_radius_factor = get_optimal_search_radius(binary.body1, binary.body2)
+            print("Using search radius factor:", search_radius_factor)
+        
+        return _evaluate_orbit(binary, time, search_radius_factor)
 
 
-def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: Optional[int] = None) -> Tuple[Model, Model]:
+def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, search_radius_factor: Optional[float] = None) -> Tuple[Model, Model]:
     """
     Evaluates the orbit of binary components at multiple specific times.
 
     This function leverages vectorized computation to evaluate the positions and velocities of the binary components
-    at an array of given times. It constructs a grid for occlusion detection and resolution, then iteratively evaluates
+    at an array of given times. It uses KD-tree based spatial search for occlusion detection and resolution, then iteratively evaluates
     the orbit for each time point specified in the `times` array. This is particularly useful for simulations or
     animations where the orbit needs to be computed at several discrete time points.
 
@@ -354,8 +360,9 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: Optional[
         binary (Binary): The binary system to evaluate. Can be a general Binary or a PhoebeBinary.
         times (ArrayLike): An array of times at which to evaluate the orbit. Each time should correspond to a specific
             point in the orbit where the positions and velocities of the binary components are desired.
-        n_cells (int, optional): The number of cells to use for the occlusion grid construction. This grid is used to
-            detect and resolve occlusions between the binary components. Defaults to an optimal size.
+        search_radius_factor (float, optional): The search radius factor to use for KD-tree based occlusion detection.
+            This parameter controls how far to search for potential occluders around each triangle.
+            Defaults to an optimal value determined based on the mesh properties.
 
     Returns:
         Tuple[Model, Model]: A tuple containing arrays of evaluated models for the primary and secondary components of
@@ -371,17 +378,8 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, n_cells: Optional[
         return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
                [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
     else:
-        optimal_size = get_optimal_grid_size(binary.body1, binary.body2)
-        print("Optimal grid size: ", optimal_size)
-        if n_cells is None:
-            n_cells = int(optimal_size)
-        else:
-            print("n_cells: ", n_cells)
-            span_size = get_grid_spans(binary.body1, binary.body2, jnp.array([n_cells]))
-            if span_size < 1.5 * jnp.maximum(
-                jnp.max(binary.body1.cast_areas[binary.body1.mus>0]),
-                jnp.max(binary.body2.cast_areas[binary.body2.mus>0])
-            ):
-                warnings.warn(f"Grid size {n_cells} is too small for the given cast areas. Optimal size is {optimal_size}.")
-        grid = Grid.construct(binary.body1, binary.body2, n_cells)
-    return v_evaluate_orbit(binary, times, grid)
+        if search_radius_factor is None:
+            search_radius_factor = get_optimal_search_radius(binary.body1, binary.body2)
+            print("Using search radius factor for KD-tree:", search_radius_factor)
+        
+        return v_evaluate_orbit(binary, times, search_radius_factor)
