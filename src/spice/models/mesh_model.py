@@ -191,7 +191,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     
     @property
     def visible_cast_areas(self) -> Float[Array, "n_mesh_elements"]:
-        return jnp.where(self.mus > 0, self.cast_areas - self.occluded_areas, 0.)
+        return jnp.where(self.mus > 0, self.cast_areas - jnp.nan_to_num(self.occluded_areas, 0.), 0.)
 
 
 class IcosphereModel(MeshModel):
