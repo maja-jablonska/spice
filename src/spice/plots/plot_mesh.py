@@ -8,13 +8,14 @@ from jax.typing import ArrayLike
 import cmasher as cmr
 
 PLOT_MODES = ['MESH', 'POINTS']
-COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas', 'log_gs']
+COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas', 'visible_cast_areas', 'log_gs']
 DEFAULT_PROPERTY = 'mus'
 
 DEFAULT_PLOT_PROPERTY_LABELS = {
     'mus': r'$\mu$',
     'los_velocities': 'LOS velocity [km/s]',
-    'cast_areas': 'cast area [km$^2$]',
+    'cast_areas': 'cast area [cm$^2$]',
+    'visible_cast_areas': 'visible cast area [cm$^2$]',
     'log_gs': 'log g'
 }
 
@@ -183,7 +184,7 @@ def plot_3D_binary(mesh1: MeshModel,
     if draw_los_vector or draw_rotation_axes:
         plot_ax.legend()
 
-    norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), vmax=to_be_mapped.max())
+    norm = mpl.colors.Normalize(vmin=np.nanmin(to_be_mapped), vmax=np.nanmax(to_be_mapped))
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
     if mode == 'MESH':
