@@ -16,6 +16,30 @@ JY_TO_ERG = 1e-23
 H_CONST_ERG_S = 6.62607015*10**(-27)
 
 
+def scale_all_abundances_by_metallicity(tpayne, metallicity):
+    """
+    Scale all abundance parameters by the given metallicity value.
+    
+    Args:
+        tpayne: TransformerPayne instance
+        parameters: Current parameters array
+        metallicity: [Fe/H] value to scale abundances by
+        
+    Returns:
+        Updated parameters array with all abundances scaled
+    """
+    # Get indices of abundance parameters
+    abundance_indices = [i for i, is_abundance in 
+                         enumerate(tpayne.model_definition.abundance_parameters[:-1])
+                         if is_abundance]
+    
+    # Get the corresponding parameter names
+    abundance_elements = [tpayne.stellar_parameter_names[i] for i in abundance_indices]
+    
+    # Use the existing method to set all abundance parameters
+    return tpayne.set_group_of_abundances_relative_to_solar(tpayne.solar_parameters, metallicity, abundance_elements)
+
+
 @jax.jit
 def wavelengths_to_frequencies(wavelengths: ArrayLike) -> ArrayLike:
     return C_CENTIMETERS*1e8/wavelengths
