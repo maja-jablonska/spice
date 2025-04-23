@@ -255,7 +255,6 @@ def _evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: float
     
     return body1, body2
 
-
 @jax.jit
 def v_evaluate_orbit(binary: Binary, times: ArrayLike, search_radius_factor: float) -> Tuple[List[Model], List[Model]]:
     """Evaluate the orbit at multiple times.
@@ -282,14 +281,15 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, search_radius_factor: flo
     body2_list = jax.tree_util.tree_map(lambda x: list(x), result_body2)
     
     # Transpose the tree structure to get a list of models
+    # The API changed in newer JAX versions - tree_transpose now takes trees as positional args
     return jax.tree_util.tree_transpose(
         outer_treedef=jax.tree_util.tree_structure(binary.body1),
-        inner_treedef=jax.tree_util.tree_structure([0 for _ in times]),
-        pytree=body1_list
+        inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
+        pytree_to_transpose=body1_list
     ), jax.tree_util.tree_transpose(
         outer_treedef=jax.tree_util.tree_structure(binary.body2),
-        inner_treedef=jax.tree_util.tree_structure([0 for _ in times]),
-        pytree=body2_list
+        inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
+        pytree_to_transpose=body2_list
     )
 
 
