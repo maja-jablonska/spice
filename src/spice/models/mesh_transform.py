@@ -506,7 +506,51 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude
         new_centers - m.d_centers), jnp.nan_to_num(radius * magnitude_prim * center_harmonic_mags * center_direction_vectors)
 
 
-def evaluate_pulsations(m: MeshModel, t: float):
+def calculate_numerical_pulsation_velocity(m: MeshModel, t: float, dt: float = 1e-6):
+    """
+    Calculates pulsation velocity using numerical differentiation.
+    
+    This function approximates the derivative of the pulsation displacement with respect to time
+    using a forward difference method: [r(t+dt) - r(t)]/dt
+    
+    Args:
+        m (MeshModel): The mesh model to calculate pulsation velocities for
+        t (float): The current time in days
+        dt (float, optional): The time step for numerical differentiation in days. Defaults to 1e-6.
+        
+    Returns:
+        tuple: (pulsation_magnitudes, pulsation_velocity_magnitudes) where pulsation_velocity_magnitudes
+               are calculated numerically
+    """
+    # Apply nan_to_num to inputs to prevent NaN propagation
+    t = jnp.nan_to_num(t)
+    
+    # Safe extraction of Fourier parameters
+    fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
+    
+    # Calculate pulsation magnitudes at time t
+    pulsation_magnitudes_t = evaluate_many_fouriers_for_value(
+        jnp.nan_to_num(m.pulsation_periods),
+        fourier_params[:, :, 0],
+        fourier_params[:, :, 1],
+        t
+    )
+    
+    # Calculate pulsation magnitudes at time t+dt
+    pulsation_magnitudes_t_plus_dt = evaluate_many_fouriers_for_value(
+        jnp.nan_to_num(m.pulsation_periods),
+        fourier_params[:, :, 0],
+        fourier_params[:, :, 1],
+        t + dt
+    )
+    
+    # Calculate numerical derivative
+    pulsation_velocity_magnitudes = (pulsation_magnitudes_t_plus_dt - pulsation_magnitudes_t) / dt
+    
+    return pulsation_magnitudes_t, pulsation_velocity_magnitudes
+
+
+def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool = False, dt: float = 1e-6):
     """
     Evaluates and updates the mesh model with pulsation effects at a specific time.
 
@@ -514,13 +558,17 @@ def evaluate_pulsations(m: MeshModel, t: float):
     Fourier series parameters for both static and dynamic components of the pulsation. It first checks if the
     mesh model is an instance of PhoebeModel, raising a ValueError if so, to enforce the read-only status of
     these models within the SPICE framework. The function then computes the pulsation magnitudes and velocities
-    using Fourier series evaluations. These values are used along with spherical harmonics parameters to
-    calculate offsets for vertices, areas, and centers of the mesh model, simulating the pulsation effects.
-    Finally, the mesh model is updated with these calculated offsets and velocities.
+    using either analytical or numerical derivatives of Fourier series evaluations. These values are used 
+    along with spherical harmonics parameters to calculate offsets for vertices, areas, and centers of the mesh model, 
+    simulating the pulsation effects. Finally, the mesh model is updated with these calculated offsets and velocities.
 
     Args:
         m (MeshModel): The mesh model to evaluate pulsations for.
         t (float): The time at which to evaluate the pulsations, in days.
+        use_numerical_derivative (bool, optional): Whether to use numerical differentiation for velocity calculation.
+            Defaults to False (use analytical derivative).
+        dt (float, optional): Time step for numerical differentiation when use_numerical_derivative is True.
+            Defaults to 1e-6 days.
 
     Returns:
         MeshModel: The mesh model updated with pulsation effects.
@@ -531,27 +579,33 @@ def evaluate_pulsations(m: MeshModel, t: float):
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
-    # Apply nan_to_num to inputs to prevent NaN propagation
-    t = jnp.nan_to_num(t)
-    
-    # Safe extraction of Fourier parameters
-    fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
-    
-    # Safely compute pulsation magnitudes
-    pulsation_magnitudes = evaluate_many_fouriers_for_value(
-        jnp.nan_to_num(m.pulsation_periods),
-        fourier_params[:, :, 0],
-        fourier_params[:, :, 1],
-        t
-    )
-    
-    # Safely compute pulsation velocity magnitudes
-    pulsation_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
-        jnp.nan_to_num(m.pulsation_periods),
-        fourier_params[:, :, 0],
-        fourier_params[:, :, 1],
-        t
-    )
+    # Calculate pulsation magnitudes and velocities
+    if use_numerical_derivative:
+        # Use numerical differentiation
+        pulsation_magnitudes, pulsation_velocity_magnitudes = calculate_numerical_pulsation_velocity(m, t, dt)
+    else:
+        # Use analytical differentiation (original method)
+        # Apply nan_to_num to inputs to prevent NaN propagation
+        t = jnp.nan_to_num(t)
+        
+        # Safe extraction of Fourier parameters
+        fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
+        
+        # Safely compute pulsation magnitudes
+        pulsation_magnitudes = evaluate_many_fouriers_for_value(
+            jnp.nan_to_num(m.pulsation_periods),
+            fourier_params[:, :, 0],
+            fourier_params[:, :, 1],
+            t
+        )
+        
+        # Safely compute pulsation velocity magnitudes
+        pulsation_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
+            jnp.nan_to_num(m.pulsation_periods),
+            fourier_params[:, :, 0],
+            fourier_params[:, :, 1],
+            t
+        )
     
     # Create harmonic parameters
     harmonic_params = create_harmonics_params(m.max_pulsation_mode)
@@ -571,6 +625,6 @@ def evaluate_pulsations(m: MeshModel, t: float):
         center_pulsation_offsets=jnp.nan_to_num(jnp.sum(center_offsets, axis=0)),
         area_pulsation_offsets=jnp.nan_to_num(jnp.sum(area_offsets, axis=0)),
         pulsation_velocities=jnp.nan_to_num(
-            jnp.sum(pulsation_velocities, axis=0) * 695700.0  # solRad/day to km/s
+            jnp.sum(pulsation_velocities, axis=0) * 8.052083333333332  # solRad/day to km/s
         )
     )
