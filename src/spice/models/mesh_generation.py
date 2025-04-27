@@ -1,10 +1,13 @@
 import warnings
-from typing import Tuple
+from typing import Tuple, Any
 import pkgutil
 import pickle
-from jax.typing import ArrayLike
+import numpy as np
 import jax.numpy as jnp
 import jax
+
+# Define ArrayLike type alias since jax.typing.ArrayLike is causing issues
+ArrayLike = Any
 
 # https://sinestesia.co/blog/tutorials/python-icospheres/
 
