@@ -372,7 +372,10 @@ def plot_3D_sequence(meshes: List[MeshModel],
                      property_label: Optional[str] = None,
                      timestamp_label: Optional[str] = None,
                      figsize: Tuple[int, int] = (12, 10),
-                     mode: str = 'MESH'):
+                     mode: str = 'MESH',
+                     draw_los_vector: bool = True,
+                     draw_rotation_axes: bool = True,
+                     tight_layout: bool = True):
     """
     Create a visualization of a sequence of mesh models in a grid layout.
     
@@ -396,6 +399,12 @@ def plot_3D_sequence(meshes: List[MeshModel],
         Figure size if creating a new figure
     mode : str, default: 'MESH'
         Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+    draw_los_vector : bool, default: True
+        Whether to draw the line-of-sight vector
+    draw_rotation_axes : bool, default: True
+        Whether to draw the rotation axes of both stars
+    tight_layout : bool, default: True
+        Whether to call plt.tight_layout()
         
     Returns
     -------
@@ -439,9 +448,15 @@ def plot_3D_sequence(meshes: List[MeshModel],
         plot_axes = [fig.add_subplot(gs[10*(i // cols):10*((i // cols)+1), i % cols], projection='3d') 
                      for i in range(num_plots)]
 
-        # Add the colorbar in the last column
+        # Add the colorbar in the last column with more space to the right
         cax_limit = max(rows, 5)
+        # Add a small horizontal padding to move the colorbar more to the right
+        gs_right = cols + 0.2  # Add padding to position
         cbar_ax = fig.add_subplot(gs[cax_limit:-cax_limit, -1])
+        cbar_ax.set_position([cbar_ax.get_position().x0 + 0.02, 
+                             cbar_ax.get_position().y0,
+                             cbar_ax.get_position().width,
+                             cbar_ax.get_position().height])
     else:
         try:
             fig, plot_axes, cbar_ax = axes
@@ -468,10 +483,12 @@ def plot_3D_sequence(meshes: List[MeshModel],
         normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
         normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
 
-        plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
-                    color='red', linewidth=3., label='LOS vector')
-        plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
-                    color='black', linewidth=3., label='Rotation axis')
+        if draw_los_vector:
+            plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+                        color='red', linewidth=3., label='LOS vector')
+        if draw_rotation_axes:
+            plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                        color='black', linewidth=3., label='Rotation axis')
 
         # Visualize according to mode
         if mode == 'MESH':
@@ -479,22 +496,25 @@ def plot_3D_sequence(meshes: List[MeshModel],
             face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
             p = art3d.Poly3DCollection(vs2, facecolors=face_colors, edgecolor="black", linewidth=0.1)
             plot_ax.add_collection(p)
-            
-            # Add timestamp if available
-            if timestamps is not None:
-                plot_ax.set_title(f"Time: {timestamps[i]:.2f} {timestamp_label}", pad=1.0)
         else:  # mode == 'POINTS'
             p = plot_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
                                 c=to_be_mapped, cmap=cmap, norm=norm)
             
+        # Add timestamp if available
+        if timestamps is not None:
+            plot_ax.set_title(f"Time: {timestamps[i]:.2f} {timestamp_label}", pad=1.0)
+            
     # Add legend to the last subplot
-    plot_axes[int(cols-1)].legend(loc="upper left", bbox_to_anchor=(1.05, 1.05))
+    if draw_los_vector or draw_rotation_axes:
+        plot_axes[int(cols-1)].legend(loc="upper left", bbox_to_anchor=(1.05, 1.05))
     
     # Set up colorbar
     mappable.set_array([])
     cbar = plt.colorbar(mappable, cax=cbar_ax)
     cbar.set_label(cbar_label, fontsize=12)
-    fig.tight_layout()
+    
+    if tight_layout:
+        plt.tight_layout()
 
     return fig, plot_axes, cbar_ax
 
@@ -842,4 +862,213 @@ def animate_single_star(meshes: List[MeshModel],
             # File doesn't exist, re-raise the error
             raise
     
+    return filename
+
+
+def animate_mesh_and_spectra(meshes, spectra, wavelengths, 
+                             property=DEFAULT_PROPERTY, 
+                             cmap=None, 
+                             property_label=None,
+                             filename='mesh_and_spectra_animation.mp4',
+                             figsize=(15, 5),
+                             mode='MESH',
+                             draw_los_vector=True,
+                             draw_rotation_axis=True,
+                             linewidth=0.1,
+                             axes_lim=None,
+                             timestamps=None,
+                             timestamp_label=None):
+    """
+    Create an animation showing both a 3D mesh model and its corresponding spectrum over time.
+    
+    Parameters
+    ----------
+    meshes : List[MeshModel]
+        List of mesh models to animate
+    spectra : ndarray
+        Array of spectra corresponding to each mesh, shape (n_frames, n_wavelengths)
+    wavelengths : ndarray
+        Wavelength array for the spectra
+    property : Union[str, int], default: DEFAULT_PROPERTY
+        Property to color the mesh by (attribute name or parameter index)
+    cmap : Optional[str], default: None
+        Matplotlib colormap name. If None, uses defaults based on property
+    property_label : Optional[str], default: None
+        Custom label for the colorbar. If None, uses default for the property
+    filename : str, default: 'mesh_and_spectra_animation.mp4'
+        Output filename for the animation
+    figsize : Tuple[int, int], default: (12, 8)
+        Figure size
+    mode : str, default: 'MESH'
+        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+    draw_los_vector : bool, default: True
+        Whether to draw the line-of-sight vector
+    draw_rotation_axis : bool, default: True
+        Whether to draw the rotation axis
+    linewidth : float, default: 0.1
+        Line width for mesh edges
+    axes_lim : Optional[float], default: None
+        Limit for all axes. If None, calculated from mesh radius
+    timestamps : Optional[ArrayLike], default: None
+        List of timestamps corresponding to each mesh
+    timestamp_label : Optional[str], default: None
+        Label to accompany timestamps (e.g., "hours", "days")
+        
+    Returns
+    -------
+    str
+        Path to the saved animation file
+    
+    Raises
+    ------
+    ValueError
+        If the mode is invalid or if spectra and meshes have different lengths
+    """
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of {PLOT_MODES}. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    if len(meshes) != len(spectra):
+        raise ValueError(f"Number of meshes ({len(meshes)}) must match number of spectra ({len(spectra)})")
+    
+    # Setup timestamp label
+    timestamp_label = timestamp_label or ''
+    
+    # Get property data for coloring the mesh
+    to_be_mapped_arrays = []
+    for mesh in meshes:
+        to_be_mapped, label = _evaluate_to_be_mapped_property(mesh, property, property_label)
+        to_be_mapped_arrays.append(to_be_mapped)
+    
+    cbar_label = label
+    to_be_mapped_arrays_concatenated = np.concatenate(to_be_mapped_arrays)
+    
+    # Set up the colormap
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
+    
+    # Determine axis limits
+    if axes_lim is None:
+        axes_lim = 1.5 * max([mesh.radius for mesh in meshes])
+    
+    # Create figure with two subplots: 3D mesh and spectrum
+    fig = plt.figure(figsize=figsize)
+    gs = plt.GridSpec(4, 2, width_ratios=[1, 2])
+
+    # 3D mesh subplot
+    mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
+    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+    mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+    mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    
+    # Spectrum subplot
+    spec_ax = fig.add_subplot(gs[1:3, 1])
+    spec_ax.set_xlabel('Wavelength', fontsize=10)
+    spec_ax.set_ylabel('Flux', fontsize=10)
+    
+    # Set up color normalization for the mesh
+    norm = mpl.colors.Normalize(vmin=to_be_mapped_arrays_concatenated.min(), 
+                               vmax=to_be_mapped_arrays_concatenated.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    
+    # Add colorbar for the mesh
+    cbar_ax = fig.add_axes([0.35, 0.15, 0.02, 0.7])  # [left, bottom, width, height] - positioned left to mesh_ax
+    cbar = plt.colorbar(mappable, cax=cbar_ax)
+    cbar.set_label(cbar_label, fontsize=12)
+    
+    # Find min/max for spectrum y-axis
+    spec_min = np.min(spectra)
+    spec_max = np.max(spectra)
+    spec_padding = 0.05 * (spec_max - spec_min)
+    spec_ax.set_ylim(spec_min - spec_padding, spec_max + spec_padding)
+    
+    # Initial spectrum line
+    spectrum_line, = spec_ax.plot(wavelengths, spectra[0], 'b-')
+    
+    # Animation update function
+    def update(frame):
+        mesh_ax.clear()
+        
+        # Reset axis properties
+        mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+        mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+        mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+        mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+        
+        # Get current mesh and property data
+        mesh = meshes[frame]
+        to_be_mapped = to_be_mapped_arrays[frame]
+        
+        # Draw los vector and rotation axis
+        if draw_los_vector:
+            normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+            mesh_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+                        color='red', linewidth=3., label='LOS vector')
+        
+        if draw_rotation_axis:
+            normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+            mesh_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                        color='black', linewidth=3., label='Rotation axis')
+        
+        # Visualize mesh according to mode
+        if mode == 'MESH':
+            vs2 = mesh.vertices[mesh.faces.astype(int)]
+            face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
+            mesh_collection = art3d.Poly3DCollection(vs2, facecolors=face_colors, 
+                                                   edgecolor="black", linewidths=linewidth)
+            mesh_ax.add_collection(mesh_collection)
+        else:  # mode == 'POINTS'
+            mesh_collection = mesh_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
+                                           c=to_be_mapped, cmap=cmap, norm=norm)
+        
+        # Update spectrum
+        spectrum_line.set_ydata(spectra[frame])
+        
+        # Add timestamp if available
+        if timestamps is not None:
+            title = f"Time: {timestamps[frame]:.2f} {timestamp_label}"
+            mesh_ax.set_title(title, pad=1.0)
+            spec_ax.set_title(title, pad=1.0)
+        
+        # Only show legend in the first frame
+        if frame == 0 and (draw_los_vector or draw_rotation_axis):
+            mesh_ax.legend(loc='upper right', fontsize=10)
+        
+        return [mesh_collection, spectrum_line]
+    
+    # Create and save animation
+    try:
+        anim = FuncAnimation(fig, update, frames=len(meshes), blit=False)
+        smart_save(anim, filename, fps=20)
+    except Exception as e:
+        import os
+        import time
+        import warnings
+        
+        # Check if the file exists and when it was created
+        if os.path.exists(filename):
+            # Check both creation and modification time to handle overwrites
+            file_creation_time = os.path.getctime(filename)
+            file_modification_time = os.path.getmtime(filename)
+            current_time = time.time()
+            # Use the most recent timestamp (creation or modification)
+            most_recent_time = max(file_creation_time, file_modification_time)
+            # If file was created or modified in the last 10 seconds, assume it's from this run
+            if current_time - most_recent_time < 10:
+                warnings.warn(f"Animation save warning: {str(e)}")
+            else:
+                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                # File exists but is older, re-raise the error
+                raise
+        else:
+            print(f'File {filename} does not exist, re-raising error')
+            # File doesn't exist, re-raise the error
+            raise
+    
+    plt.close(fig)
     return filename
