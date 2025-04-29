@@ -69,7 +69,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def los_velocities(self) -> ArrayLike:
-        return -1.*cast_to_los(self.velocities, self.los_vector)
+        return cast_to_los(self.velocities, self.los_vector)
 
     @property
     def los_z(self) -> ArrayLike:
