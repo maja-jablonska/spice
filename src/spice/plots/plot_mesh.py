@@ -756,9 +756,6 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
         mesh_collection = mesh_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
                                         c=to_be_mapped, cmap=cmap, norm=norm)
         
-        # Update spectrum
-        spectrum_line.set_ydata(spectra[frame])
-        
         # Add timestamp if available
     if timestamp is not None:
         title = f"Time: {timestamp:.2f} {timestamp_label}"
