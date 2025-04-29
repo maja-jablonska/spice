@@ -449,11 +449,33 @@ def resolve_occlusion(m1: MeshModel, m2: MeshModel, search_radius_factor: float 
     Returns:
         MeshModel: m1 with updated occluded_areas
     """
-    # Calculate occlusions for all faces in m1
-    face_indices = jnp.arange(len(m1.faces))
-    occlusions = jax.vmap(
-        lambda idx: resolve_occlusion_for_face(m1, m2, idx, search_radius_factor)
-    )(face_indices)
+    # Check if m1 is closer to the observer than m2
+    # We need to compare the los_z values of both meshes
+    # Only calculate occlusions if m1 is closer to the observer (smaller los_z)
+    
+    def calculate_occlusions():
+        # Calculate occlusions for all faces in m1
+        face_indices = jnp.arange(len(m1.faces))
+        occlusions = jax.vmap(
+            lambda idx: resolve_occlusion_for_face(m1, m2, idx, search_radius_factor)
+        )(face_indices)
+        return occlusions
+    
+    def no_occlusions():
+        # If m1 is behind m2, no occlusion occurs
+        return jnp.zeros_like(m1.cast_areas)
+    
+    # Compare los_z values - smaller values are closer to observer
+    # Use mean los_z for comparison as a simple heuristic
+    m1_los_z = jnp.mean(m1.los_z)
+    m2_los_z = jnp.mean(m2.los_z)
+    
+    # Only calculate occlusions if m1 is closer to the observer than m2
+    occlusions = jax.lax.cond(
+        m1_los_z < m2_los_z,
+        calculate_occlusions,
+        no_occlusions
+    )
     
     # Update occluded_areas
     return m1._replace(occluded_areas=occlusions)
