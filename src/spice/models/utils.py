@@ -259,7 +259,7 @@ def cast_to_los(vectors: Float[Array, "batch 3"], los_vector: Float[Array, "3"])
     Returns:
         ArrayLike: Casted vectors (n, 1)
     """
-    return jnp.dot(vectors, los_vector)
+    return -1. * jnp.dot(vectors, los_vector)
 
 
 @jax.jit
