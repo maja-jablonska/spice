@@ -607,47 +607,167 @@ def plot_2D(mesh: MeshModel,
     return fig, plot_ax, cbar_ax
 
 
-def plot_3D_mesh_and_spectrum(mesh: MeshModel,
-                              wavelengths: ArrayLike,
-                              spectrum: ArrayLike,
-                              mesh_plot_kwargs: Optional[Dict[str, Any]] = None):
+def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths, 
+                            property=DEFAULT_PROPERTY, 
+                            cmap=None, 
+                            property_label=None,
+                            figsize=(15, 5),
+                            mode='MESH',
+                            draw_los_vector=True,
+                            draw_rotation_axis=True,
+                            linewidth=0.1,
+                            axes_lim=None,
+                            timestamp=None,
+                            timestamp_label=None) -> Tuple[plt.figure, plt.axes, plt.axes]:
     """
-    Create a side-by-side visualization of a 3D mesh model and its spectrum.
+    Create an animation showing both a 3D mesh model and its corresponding spectrum over time.
     
     Parameters
     ----------
-    mesh : MeshModel
-        The mesh model to visualize
-    wavelengths : ArrayLike
-        Array of wavelength values
-    spectrum : ArrayLike
-        Array of spectrum intensity values
-    mesh_plot_kwargs : Optional[Dict[str, Any]], default: None
-        Additional keyword arguments to pass to plot_3D
+    meshes : List[MeshModel]
+        List of mesh models to animate
+    spectra : ndarray
+        Array of spectra corresponding to each mesh, shape (n_frames, n_wavelengths)
+    wavelengths : ndarray
+        Wavelength array for the spectra
+    property : Union[str, int], default: DEFAULT_PROPERTY
+        Property to color the mesh by (attribute name or parameter index)
+    cmap : Optional[str], default: None
+        Matplotlib colormap name. If None, uses defaults based on property
+    property_label : Optional[str], default: None
+        Custom label for the colorbar. If None, uses default for the property
+    filename : str, default: 'mesh_and_spectra_animation.mp4'
+        Output filename for the animation
+    figsize : Tuple[int, int], default: (12, 8)
+        Figure size
+    mode : str, default: 'MESH'
+        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+    draw_los_vector : bool, default: True
+        Whether to draw the line-of-sight vector
+    draw_rotation_axis : bool, default: True
+        Whether to draw the rotation axis
+    linewidth : float, default: 0.1
+        Line width for mesh edges
+    axes_lim : Optional[float], default: None
+        Limit for all axes. If None, calculated from mesh radius
+    timestamps : Optional[ArrayLike], default: None
+        List of timestamps corresponding to each mesh
+    timestamp_label : Optional[str], default: None
+        Label to accompany timestamps (e.g., "hours", "days")
         
     Returns
     -------
-    Tuple[Tuple[plt.figure, plt.axes], plt.axes]
-        Tuple containing (figure, mesh plot axes) and spectrum axes
+    fig : matplotlib.figure.Figure
+        The figure containing the mesh and spectrum plots
+    mesh_ax : matplotlib.axes.Axes
+        The axis containing the mesh plot
+    spec_ax : matplotlib.axes.Axes
+        The axis containing the spectrum plot
+    
+    Raises
+    ------
+    ValueError
+        If the mode is invalid or if spectra and meshes have different lengths
     """
-    # Prepare plot parameters
-    mesh_plot_kwargs = mesh_plot_kwargs or {}
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of {PLOT_MODES}. Got {mode.upper()}')
+    mode = mode.upper()
     
-    # Create the figure and axes
-    fig = plt.figure(figsize=(24, 10))
-    spec = fig.add_gridspec(10, 24)
-    plot_ax = fig.add_subplot(spec[:, :10], projection='3d')
-
-    # Create spectrum axes
-    spectrum_ax = fig.add_subplot(spec[3:7, 11:-1])
-    spectrum_ax.set_xlabel('wavelength [$\\AA$]', fontsize=13)
-    spectrum_ax.set_ylabel('intensity [erg/s/cm$^2$]', fontsize=13)
-
-    # Plot the spectrum
-    spectrum_ax.plot(wavelengths, spectrum, color='black')
+    # Setup timestamp label
+    timestamp_label = timestamp_label or ''
     
-    # Plot the mesh using the existing function
-    return plot_3D(mesh, axes=(fig, plot_ax), **mesh_plot_kwargs), spectrum_ax
+    to_be_mapped, label = _evaluate_to_be_mapped_property(mesh, property, property_label)
+    cbar_label = label
+    
+    # Set up the colormap
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
+    
+    # Determine axis limits
+    if axes_lim is None:
+        axes_lim = 1.5 * mesh.radius
+    
+    # Create figure with two subplots: 3D mesh and spectrum
+    fig = plt.figure(figsize=figsize)
+    # Adjust GridSpec to make the colorbar closer to the mesh plot
+    gs = plt.GridSpec(4, 4, width_ratios=[1, 0.05, 0.05, 2])
+
+    # 3D mesh subplot
+    mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
+    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+    mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+    mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    
+    # Spectrum subplot
+    spec_ax = fig.add_subplot(gs[1:3, 3])
+    spec_ax.set_xlabel('Wavelength [$\AA$]', fontsize=10)
+    spec_ax.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
+    
+    # Set up color normalization for the mesh
+    norm = mpl.colors.Normalize(vmin=to_be_mapped.min(), 
+                               vmax=to_be_mapped.max())
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    
+    # Add colorbar for the mesh in the middle column
+    # Reduced spacing between mesh and colorbar
+    cbar_ax = fig.add_subplot(gs[1:3, 1])
+    cbar = plt.colorbar(mappable, cax=cbar_ax)
+    cbar.set_label(cbar_label, fontsize=12)
+    
+    # Find min/max for spectrum y-axis
+    spec_min = np.min(spectrum)
+    spec_max = np.max(spectrum)
+    spec_padding = 0.05 * (spec_max - spec_min)
+    spec_ax.set_ylim(spec_min - spec_padding, spec_max + spec_padding)
+    
+        
+    # Reset axis properties
+    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+    mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+    mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    
+    spec_ax.plot(wavelengths, spectrum, color='black')
+        
+    # Draw los vector and rotation axis
+    if draw_los_vector:
+        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
+        mesh_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+                    color='red', linewidth=3., label='LOS vector')
+    
+    if draw_rotation_axis:
+        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+        mesh_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+                    color='black', linewidth=3., label='Rotation axis')
+    
+    # Visualize mesh according to mode
+    if mode == 'MESH':
+        vs2 = mesh.vertices[mesh.faces.astype(int)]
+        face_colors = mpl.colormaps[cmap](norm(to_be_mapped))
+        mesh_collection = art3d.Poly3DCollection(vs2, facecolors=face_colors, 
+                                                edgecolor="black", linewidths=linewidth)
+        mesh_ax.add_collection(mesh_collection)
+    else:  # mode == 'POINTS'
+        mesh_collection = mesh_ax.scatter(mesh.centers[:, 0], mesh.centers[:, 1], mesh.centers[:, 2],
+                                        c=to_be_mapped, cmap=cmap, norm=norm)
+        
+        # Update spectrum
+        spectrum_line.set_ydata(spectra[frame])
+        
+        # Add timestamp if available
+    if timestamp is not None:
+        title = f"Time: {timestamp:.2f} {timestamp_label}"
+        fig.suptitle(title, y=0.85)
+    if draw_los_vector and draw_rotation_axis:
+        mesh_ax.legend(loc='upper right', fontsize=10)
+        
+    plt.tight_layout()
+    return fig, mesh_ax, spec_ax
 
 
 def animate_single_star(meshes: List[MeshModel],
@@ -703,8 +823,8 @@ def animate_single_star(meshes: List[MeshModel],
         
     Returns
     -------
-    matplotlib.animation.Animation
-        The animation object
+    str
+        The path to the saved animation file
     """
     from matplotlib.animation import FuncAnimation
     
@@ -953,7 +1073,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     
     # Create figure with two subplots: 3D mesh and spectrum
     fig = plt.figure(figsize=figsize)
-    gs = plt.GridSpec(4, 2, width_ratios=[1, 2])
+    gs = plt.GridSpec(4, 4, width_ratios=[1, 0.05, 0.05, 2])
 
     # 3D mesh subplot
     mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
@@ -965,9 +1085,9 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
     
     # Spectrum subplot
-    spec_ax = fig.add_subplot(gs[1:3, 1])
-    spec_ax.set_xlabel('Wavelength', fontsize=10)
-    spec_ax.set_ylabel('Flux', fontsize=10)
+    spec_ax = fig.add_subplot(gs[1:3, 3])
+    spec_ax.set_xlabel('Wavelength [$\AA$]', fontsize=10)
+    spec_ax.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
     
     # Set up color normalization for the mesh
     norm = mpl.colors.Normalize(vmin=to_be_mapped_arrays_concatenated.min(), 
@@ -975,7 +1095,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
     
     # Add colorbar for the mesh
-    cbar_ax = fig.add_axes([0.35, 0.15, 0.02, 0.7])  # [left, bottom, width, height] - positioned left to mesh_ax
+    cbar_ax = fig.add_subplot(gs[1:3, 1])
     cbar = plt.colorbar(mappable, cax=cbar_ax)
     cbar.set_label(cbar_label, fontsize=12)
     
@@ -986,7 +1106,8 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     spec_ax.set_ylim(spec_min - spec_padding, spec_max + spec_padding)
     
     # Initial spectrum line
-    spectrum_line, = spec_ax.plot(wavelengths, spectra[0], 'b-')
+    spectrum_line, = spec_ax.plot(wavelengths, spectra[0], color='black')
+    plt.tight_layout()
     
     # Animation update function
     def update(frame):
@@ -1032,8 +1153,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
         # Add timestamp if available
         if timestamps is not None:
             title = f"Time: {timestamps[frame]:.2f} {timestamp_label}"
-            mesh_ax.set_title(title, pad=1.0)
-            spec_ax.set_title(title, pad=1.0)
+            fig.suptitle(title, y=0.85)
         
         # Only show legend in the first frame
         if frame == 0 and (draw_los_vector or draw_rotation_axis):
