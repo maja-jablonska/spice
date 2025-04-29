@@ -34,6 +34,9 @@ class ATLAS9Interpolator(UserSpectrumInterpolator):
             cache_dir: Directory to cache downloaded files. If None, uses the default.
             parameter_names: Custom parameter names (default: ["teff", "logg", "m/h"])
         """
+        
+        warnings.warn(" ⚠️ The ATLAS9 interpolator is highly experimental and not fully validated. Use with caution!")
+        
         # Define default parameter names for ATLAS9 models
         self._default_parameter_names = parameter_names or ["teff", "logg", "m/h"]
         
