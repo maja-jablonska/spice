@@ -1,0 +1,46 @@
+Metadata-Version: 2.4
+Name: stellar-spice
+Version: 1.4.2
+Description-Content-Type: text/markdown
+Requires-Dist: celluloid~=0.2.0
+Requires-Dist: chex~=0.1.88
+Requires-Dist: jaxtyping~=0.2.36
+Requires-Dist: jax>=0.4.24
+Requires-Dist: jaxlib>=0.4.24
+Requires-Dist: numpy~=1.26.4
+Requires-Dist: flax>=0.8.1
+Requires-Dist: joblib~=1.3.2
+Requires-Dist: transformer-payne~=0.5
+Provides-Extra: huggingface
+Requires-Dist: huggingface-hub~=0.21.3; extra == "huggingface"
+Provides-Extra: dev
+Requires-Dist: pytest~=8.0.0; extra == "dev"
+Requires-Dist: pytest-datadir~=1.5.0; extra == "dev"
+Requires-Dist: coverage~=7.4.3; extra == "dev"
+
+![spice logo](https://raw.githubusercontent.com/maja-jablonska/spice/main/docs/img/spice_pink.svg)
+
+A stellar spectra integration library.
+
+The package can be installed using PyPI:
+
+```bash
+pip install stellar-spice
+```
+
+Paper is currently in prep.
+
+# Documentation
+
+Read the [docs](https://spice.readthedocs.io) here.
+
+# Features implemented
+
+- [x] Rotation
+- [x] Spots
+- [x] Pulsations
+- [x] PHOEBE integration
+
+## Dev log
+
+Notebooks are being updated one by one.
