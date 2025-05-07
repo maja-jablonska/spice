@@ -1,7 +1,7 @@
 from jax.typing import ArrayLike
 from spice.models.utils import cast_to_los
 from .mesh_model import Model
-from .phoebe_utils import Component, PhoebeConfig
+from .phoebe_utils import Component, PhoebeConfig, PHOEBE_AVAILABLE
 from typing import List, Optional, Dict
 from collections import namedtuple
 import numpy as np
@@ -99,6 +99,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                   parameter_values: Dict[str, float] = None,
                   component: Optional[Component] = None,
                   override_parameters: Optional[ArrayLike] = None) -> "PhoebeModel":
+        if not PHOEBE_AVAILABLE:
+            raise ImportError("PHOEBE is not installed. Please install it with 'pip install stellar-spice[phoebe]'")
         radius = phoebe_config.get_quantity('requiv', component=component)
         inclination = np.deg2rad(phoebe_config.get_quantity('incl', component=component))
         period = phoebe_config.get_quantity('period', component=component) * DAY_TO_S
