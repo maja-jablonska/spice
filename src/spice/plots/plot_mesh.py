@@ -1,3 +1,4 @@
+from matplotlib import gridspec
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import art3d
@@ -1152,7 +1153,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
             title = f"Time: {timestamps[frame]:.2f} {timestamp_label}"
             fig.suptitle(title, y=0.85)
         
-        # Only show legend in the first frame
+        # Only show legend in the first frame or if explicitly asked
         if frame == 0 and (draw_los_vector or draw_rotation_axis):
             mesh_ax.legend(loc='upper right', fontsize=10)
         
@@ -1297,7 +1298,7 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
     _, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
     
     # Set up axes limits
-    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius))) * scale_radius * 1.2
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius))) * 1.2
     plot_ax.set_xlim3d(-axes_lim, axes_lim)
     plot_ax.set_ylim3d(-axes_lim, axes_lim)
     plot_ax.set_zlim3d(-axes_lim, axes_lim)
@@ -1368,11 +1369,11 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
             normalized_rotation_axis2 = mesh2.rotation_axis / np.linalg.norm(mesh2.rotation_axis)
             
             plot_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), 
-                           *(mesh1.radius*normalized_rotation_axis1*scale_radius),
-                           color='black', linewidth=3., label='Rotation axis of mesh1')
+                         *(mesh1.radius*normalized_rotation_axis1*scale_radius),
+                         color='black', linewidth=3., label='Rotation axis of mesh1')
             plot_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), 
-                           *(mesh2.radius*normalized_rotation_axis2*scale_radius),
-                           color='blue', linewidth=3., label='Rotation axis of mesh2')
+                         *(mesh2.radius*normalized_rotation_axis2*scale_radius),
+                         color='blue', linewidth=3., label='Rotation axis of mesh2')
         
         # Visualize the meshes
         if mode == 'MESH':
@@ -1399,9 +1400,9 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
             plot_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
                            c=to_be_mapped2, cmap=cmap, norm=norm)
         
-        # Only show legend in the first frame
-        if draw_los_vector or draw_rotation_axes:
-            plot_ax.legend(loc='upper right', fontsize=12)
+        # Only show legend in the first frame or if explicitly asked
+        if frame == 0 and (draw_los_vector or draw_rotation_axes):
+            plot_ax.legend(loc='upper right', fontsize=8)
         
         # Add padding between plot and colorbar
         plt.subplots_adjust(right=0.85)
@@ -1414,21 +1415,856 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
     plt.close(fig)
     return filename
 
-# Helper function to evaluate property to be mapped
-def _evaluate_to_be_mapped_property(mesh, property, property_label=None):
-    """Helper function to get property data and label for visualization."""
-    if isinstance(property, str):
-        # If property is a string, try to get it as an attribute
-        if hasattr(mesh, property):
-            to_be_mapped = getattr(mesh, property)
-            label = property_label or property
-        else:
-            raise ValueError(f"Mesh does not have attribute '{property}'")
-    elif isinstance(property, int):
-        # If property is an integer, assume it's a parameter index
-        to_be_mapped = mesh.parameters[:, property]
-        label = property_label or f"Parameter {property}"
-    else:
-        raise ValueError(f"Property must be a string or integer, got {type(property)}")
+
+def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelengths,
+                               filename='binary_and_spectrum_animation.mp4',
+                               property='los_velocities', 
+                               timestamps=None, 
+                               cmap=None,
+                               property_label=None,
+                               timestamp_label='days',
+                               mode='MESH',
+                               skip_frames=1,
+                               linewidth=0.01,
+                               figsize=(15, 5),
+                               draw_los_vector=True,
+                               draw_rotation_axes=True,
+                               view_angles=None,
+                               fixed_norm=True,
+                               scale_radius=1.0):
+    """
+    Create an animation of a binary system with its corresponding spectrum over time.
     
-    return to_be_mapped, label
+    Parameters
+    ----------
+    binary1_meshes : List[MeshModel]
+        List of mesh models for the first star at different time steps
+    binary2_meshes : List[MeshModel]
+        List of mesh models for the second star at different time steps
+    spectra : ndarray
+        Array of spectra corresponding to each frame, shape (n_frames, n_wavelengths)
+    wavelengths : ndarray
+        Wavelength array for the spectra
+    filename : str, default: 'binary_and_spectrum_animation.mp4'
+        Output filename for the animation
+    property : Union[str, int], default: 'los_velocities'
+        Property to color the meshes by (attribute name or parameter index)
+    timestamps : Optional[ArrayLike], default: None
+        List of timestamps corresponding to each frame
+    cmap : Optional[str], default: None
+        Matplotlib colormap name. If None, uses defaults based on property
+    property_label : Optional[str], default: None
+        Custom label for the colorbar. If None, uses default for the property
+    timestamp_label : Optional[str], default: "days"
+        Label to accompany timestamps (e.g., "hours", "days")
+    mode : str, default: 'MESH'
+        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+    skip_frames : int, default: 1
+        Only use every nth frame for performance
+    linewidth : float, default: 0.01
+        Line width for mesh edges
+    figsize : Tuple[int, int], default: (15, 5)
+        Figure size (width, height) in inches
+    draw_los_vector : bool, default: True
+        Whether to draw the line-of-sight vector
+    draw_rotation_axes : bool, default: True
+        Whether to draw the rotation axes of both stars
+    view_angles : Optional[Tuple[float, float]], default: None
+        Tuple of (elevation, azimuth) viewing angles. If None, uses default view
+    fixed_norm : bool, default: True
+        Whether to keep color normalization fixed across all frames
+    scale_radius : float, default: 1.0
+        Scale factor for both stellar radii
+        
+    Returns
+    -------
+    str
+        The path to the saved animation file
+    """
+    from matplotlib.animation import FuncAnimation
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of {PLOT_MODES}. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    # Filter meshes, spectra, and timestamps using skip_frames
+    binary1_meshes = binary1_meshes[::skip_frames]
+    binary2_meshes = binary2_meshes[::skip_frames]
+    spectra = spectra[::skip_frames]
+    if timestamps is not None:
+        timestamps = timestamps[::skip_frames]
+    
+    # Verify that the number of frames matches
+    if len(binary1_meshes) != len(binary2_meshes) or len(binary1_meshes) != len(spectra):
+        raise ValueError(f"Number of frames must match: binary1_meshes ({len(binary1_meshes)}), "
+                         f"binary2_meshes ({len(binary2_meshes)}), spectra ({len(spectra)})")
+    
+    # Get first meshes for initial setup
+    mesh1 = binary1_meshes[0]
+    mesh2 = binary2_meshes[0]
+    
+    # If using fixed color normalization across frames, compute min/max across all meshes
+    if fixed_norm:
+        all_property_values = []
+        for i in range(len(binary1_meshes)):
+            # Get property values for both stars
+            mesh1, mesh2 = binary1_meshes[i], binary2_meshes[i]
+            
+            # Get property data
+            to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+            to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+            
+            all_property_values.append(np.concatenate([to_be_mapped1, to_be_mapped2]))
+        
+        all_property_values = np.concatenate(all_property_values)
+        vmin, vmax = np.nanmin(all_property_values), np.nanmax(all_property_values)
+    else:
+        # Just get the property values from the first meshes
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        to_be_mapped = np.concatenate([to_be_mapped1, to_be_mapped2])
+        vmin, vmax = np.nanmin(to_be_mapped), np.nanmax(to_be_mapped)
+    
+    # Get property label
+    _, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+    
+    # Create figure with multiple components: 3D binary system, colorbar, and spectrum
+    fig = plt.figure(figsize=figsize)
+    gs = plt.GridSpec(4, 4, width_ratios=[1, 0.05, 0.05, 2])
+    
+    # 3D binary system subplot
+    mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
+    
+    # Set up axes limits
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius))) * 1.2
+    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+    mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+    mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    
+    # Set custom view angle if provided
+    if view_angles is not None:
+        elev, azim = view_angles
+        mesh_ax.view_init(elev=elev, azim=azim)
+    
+    # Spectrum subplot
+    spec_ax = fig.add_subplot(gs[1:3, 3])
+    spec_ax.set_xlabel('Wavelength [$\AA$]', fontsize=10)
+    spec_ax.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
+    
+    # Set up colormap
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
+    
+    # Set up colormap normalization
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    
+    # Add colorbar in the middle column
+    cbar_ax = fig.add_subplot(gs[1:3, 1])
+    cbar = plt.colorbar(mappable, cax=cbar_ax)
+    cbar.set_label(cbar_label, fontsize=12)
+    
+    # Find min/max for spectrum y-axis
+    spec_min = np.min(spectra)
+    spec_max = np.max(spectra)
+    spec_padding = 0.05 * (spec_max - spec_min)
+    spec_ax.set_ylim(spec_min - spec_padding, spec_max + spec_padding)
+    
+    # Initial spectrum line
+    spectrum_line, = spec_ax.plot(wavelengths, np.zeros_like(wavelengths), color='black')
+    
+    # Define the update function for animation
+    def update(frame):
+        # Clear previous frame elements for mesh plot
+        mesh_ax.clear()
+        
+        # Reset axis properties after clearing
+        mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+        mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+        mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+        mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+        
+        # Set custom view angle if provided
+        if view_angles is not None:
+            elev, azim = view_angles
+            mesh_ax.view_init(elev=elev, azim=azim)
+        
+        # Get current meshes
+        mesh1 = binary1_meshes[frame]
+        mesh2 = binary2_meshes[frame]
+        
+        # Update timestamp if available
+        if timestamps is not None:
+            ts_str = f"Time: {timestamps[frame]:.2f} {timestamp_label}"
+            fig.suptitle(ts_str, fontsize=20, y=0.91)
+        
+        # Get property data for current meshes
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        
+        # Draw vectors
+        if draw_los_vector:
+            normalized_los_vector = mesh1.los_vector / np.linalg.norm(mesh1.los_vector)
+            mesh_ax.quiver(*(-1.5*axes_lim*normalized_los_vector), *((axes_lim*normalized_los_vector)/2),
+                         color='red', linewidth=3., label='LOS vector')
+        
+        if draw_rotation_axes:
+            normalized_rotation_axis1 = mesh1.rotation_axis / np.linalg.norm(mesh1.rotation_axis)
+            normalized_rotation_axis2 = mesh2.rotation_axis / np.linalg.norm(mesh2.rotation_axis)
+            
+            mesh_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), 
+                           *(mesh1.radius*normalized_rotation_axis1*scale_radius),
+                           color='black', linewidth=3., label='Rotation axis of mesh1')
+            mesh_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), 
+                           *(mesh2.radius*normalized_rotation_axis2*scale_radius),
+                           color='blue', linewidth=3., label='Rotation axis of mesh2')
+        
+        # Visualize the meshes
+        if mode == 'MESH':
+            # First mesh
+            vs2_1 = mesh1.center+(mesh1.mesh_elements-mesh1.center)*scale_radius
+            face_colors1 = mpl.colormaps[cmap](norm(to_be_mapped1))
+            p1 = art3d.Poly3DCollection(vs2_1, facecolors=face_colors1, edgecolor="black", linewidths=linewidth)
+            
+            # Second mesh
+            vs2_2 = mesh2.center+(mesh2.mesh_elements-mesh2.center)*scale_radius
+            face_colors2 = mpl.colormaps[cmap](norm(to_be_mapped2))
+            p2 = art3d.Poly3DCollection(vs2_2, facecolors=face_colors2, edgecolor="black", linewidths=linewidth)
+            
+            mesh_ax.add_collection(p1)
+            mesh_ax.add_collection(p2)
+        else:  # mode == 'POINTS'
+            # First mesh as points
+            centers1 = mesh1.center+(mesh1.centers-mesh1.center)*scale_radius
+            mesh_ax.scatter(centers1[:, 0], centers1[:, 1], centers1[:, 2],
+                           c=to_be_mapped1, cmap=cmap, norm=norm)
+            
+            # Second mesh as points
+            centers2 = mesh2.center+(mesh2.centers-mesh2.center)*scale_radius
+            mesh_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
+                           c=to_be_mapped2, cmap=cmap, norm=norm)
+        
+        # Update spectrum
+        spectrum_line.set_ydata(spectra[frame])
+        
+        # Only show legend in the first frame or if explicitly asked
+        if frame == 0 and (draw_los_vector or draw_rotation_axes):
+            mesh_ax.legend(loc='upper right', fontsize=8)
+        
+        return []
+    
+    # Create and save animation
+    try:
+        anim = FuncAnimation(fig, update, frames=len(binary1_meshes), blit=False)
+        smart_save(anim, filename, fps=20)
+    except Exception as e:
+        import os
+        import time
+        import warnings
+        
+        # Check if the file exists and when it was created
+        if os.path.exists(filename):
+            # Check both creation and modification time to handle overwrites
+            file_creation_time = os.path.getctime(filename)
+            file_modification_time = os.path.getmtime(filename)
+            current_time = time.time()
+            # Use the most recent timestamp (creation or modification)
+            most_recent_time = max(file_creation_time, file_modification_time)
+            # If file was created or modified in the last 10 seconds, assume it's from this run
+            if current_time - most_recent_time < 10:
+                warnings.warn(f"Animation save warning: {str(e)}")
+            else:
+                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                # File exists but is older, re-raise the error
+                raise
+        else:
+            print(f'File {filename} does not exist, re-raising error')
+            # File doesn't exist, re-raise the error
+            raise
+    
+    plt.close(fig)
+    return filename
+
+
+
+def animate_binary_and_separate_spectra(binary1_meshes, binary2_meshes, spectra1, spectra2, wavelengths,
+                                        filename='binary_and_spectrum_animation.mp4',
+                                        property='los_velocities', 
+                                        timestamps=None, 
+                                        cmap=None,
+                                        property_label=None,
+                                        timestamp_label='days',
+                                        mode='MESH',
+                                        skip_frames=1,
+                                        linewidth=0.01,
+                                        figsize=(15, 10),
+                                        draw_los_vector=True,
+                                        draw_rotation_axes=True,
+                                        view_angles=None,
+                                        fixed_norm=True,
+                                        scale_radius=1.0):
+    """
+    Create an animation of a binary system with its corresponding spectrum over time.
+    
+    Parameters
+    ----------
+    binary1_meshes : List[MeshModel]
+        List of mesh models for the first star at different time steps
+    binary2_meshes : List[MeshModel]
+        List of mesh models for the second star at different time steps
+    spectra : ndarray
+        Array of spectra corresponding to each frame, shape (n_frames, n_wavelengths)
+    wavelengths : ndarray
+        Wavelength array for the spectra
+    filename : str, default: 'binary_and_spectrum_animation.mp4'
+        Output filename for the animation
+    property : Union[str, int], default: 'los_velocities'
+        Property to color the meshes by (attribute name or parameter index)
+    timestamps : Optional[ArrayLike], default: None
+        List of timestamps corresponding to each frame
+    cmap : Optional[str], default: None
+        Matplotlib colormap name. If None, uses defaults based on property
+    property_label : Optional[str], default: None
+        Custom label for the colorbar. If None, uses default for the property
+    timestamp_label : Optional[str], default: "days"
+        Label to accompany timestamps (e.g., "hours", "days")
+    mode : str, default: 'MESH'
+        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+    skip_frames : int, default: 1
+        Only use every nth frame for performance
+    linewidth : float, default: 0.01
+        Line width for mesh edges
+    figsize : Tuple[int, int], default: (15, 5)
+        Figure size (width, height) in inches
+    draw_los_vector : bool, default: True
+        Whether to draw the line-of-sight vector
+    draw_rotation_axes : bool, default: True
+        Whether to draw the rotation axes of both stars
+    view_angles : Optional[Tuple[float, float]], default: None
+        Tuple of (elevation, azimuth) viewing angles. If None, uses default view
+    fixed_norm : bool, default: True
+        Whether to keep color normalization fixed across all frames
+    scale_radius : float, default: 1.0
+        Scale factor for both stellar radii
+        
+    Returns
+    -------
+    str
+        The path to the saved animation file
+    """
+    from matplotlib.animation import FuncAnimation
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of {PLOT_MODES}. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    # Filter meshes, spectra, and timestamps using skip_frames
+    binary1_meshes = binary1_meshes[::skip_frames]
+    binary2_meshes = binary2_meshes[::skip_frames]
+    spectra1 = spectra1[::skip_frames]
+    spectra2 = spectra2[::skip_frames]
+    if timestamps is not None:
+        timestamps = timestamps[::skip_frames]
+    
+    # Verify that the number of frames matches
+    if len(binary1_meshes) != len(binary2_meshes) or len(binary1_meshes) != len(spectra1) or len(binary1_meshes) != len(spectra2):
+        raise ValueError(f"Number of frames must match: binary1_meshes ({len(binary1_meshes)}), "
+                         f"binary2_meshes ({len(binary2_meshes)}), spectra1 ({len(spectra1)}), spectra2 ({len(spectra2)})")
+    
+    # Get first meshes for initial setup
+    mesh1 = binary1_meshes[0]
+    mesh2 = binary2_meshes[0]
+    
+    # If using fixed color normalization across frames, compute min/max across all meshes
+    if fixed_norm:
+        all_property_values = []
+        for i in range(len(binary1_meshes)):
+            # Get property values for both stars
+            mesh1, mesh2 = binary1_meshes[i], binary2_meshes[i]
+            
+            # Get property data
+            to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+            to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+            
+            all_property_values.append(np.concatenate([to_be_mapped1, to_be_mapped2]))
+        
+        all_property_values = np.concatenate(all_property_values)
+        vmin, vmax = np.nanmin(all_property_values), np.nanmax(all_property_values)
+    else:
+        # Just get the property values from the first meshes
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        to_be_mapped = np.concatenate([to_be_mapped1, to_be_mapped2])
+        vmin, vmax = np.nanmin(to_be_mapped), np.nanmax(to_be_mapped)
+    
+    # Get property label
+    _, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+    
+    # Create figure with multiple components: 3D binary system, colorbar, and spectrum
+    fig = plt.figure(figsize=figsize)
+    gs = plt.GridSpec(8, 4, width_ratios=[1, 0.05, 0.05, 2])
+    
+    # 3D binary system subplot
+    mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
+    
+    # Set up axes limits
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius))) * 1.2
+    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+    mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+    mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    
+    # Set custom view angle if provided
+    if view_angles is not None:
+        elev, azim = view_angles
+        mesh_ax.view_init(elev=elev, azim=azim)
+    
+    # Spectrum subplot
+    spec_ax_1 = fig.add_subplot(gs[1:3, 3])
+    spec_ax_2 = fig.add_subplot(gs[3:5, 3], sharey=spec_ax_1)
+    spec_ax_3 = fig.add_subplot(gs[5:7, 3], sharey=spec_ax_2)
+
+    spec_ax_2.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
+    spec_ax_3.set_xlabel('Wavelength [$\\AA$]', fontsize=10)
+    
+    # Set up colormap
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
+    
+    # Set up colormap normalization
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    
+    # Add colorbar in the middle column
+    cbar_ax = fig.add_subplot(gs[3:5, 1])
+    cbar = plt.colorbar(mappable, cax=cbar_ax)
+    cbar.set_label(cbar_label, fontsize=12)
+    
+    # Find min/max for spectrum y-axis
+    all_spectra = spectra1+spectra2
+    spec_min = np.min(all_spectra)
+    spec_max = np.max(all_spectra)
+    spec_padding = 0.05 * (spec_max - spec_min)
+    
+    spec_ax_1.set_ylim(spec_min - spec_padding, spec_max + spec_padding)
+    
+    # Initial spectrum line
+    spectrum_line_1, = spec_ax_1.plot(wavelengths, np.zeros_like(wavelengths), color='coral')
+    spectrum_line_2, = spec_ax_2.plot(wavelengths, np.zeros_like(wavelengths), color='royalblue')
+    spectrum_line_3, = spec_ax_3.plot(wavelengths, np.zeros_like(wavelengths), color='black')
+    
+    # Define the update function for animation
+    def update(frame):
+        # Clear previous frame elements for mesh plot
+        mesh_ax.clear()
+        
+        # Reset axis properties after clearing
+        mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+        mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+        mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+        mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+        
+        # Set custom view angle if provided
+        if view_angles is not None:
+            elev, azim = view_angles
+            mesh_ax.view_init(elev=elev, azim=azim)
+        
+        # Get current meshes
+        mesh1 = binary1_meshes[frame]
+        mesh2 = binary2_meshes[frame]
+        
+        # Update timestamp if available
+        if timestamps is not None:
+            ts_str = f"Time: {timestamps[frame]:.2f} {timestamp_label}"
+            fig.suptitle(ts_str, fontsize=20, y=0.91)
+        
+        # Get property data for current meshes
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        
+        # Draw vectors
+        if draw_los_vector:
+            normalized_los_vector = mesh1.los_vector / np.linalg.norm(mesh1.los_vector)
+            mesh_ax.quiver(*(-1.5*axes_lim*normalized_los_vector), *((axes_lim*normalized_los_vector)/2),
+                         color='red', linewidth=3., label='LOS vector')
+        
+        if draw_rotation_axes:
+            normalized_rotation_axis1 = mesh1.rotation_axis / np.linalg.norm(mesh1.rotation_axis)
+            normalized_rotation_axis2 = mesh2.rotation_axis / np.linalg.norm(mesh2.rotation_axis)
+            
+            mesh_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), 
+                           *(mesh1.radius*normalized_rotation_axis1*scale_radius),
+                           color='black', linewidth=3., label='Rotation axis of mesh1')
+            mesh_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), 
+                           *(mesh2.radius*normalized_rotation_axis2*scale_radius),
+                           color='blue', linewidth=3., label='Rotation axis of mesh2')
+        
+        # Visualize the meshes
+        if mode == 'MESH':
+            # First mesh
+            vs2_1 = mesh1.center+(mesh1.mesh_elements-mesh1.center)*scale_radius
+            face_colors1 = mpl.colormaps[cmap](norm(to_be_mapped1))
+            p1 = art3d.Poly3DCollection(vs2_1, facecolors=face_colors1, edgecolor="black", linewidths=linewidth)
+            
+            # Second mesh
+            vs2_2 = mesh2.center+(mesh2.mesh_elements-mesh2.center)*scale_radius
+            face_colors2 = mpl.colormaps[cmap](norm(to_be_mapped2))
+            p2 = art3d.Poly3DCollection(vs2_2, facecolors=face_colors2, edgecolor="black", linewidths=linewidth)
+            
+            mesh_ax.add_collection(p1)
+            mesh_ax.add_collection(p2)
+        else:  # mode == 'POINTS'
+            # First mesh as points
+            centers1 = mesh1.center+(mesh1.centers-mesh1.center)*scale_radius
+            mesh_ax.scatter(centers1[:, 0], centers1[:, 1], centers1[:, 2],
+                           c=to_be_mapped1, cmap=cmap, norm=norm)
+            
+            # Second mesh as points
+            centers2 = mesh2.center+(mesh2.centers-mesh2.center)*scale_radius
+            mesh_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
+                           c=to_be_mapped2, cmap=cmap, norm=norm)
+        
+        # Update spectrum
+        spectrum_line_1.set_ydata(spectra1[frame])
+        spectrum_line_2.set_ydata(spectra2[frame])
+        spectrum_line_3.set_ydata(spectra1[frame]+spectra2[frame])
+        
+        # Only show legend in the first frame or if explicitly asked
+        if frame == 0 and (draw_los_vector or draw_rotation_axes):
+            mesh_ax.legend(loc='upper right', fontsize=8)
+        
+        return []
+    
+    plt.tight_layout()
+    
+    # Create and save animation
+    try:
+        anim = FuncAnimation(fig, update, frames=len(binary1_meshes), blit=False)
+        smart_save(anim, filename, fps=20)
+    except Exception as e:
+        import os
+        import time
+        import warnings
+        
+        # Check if the file exists and when it was created
+        if os.path.exists(filename):
+            # Check both creation and modification time to handle overwrites
+            file_creation_time = os.path.getctime(filename)
+            file_modification_time = os.path.getmtime(filename)
+            current_time = time.time()
+            # Use the most recent timestamp (creation or modification)
+            most_recent_time = max(file_creation_time, file_modification_time)
+            # If file was created or modified in the last 10 seconds, assume it's from this run
+            if current_time - most_recent_time < 10:
+                warnings.warn(f"Animation save warning: {str(e)}")
+            else:
+                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                # File exists but is older, re-raise the error
+                raise
+        else:
+            print(f'File {filename} does not exist, re-raising error')
+            # File doesn't exist, re-raise the error
+            raise
+    
+    plt.close(fig)
+    return filename
+
+
+def animate_binary_and_lightcurve(binary1_meshes, binary2_meshes,
+                                  lightcurve,
+                                  timestamps,
+                                filename='binary_and_lightcurve_animation.mp4',
+                                property='los_velocities',
+                                cmap=None,
+                                property_label=None,
+                                timestamp_label='days',
+                                lightcurve_label='Luminosity [mag]',
+                                mode='MESH',
+                                skip_frames=1,
+                                linewidth=0.01,
+                                figsize=(15, 5),
+                                draw_los_vector=True,
+                                draw_rotation_axes=True,
+                                view_angles=None,
+                                fixed_norm=True,
+                                scale_radius=1.0,
+                                highlight_color='red',
+                                highlight_size=50):
+    """
+    Create an animation of a binary system with its corresponding lightcurve over time.
+    The current position in the lightcurve is highlighted as the animation progresses.
+    
+    Parameters
+    ----------
+    binary1_meshes : List[MeshModel]
+        List of mesh models for the first star at different time steps
+    binary2_meshes : List[MeshModel]
+        List of mesh models for the second star at different time steps
+    lightcurve_fluxes : ndarray
+        Array of fluxes for the lightcurve
+    lightcurve_times : ndarray
+        Array of times corresponding to the lightcurve fluxes
+    filename : str, default: 'binary_and_lightcurve_animation.mp4'
+        Output filename for the animation
+    property : Union[str, int], default: 'los_velocities'
+        Property to color the meshes by (attribute name or parameter index)
+    timestamps : Optional[ArrayLike], default: None
+        List of timestamps corresponding to each mesh frame
+    cmap : Optional[str], default: None
+        Matplotlib colormap name. If None, uses defaults based on property
+    property_label : Optional[str], default: None
+        Custom label for the colorbar. If None, uses default for the property
+    time_unit : str, default: "days"
+        Unit for the time axis in the lightcurve
+    flux_unit : str, default: "normalized"
+        Unit for the flux axis in the lightcurve
+    mode : str, default: 'MESH'
+        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+    skip_frames : int, default: 1
+        Only use every nth frame for performance
+    linewidth : float, default: 0.01
+        Line width for mesh edges
+    figsize : Tuple[int, int], default: (15, 5)
+        Figure size (width, height) in inches
+    draw_los_vector : bool, default: True
+        Whether to draw the line-of-sight vector
+    draw_rotation_axes : bool, default: True
+        Whether to draw the rotation axes of both stars
+    view_angles : Optional[Tuple[float, float]], default: None
+        Tuple of (elevation, azimuth) viewing angles. If None, uses default view
+    fixed_norm : bool, default: True
+        Whether to keep color normalization fixed across all frames
+    scale_radius : float, default: 1.0
+        Scale factor for both stellar radii
+    highlight_color : str, default: 'red'
+        Color for the marker highlighting the current position in the lightcurve
+    highlight_size : int, default: 50
+        Size of the marker highlighting the current position in the lightcurve
+        
+    Returns
+    -------
+    str
+        The path to the saved animation file
+    """
+    from matplotlib.animation import FuncAnimation
+    
+    if mode.upper() not in PLOT_MODES:
+        raise ValueError(f'Mode must be one of {PLOT_MODES}. Got {mode.upper()}')
+    mode = mode.upper()
+    
+    # Filter meshes and timestamps using skip_frames
+    binary1_meshes = binary1_meshes[::skip_frames]
+    binary2_meshes = binary2_meshes[::skip_frames]
+    if timestamps is not None:
+        timestamps = timestamps[::skip_frames]
+    
+    # Verify that the number of frames matches
+    if len(binary1_meshes) != len(binary2_meshes):
+        raise ValueError(f"Number of frames must match: binary1_meshes ({len(binary1_meshes)}), "
+                         f"binary2_meshes ({len(binary2_meshes)})")
+    
+    # Get first meshes for initial setup
+    mesh1 = binary1_meshes[0]
+    mesh2 = binary2_meshes[0]
+    
+    # If using fixed color normalization across frames, compute min/max across all meshes
+    if fixed_norm:
+        all_property_values = []
+        for i in range(len(binary1_meshes)):
+            # Get property values for both stars
+            mesh1, mesh2 = binary1_meshes[i], binary2_meshes[i]
+            
+            # Get property data
+            to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+            to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+            
+            all_property_values.append(np.concatenate([to_be_mapped1, to_be_mapped2]))
+        
+        all_property_values = np.concatenate(all_property_values)
+        vmin, vmax = np.nanmin(all_property_values), np.nanmax(all_property_values)
+    else:
+        # Just get the property values from the first meshes
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        to_be_mapped = np.concatenate([to_be_mapped1, to_be_mapped2])
+        vmin, vmax = np.nanmin(to_be_mapped), np.nanmax(to_be_mapped)
+    
+    # Get property label
+    _, cbar_label = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+    
+    # Create figure with multiple components: 3D binary system, colorbar, and lightcurve
+    fig = plt.figure(figsize=figsize)
+    gs = plt.GridSpec(4, 4, width_ratios=[1, 0.05, 0.05, 2])
+    
+    # 3D binary system subplot
+    mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
+    
+    # Set up axes limits
+    axes_lim = np.max(np.abs((mesh1.radius+mesh1.center)-(mesh2.center-mesh2.radius))) * 1.2
+    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+    mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+    mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    
+    # Set custom view angle if provided
+    if view_angles is not None:
+        elev, azim = view_angles
+        mesh_ax.view_init(elev=elev, azim=azim)
+    
+    # Lightcurve subplot
+    lc_ax = fig.add_subplot(gs[1:3, 3])
+    lc_ax.set_xlabel(f'Time [{timestamp_label}]', fontsize=10)
+    lc_ax.set_ylabel(lightcurve_label, fontsize=10)
+    
+    # Set up colormap
+    if cmap is None:
+        cmap = DEFAULT_PROPERTY_CMAPS.get(property, DEFAULT_CMAP)
+    
+    # Set up colormap normalization
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    mappable = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+    
+    # Add colorbar in the middle column
+    cbar_ax = fig.add_subplot(gs[1:3, 1])
+    cbar = plt.colorbar(mappable, cax=cbar_ax)
+    cbar.set_label(cbar_label, fontsize=12)
+    
+    # Plot the entire lightcurve
+    lc_ax.plot(timestamps, lightcurve, color='black', linestyle='--', lw=1, zorder=4)
+    
+    # Find min/max for lightcurve y-axis with small padding
+    lc_min = np.min(lightcurve)
+    lc_max = np.max(lightcurve)
+    lc_padding = 0.05 * (lc_max - lc_min)
+    lc_ax.set_ylim(lc_min - lc_padding, lc_max + lc_padding)
+    lc_ax.invert_yaxis()
+    
+    # Initial highlight point (will be updated in the animation)
+    highlight_point = lc_ax.scatter([], [], s=highlight_size, c=highlight_color, edgecolor='black', zorder=5)
+    
+    # Define the update function for animation
+    def update(frame):
+        # Clear previous frame elements for mesh plot
+        mesh_ax.clear()
+        
+        # Reset axis properties after clearing
+        mesh_ax.set_xlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_ylim3d(-axes_lim, axes_lim)
+        mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+        mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
+        mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
+        mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+        
+        # Set custom view angle if provided
+        if view_angles is not None:
+            elev, azim = view_angles
+            mesh_ax.view_init(elev=elev, azim=azim)
+        
+        # Get current meshes
+        mesh1 = binary1_meshes[frame]
+        mesh2 = binary2_meshes[frame]
+        
+        # Update timestamp if available
+        if timestamps is not None:
+            ts_str = f"Time: {timestamps[frame]:.2f} {timestamp_label}"
+            fig.suptitle(ts_str, fontsize=20, y=0.90)
+            
+            # Update highlighted point in lightcurve
+            # Find closest time in the lightcurve to the current timestamp
+            closest_idx = np.argmin(np.abs(timestamps - timestamps[frame]))
+            highlight_point.set_offsets([timestamps[closest_idx], lightcurve[closest_idx]])
+        
+        # Get property data for current meshes
+        to_be_mapped1, _ = _evaluate_to_be_mapped_property(mesh1, property, property_label)
+        to_be_mapped2, _ = _evaluate_to_be_mapped_property(mesh2, property, property_label)
+        
+        # Draw vectors
+        if draw_los_vector:
+            normalized_los_vector = mesh1.los_vector / np.linalg.norm(mesh1.los_vector)
+            mesh_ax.quiver(*(-1.5*axes_lim*normalized_los_vector), *((axes_lim*normalized_los_vector)/2),
+                         color='red', linewidth=3., label='LOS vector')
+        
+        if draw_rotation_axes:
+            normalized_rotation_axis1 = mesh1.rotation_axis / np.linalg.norm(mesh1.rotation_axis)
+            normalized_rotation_axis2 = mesh2.rotation_axis / np.linalg.norm(mesh2.rotation_axis)
+            
+            mesh_ax.quiver(*(mesh1.center+normalized_rotation_axis1*mesh1.radius*scale_radius), 
+                           *(mesh1.radius*normalized_rotation_axis1*scale_radius),
+                           color='black', linewidth=3., label='Rotation axis of mesh1')
+            mesh_ax.quiver(*(mesh2.center+normalized_rotation_axis2*mesh2.radius*scale_radius), 
+                           *(mesh2.radius*normalized_rotation_axis2*scale_radius),
+                           color='blue', linewidth=3., label='Rotation axis of mesh2')
+        
+        # Visualize the meshes
+        if mode == 'MESH':
+            # First mesh
+            vs2_1 = mesh1.center+(mesh1.mesh_elements-mesh1.center)*scale_radius
+            face_colors1 = mpl.colormaps[cmap](norm(to_be_mapped1))
+            p1 = art3d.Poly3DCollection(vs2_1, facecolors=face_colors1, edgecolor="black", linewidths=linewidth)
+            
+            # Second mesh
+            vs2_2 = mesh2.center+(mesh2.mesh_elements-mesh2.center)*scale_radius
+            face_colors2 = mpl.colormaps[cmap](norm(to_be_mapped2))
+            p2 = art3d.Poly3DCollection(vs2_2, facecolors=face_colors2, edgecolor="black", linewidths=linewidth)
+            
+            mesh_ax.add_collection(p1)
+            mesh_ax.add_collection(p2)
+        else:  # mode == 'POINTS'
+            # First mesh as points
+            centers1 = mesh1.center+(mesh1.centers-mesh1.center)*scale_radius
+            mesh_ax.scatter(centers1[:, 0], centers1[:, 1], centers1[:, 2],
+                           c=to_be_mapped1, cmap=cmap, norm=norm)
+            
+            # Second mesh as points
+            centers2 = mesh2.center+(mesh2.centers-mesh2.center)*scale_radius
+            mesh_ax.scatter(centers2[:, 0], centers2[:, 1], centers2[:, 2],
+                           c=to_be_mapped2, cmap=cmap, norm=norm)
+        
+        # Only show legend in the first frame
+        if frame == 0 and (draw_los_vector or draw_rotation_axes):
+            mesh_ax.legend(loc='upper right', fontsize=8)
+        
+        return [highlight_point]
+    
+    # Create and save animation
+    try:
+        anim = FuncAnimation(fig, update, frames=len(binary1_meshes), blit=True)
+        smart_save(anim, filename, fps=20)
+    except Exception as e:
+        import os
+        import time
+        import warnings
+        
+        # Check if the file exists and when it was created
+        if os.path.exists(filename):
+            # Check both creation and modification time to handle overwrites
+            file_creation_time = os.path.getctime(filename)
+            file_modification_time = os.path.getmtime(filename)
+            current_time = time.time()
+            # Use the most recent timestamp (creation or modification)
+            most_recent_time = max(file_creation_time, file_modification_time)
+            # If file was created or modified in the last 10 seconds, assume it's from this run
+            if current_time - most_recent_time < 10:
+                warnings.warn(f"Animation save warning: {str(e)}")
+            else:
+                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                # File exists but is older, re-raise the error
+                raise
+        else:
+            print(f'File {filename} does not exist, re-raising error')
+            # File doesn't exist, re-raise the error
+            raise
+    
+    plt.close(fig)
+    return filename
