@@ -6,6 +6,34 @@ from typing import Tuple
 from jaxtyping import Array, Float
 
 
+import jax
+from typing import List, Any
+
+
+class ModelList:
+    def __init__(self, items: List[Any]):
+        self.models = items
+
+# Register the class as a pytree
+def _my_list_container_flatten(container):
+    # Return a tuple of (children, auxiliary_data)
+    # children: the arrays/values that JAX should transform
+    # auxiliary_data: metadata that won't be transformed
+    children = container.models
+    aux_data = None  # No additional metadata needed
+    return (children, aux_data)
+
+def _my_list_container_unflatten(aux_data, children):
+    # Reconstruct the original object from transformed children
+    return ModelList(children)
+
+jax.tree_util.register_pytree_node(
+    ModelList,
+    _my_list_container_flatten,
+    _my_list_container_unflatten
+)
+
+
 def vertex_to_polar(v: Float[Array, "3"]) -> Float[Array, "2"]:
     v += 1e-5
     r = jnp.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2) + 1e-5
