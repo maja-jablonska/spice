@@ -10,7 +10,7 @@ import numpy as np
 from .mesh_generation import face_center
 from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
 from spice.models.phoebe_model import PhoebeModel
-from .utils import (rotation_matrix, rotation_matrix_prim,
+from .utils import (ModelList, rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix, evaluate_rotation_matrix_prim,
                     calculate_axis_radii,
                     evaluate_many_fouriers_for_value,
@@ -260,6 +260,20 @@ def evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel:
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
     return _evaluate_rotation(mesh, t)
+
+
+_evaluate_rotation_v = jax.vmap(_evaluate_rotation, in_axes=(None, 0))
+
+
+def evaluate_rotation_at_times(mesh: MeshModel, times: ArrayLike) -> ArrayLike:
+    result_bodies = _evaluate_rotation_v(mesh, times)
+    # Convert the  results to lists for each component
+    body_list = jax.tree_util.tree_map(lambda x: list(x), result_bodies)
+    return ModelList(jax.tree_util.tree_transpose(
+        outer_treedef=jax.tree_util.tree_structure(mesh),
+        inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
+        pytree_to_transpose=body_list
+    ))
 
 
 def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:

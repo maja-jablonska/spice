@@ -9,16 +9,20 @@ from jaxtyping import Float, Array
 from collections import namedtuple
 from jax import tree_util
 
-from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
-from spice.models.phoebe_utils import Component, PhoebeConfig
 from spice.models.model import Model
 from spice.models.mesh_transform import transform, evaluate_body_orbit
-import astropy.units as u
 from spice.models.orbit_utils import get_orbit_jax
 from spice.models.mesh_view_kdtree import get_optimal_search_radius, resolve_occlusion
 
+# Make PHOEBE-related imports optional
+try:
+    from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
+    from spice.models.phoebe_utils import Component, PhoebeConfig
+    PHOEBE_AVAILABLE = True
+except ImportError:
+    PHOEBE_AVAILABLE = False
 
-YEAR_TO_SECONDS = u.year.to(u.s)
+YEAR_TO_SECONDS = 3.154e7
 DAY_TO_YEAR = 0.0027378507871321013
 SOLAR_MASS_KG = 1.988409870698051e+30
 SOLAR_RAD_CM = 6.957e10
@@ -69,6 +73,11 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
                                "mean_anomaly", "reference_time", "vgamma",
                                "evaluated_times", "body1_centers", "body2_centers", "body1_velocities",
                                "body2_velocities", "phoebe_config", "parameter_labels", "parameter_values"])):
+    def __new__(cls, *args, **kwargs):
+        if not PHOEBE_AVAILABLE:
+            raise ImportError("PHOEBE is not installed. Please install it with 'pip install stellar-spice[phoebe]'")
+        return super().__new__(cls, *args, **kwargs)
+
     body1: Model
     body2: Model
 
