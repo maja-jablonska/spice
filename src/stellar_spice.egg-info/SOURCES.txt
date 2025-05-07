@@ -26,11 +26,13 @@ src/spice/phoebe_model/DI-Her-meshes.py
 src/spice/plots/__init__.py
 src/spice/plots/plot_mesh.py
 src/spice/spectrum/__init__.py
+src/spice/spectrum/atlas9_interpolator.py
 src/spice/spectrum/filter.py
 src/spice/spectrum/planck_law.py
 src/spice/spectrum/spectrum.py
 src/spice/spectrum/spectrum_emulator.py
 src/spice/spectrum/spectrum_korg.py
+src/spice/spectrum/user_spectrum_interpolator.py
 src/spice/spectrum/utils.py
 src/spice/spectrum/filter_data/2MASSH.dat
 src/spice/spectrum/filter_data/2MASSJ.dat
