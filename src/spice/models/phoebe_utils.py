@@ -1,4 +1,10 @@
-import phoebe
+try:
+    import phoebe
+    PHOEBE_AVAILABLE = True
+except ImportError:
+    PHOEBE_AVAILABLE = False
+    phoebe = None
+
 import numpy as np
 from numpy.typing import ArrayLike
 from typing import List, Optional
@@ -28,9 +34,12 @@ class Component(Enum):
 
 class PhoebeConfig:
     def __init__(self,
-                 bundle: phoebe.frontend.bundle.Bundle,
+                 bundle: 'phoebe.frontend.bundle.Bundle',
                  mesh_dataset_name: str = 'mesh01',
                  orbit_dataset_name: Optional[str] = None):
+        if not PHOEBE_AVAILABLE:
+            raise ImportError("PHOEBE is not installed. Please install it with 'pip install stellar-spice[phoebe]'")
+            
         self.__b: phoebe.frontend.bundle.Bundle = bundle
         self.__times: np.array = np.array(self.__b.times).astype(np.float64)
 
