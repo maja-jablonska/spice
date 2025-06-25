@@ -147,26 +147,27 @@ class TestMeshTransformations:
                                 evaluated_pulsation_mesh.vertices_pulsation_offsets), \
             "Pulsation offsets should change after evaluation"
         
-        # # Check if pulsation velocities are non-zero
+        # Check if pulsation velocities are non-zero
         assert jnp.any(evaluated_pulsation_mesh.pulsation_velocities != 0), \
             "Pulsation velocities should be non-zero"
         
         # Check if pulsation axis and angle are correctly set
-        assert jnp.allclose(pulsated_mesh.pulsation_axes[m_order + mesh_model.max_pulsation_mode * n_degree], 
+        harmonic_ind = m_order + mesh_model.max_pulsation_mode * n_degree
+        assert jnp.allclose(pulsated_mesh.pulsation_axes[harmonic_ind], 
                             pulsation_axis), \
             "Pulsation axis should be correctly set"
-        assert jnp.isclose(pulsated_mesh.pulsation_angles[m_order + mesh_model.max_pulsation_mode * n_degree], 
+        assert jnp.isclose(pulsated_mesh.pulsation_angles[harmonic_ind], 
                            pulsation_angle), \
             "Pulsation angle should be correctly set"
 
     def test_multiple_pulsations_with_tilt(self, mesh_model):
         t = 1800
         m_orders = jnp.array([1, 2])
-        n_degrees = jnp.array([1, 2])
+        l_degrees = jnp.array([1, 2])
         periods = jnp.array([3600.0, 7200.0])  # 1 hour and 2 hours
         fourier_series_parameters = jnp.array([
-            [[0.1, 0.0]],  # Amplitude 0.1, phase 0.0 for first pulsation
-            [[0.05, jnp.pi/2]]  # Amplitude 0.05, phase pi/2 for second pulsation
+            [0.1, 0.0],  # Amplitude 0.1, phase 0.0 for first pulsation
+            [0.05, jnp.pi/2]  # Amplitude 0.05, phase pi/2 for second pulsation
         ])
         pulsation_axes = jnp.array([
             [0.0, 1.0, 0.0],  # Y-axis for first pulsation
@@ -175,7 +176,7 @@ class TestMeshTransformations:
         pulsation_angles = jnp.array([45., 30.])  # 45 and 30 degrees tilts
 
         # Add multiple pulsations with tilts
-        pulsated_mesh = add_pulsations(mesh_model, m_orders, n_degrees, periods,
+        pulsated_mesh = add_pulsations(mesh_model, m_orders, l_degrees, periods,
                                        fourier_series_parameters, pulsation_axes, pulsation_angles)
         
         # Evaluate pulsations
@@ -192,7 +193,7 @@ class TestMeshTransformations:
         
         # Check if pulsation axes and angles are correctly set for both pulsations
         for i in range(2):
-            harmonic_ind = m_orders[i] + mesh_model.max_pulsation_mode * n_degrees[i]
+            harmonic_ind = m_orders[i] + mesh_model.max_pulsation_mode * l_degrees[i]
             assert jnp.allclose(pulsated_mesh.pulsation_axes[harmonic_ind], pulsation_axes[i]), \
                 f"Pulsation axis for pulsation {i} should be correctly set"
             assert jnp.isclose(pulsated_mesh.pulsation_angles[harmonic_ind], pulsation_angles[i]), \
