@@ -1,8 +1,7 @@
-from matplotlib import gridspec
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import art3d
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 import numpy as np
 from spice.models import MeshModel
 from jax.typing import ArrayLike
@@ -21,7 +20,7 @@ DEFAULT_PLOT_PROPERTY_LABELS = {
 }
 
 DEFAULT_PROPERTY_CMAPS = {
-    'los_velocities': 'cmr.redshift_r',
+    'los_velocities': 'cmr.redshift',
 }
 
 DEFAULT_CMAP = 'cmr.bubblegum'
