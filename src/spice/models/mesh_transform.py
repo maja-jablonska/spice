@@ -308,7 +308,7 @@ def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
     )
 
 
-def add_pulsation(m: MeshModel, m_order: Float, n_degree: Float,
+def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
                   period: Float, fourier_series_parameters: Float[Array, "n_terms 2"],
                   pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None) -> MeshModel:
     """
@@ -321,7 +321,7 @@ def add_pulsation(m: MeshModel, m_order: Float, n_degree: Float,
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
         m_order (Float): The order (m) of the spherical harmonics.
-        n_degree (Float): The degree (n) of the spherical harmonics.
+        l_degree (Float): The degree (l) of the spherical harmonics.
         period (Float): Pulsation period in seconds.
         fourier_series_parameters (Float[Array, "n_terms 2"]): Dynamic parameters for the Fourier series that define the
             time-varying aspect of the pulsation. Shape should be (N, 2) where N is the number of terms,
@@ -345,13 +345,13 @@ def add_pulsation(m: MeshModel, m_order: Float, n_degree: Float,
     if pulsation_angles is None:
         pulsation_angles = 0.
 
-    harmonic_ind = m_order + m.max_pulsation_mode * n_degree
+    harmonic_ind = m_order + m.max_pulsation_mode * l_degree
     if harmonic_ind >= len(m.pulsation_periods):
         warnings.warn("Pulsation mode is too high for the mesh model - the mesh model has" +
                       "been initialized with a maximum pulsation mode of {}".format(m.max_pulsation_mode) +
                       "This pulsation will have no effect.")
 
-    return _add_pulsation(m, jnp.array([m_order, n_degree]), period, fourier_series_parameters,
+    return _add_pulsation(m, jnp.array([m_order, l_degree]), period, fourier_series_parameters,
                           int(m.max_fourier_order -
                               fourier_series_parameters.shape[0]),
                           pulsation_axes, pulsation_angles)
@@ -400,7 +400,7 @@ def _add_pulsations(m: MeshModel,
     return updated_m
 
 
-def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degrees: Float[Array, "n_pulsations"],
+def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degrees: Float[Array, "n_pulsations"],
                    periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"],
                    pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel:
     """
@@ -412,7 +412,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degre
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
         m_orders (Float[Array, "n_pulsations"]): Array of orders (m) of the spherical harmonics.
-        n_degrees (Float[Array, "n_pulsations"]): Array of degrees (n) of the spherical harmonics.
+        l_degrees (Float[Array, "n_pulsations"]): Array of degrees (l) of the spherical harmonics.
         periods (Float[Array, "n_pulsations"]): Array of pulsation periods in seconds.
         fourier_series_parameters (Float[Array, "n_pulsations n_terms 2"]): Array of dynamic parameters for the Fourier series that define the
             time-varying aspect of the pulsations. Shape should be (K, N, 2) where K is the number of pulsations,
@@ -430,7 +430,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degre
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
-    if not (len(m_orders) == len(n_degrees) == len(periods) == len(fourier_series_parameters)):
+    if not (len(m_orders) == len(l_degrees) == len(periods) == len(fourier_series_parameters)):
         raise ValueError("Input arrays must have consistent lengths.")
 
     if pulsation_axes is None:
@@ -439,7 +439,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degre
     if pulsation_angles is None:
         pulsation_angles = jnp.zeros_like(m_orders)
 
-    harmonic_indices = m_orders + m.max_pulsation_mode * n_degrees
+    harmonic_indices = m_orders + m.max_pulsation_mode * l_degrees
     
     # Fix inconsistency: fourier_series_parameters shape is (n_pulsations, n_terms, 2)
     # We need the second dimension (n_terms) for padding calculation
