@@ -64,7 +64,7 @@ class TestSpectrumFunctions:
         # Create mock filter
         filter_wavelengths = jnp.linspace(1000, 10000, 50)
         filter_responses = jnp.ones_like(filter_wavelengths)
-        mock_filter = Filter(jnp.array([filter_wavelengths, filter_responses]))
+        mock_filter = Filter(name="test_filter", transmission_curve=jnp.stack((filter_wavelengths, filter_responses)))
         
         # Test AB magnitude
         ab_mag = AB_passband_luminosity(mock_filter, wavelengths, observed_flux[:, 0])
