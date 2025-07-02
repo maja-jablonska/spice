@@ -491,7 +491,7 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
     return _reset_pulsations(m)
 
 
-@jax.jit
+#@jax.jit
 def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, magnitude_prim: float,
                          radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
     # Ensure pulsation_angle is treated as scalar if it's a single value in an array
@@ -508,6 +508,16 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude
     center_harmonic_mags = spherical_harmonic_with_tilt(harmonic_parameters[0], harmonic_parameters[1], m.d_centers,
                                                         pulsation_axis, scalar_pulsation_angle)[:,
                                                                                          jnp.newaxis]
+    # Rescale harmonic magnitudes from -1 to 1 range
+    # Normalize to (-1, 1)
+    # Normalize vertex_harmonic_mags to the range (-1, 1) by scaling to [0, 1] using the min and max,
+    # then mapping to (-1, 1). jnp.ptp (peak-to-peak) is used to get the range (max - min).
+    # This ensures the values are distributed symmetrically around zero.
+    # The original normalization maps the minimum value to -1 and the maximum to +1,
+    # but if the harmonic is negative, this can flip the sign of the physical displacement.
+    # Instead, preserve the sign of the original harmonic magnitudes by dividing by the maximum absolute value.
+    vertex_harmonic_mags = vertex_harmonic_mags / (jnp.max(jnp.abs(vertex_harmonic_mags)) + 1e-8)
+    center_harmonic_mags = center_harmonic_mags / (jnp.max(jnp.abs(center_harmonic_mags)) + 1e-8)
     direction_vectors = m.d_vertices / \
         jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
     center_direction_vectors = m.d_centers / \
