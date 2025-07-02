@@ -177,7 +177,7 @@ def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0.,
 
 
 @jax.jit
-def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> float:
+def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float, d0: float = 0.0) -> float:
     """
     Evaluate a Fourier series for a specific timestamp.
     
@@ -186,6 +186,7 @@ def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Flo
         d (Float[Array, "1 n_orders"]): amplitudes for each order
         phi (Float[Array, "1 n_orders"]): phases for each order
         timestamp (float): time at which to evaluate the series
+        d0 (float): DC component (constant term) of the Fourier series
         
     Returns:
         float: The computed Fourier series value
@@ -193,10 +194,11 @@ def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Flo
     # Make sure we don't have NaN values in the input
     d = jnp.nan_to_num(d)
     phi = jnp.nan_to_num(phi)
+    d0 = jnp.nan_to_num(d0)
     
-    def compute_fourier(P, d, phi, timestamp):
+    def compute_fourier(P, d, phi, timestamp, d0):
         n = jnp.arange(1, d.shape[0] + 1)
-        return jnp.sum(d * jnp.cos(2 * jnp.pi * n / P * timestamp - phi))
+        return d0 + jnp.sum(d * jnp.cos(2 * jnp.pi * n / P * timestamp - phi))
     
     def return_zero():
         return 0.0
@@ -205,20 +207,21 @@ def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Flo
     return jax.lax.cond(
         jnp.isnan(P) | (P == 0),
         return_zero,
-        lambda: compute_fourier(P, d, phi, timestamp)
+        lambda: compute_fourier(P, d, phi, timestamp, d0)
     )
 
 
 @jax.jit
-def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float) -> float:
+def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float, d0: float = 0.0) -> float:
     """
     Evaluate the derivative of a Fourier series for a specific timestamp.
     
     Args:
         P (float): period P in seconds
         d (Float[Array, "1 n_orders"]): amplitudes for each order
-        phi (Float[Array, "1 n_orders"]): phases for each order
+        phi (Float[Array, "1 n_orders"]): phases for each order in radians
         timestamp (float): time at which to evaluate the derivative
+        d0 (float): DC component (constant term) of the Fourier series (does not affect derivative)
         
     Returns:
         float: The computed derivative value
@@ -227,9 +230,12 @@ def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi
     d = jnp.nan_to_num(d)
     phi = jnp.nan_to_num(phi)
     
-    def compute_fourier_prim(P, d, phi, timestamp):
+    def compute_fourier_prim(P, d, phi, timestamp, d0):
         n = jnp.arange(1, d.shape[0] + 1)
-        return -2 * jnp.pi * jnp.sum(d * n / P * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
+        # This is the derivative of the Fourier series with respect to time
+        # Original: d0 + d * cos(2π * n/P * t - phi)
+        # Derivative: -d * (2π * n/P) * sin(2π * n/P * t - phi) (d0 term disappears)
+        return -jnp.sum(d * (2 * jnp.pi * n / P) * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
     
     def return_zero():
         return 0.0
@@ -238,7 +244,7 @@ def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi
     return jax.lax.cond(
         jnp.isnan(P) | (P == 0),
         return_zero,
-        lambda: compute_fourier_prim(P, d, phi, timestamp)
+        lambda: compute_fourier_prim(P, d, phi, timestamp, d0)
     )
 
 
