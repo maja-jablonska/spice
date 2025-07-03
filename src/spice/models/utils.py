@@ -235,7 +235,7 @@ def evaluate_fourier_prim_for_value(P: float, d: Float[Array, "1 n_orders"], phi
         # This is the derivative of the Fourier series with respect to time
         # Original: d0 + d * cos(2π * n/P * t - phi)
         # Derivative: -d * (2π * n/P) * sin(2π * n/P * t - phi) (d0 term disappears)
-        return -jnp.sum(d * (2 * jnp.pi * n / P) * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
+        return jnp.sum(d * (2 * jnp.pi * n / P) * jnp.sin(2 * jnp.pi * n / P * timestamp - phi))
     
     def return_zero():
         return 0.0
