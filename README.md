@@ -34,7 +34,6 @@ pip install stellar-spice[phoebe]
 
 ### 🔄 **Stellar Rotation**
 
-- **Differential rotation** modeling with customizable rotation laws
 - **Rotational broadening** effects on spectral lines
 - **Surface velocity field** calculations
 - **Time-dependent spectral variations** due to rotation
@@ -50,8 +49,6 @@ pip install stellar-spice[phoebe]
 
 - **Spherical harmonic spot modeling** for complex spot distributions
 - **Temperature contrast** between spots and photosphere
-- **Time-evolving spot patterns**
-- **Spot-induced spectral variations**
 
 ### ⭐ **Binary Star Systems**
 
@@ -64,7 +61,6 @@ pip install stellar-spice[phoebe]
 ### 📊 **Spectral Synthesis**
 
 - **Blackbody radiation** for basic stellar modeling
-- **ATLAS9 model atmospheres** for realistic stellar spectra
 - **Transformer-Payne** integration for ML-based spectral synthesis
 - **Custom spectral models** support
 
