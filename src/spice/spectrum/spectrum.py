@@ -16,11 +16,17 @@ DEFAULT_CHUNK_SIZE: int = 1024
 C: float = 299792.458  # km/s
 SOL_RAD_CM = 69570000000.0
 
+# Apply Doppler shift to wavelengths (in Angstroms)
+# vrad is in km/s, C is speed of light in km/s
 apply_vrad = lambda x, vrad: x * (vrad / C + 1)
+# Apply Doppler shift to log10 of wavelengths (log10 of Angstroms)
 apply_vrad_log = lambda x, vrad: x + jnp.log10(vrad / C + 1)
+# Vectorized version that applies Doppler shift to all wavelengths for each velocity
 v_apply_vrad = jax.jit(jax.vmap(apply_vrad, in_axes=(None, 0)))
 
-# n_wavelengths, n_vertices
+# Vectorized version that applies Doppler shift to log wavelengths
+# Input shapes: x (n_wavelengths,), vrad (n_vertices,)
+# Output shape: (n_vertices, n_wavelengths)
 v_apply_vrad_log = jax.jit(jax.vmap(apply_vrad_log, in_axes=(None, 0), out_axes=0))
 
 
@@ -94,7 +100,7 @@ def __spectrum_flash_sum(intensity_fn,
         atmosphere_mul = jnp.multiply(
             (a_chunk)[:, jnp.newaxis, jnp.newaxis],
             v_in)
-
+        
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)
 
         return (chunk_idx + k_chunk_sizes, new_atmo_sum), chunk_idx+k_chunk_sizes
