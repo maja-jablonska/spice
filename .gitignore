@@ -8,3 +8,5 @@ __pycache__
 
 /Users/mjablons/Documents/stellar-mesh-integration/tutorial/paper_results/phoebe_checks/
 /Users/mjablons/Documents/stellar-mesh-integration/tutorial/paper_results/phoebe_lc_checks
+
+tutorial/paper_results/*.pkl
