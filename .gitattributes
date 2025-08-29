@@ -1,3 +1,5 @@
+tutorial/paper_results/cepheid_data/delta_cephei_spectra_broad.pkl filter=lfs diff=lfs merge=lfs -text
+tutorial/paper_results/paper_plots/pulsation_stacking.svg filter=lfs diff=lfs merge=lfs -text
 *.svg filter=lfs diff=lfs merge=lfs -text
 *.pkl filter=lfs diff=lfs merge=lfs -text
 * !text !filter !merge !diff
