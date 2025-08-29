@@ -133,7 +133,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         lin_velocity = 2 * np.pi * radius / period / 1e5  # km/s
 
         ones_like_centers = np.ones_like(phoebe_config.get_center_velocities(time, component))[:, 0]
-        log_gs = ones_like_centers * phoebe_config.b.get_quantity('logg', component=str(component), context='component')
+        log_gs = ones_like_centers * phoebe_config.b.get_quantity('loggs', component=str(component), time=time)
 
         if override_parameters:
             params = override_parameters
