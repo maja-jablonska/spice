@@ -5,3 +5,8 @@ __pycache__
 .vscode/
 .pytest_cache/
 .cache
+
+tutorial/paper_results/phoebe_checks/
+tutorial/paper_results/phoebe_lc_checks/
+tutorial/paper_results/*.pkl
+tutorial/paper_results/results/
