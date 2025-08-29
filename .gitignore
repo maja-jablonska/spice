@@ -5,3 +5,6 @@ __pycache__
 .vscode/
 .pytest_cache/
 .cache
+
+/Users/mjablons/Documents/stellar-mesh-integration/tutorial/paper_results/phoebe_checks/
+/Users/mjablons/Documents/stellar-mesh-integration/tutorial/paper_results/phoebe_lc_checks
