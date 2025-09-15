@@ -12,7 +12,9 @@ from jax import tree_util
 from spice.models.model import Model
 from spice.models.mesh_transform import transform, evaluate_body_orbit
 from spice.models.orbit_utils import get_orbit_jax
-from spice.models.mesh_view_kdtree import get_optimal_search_radius, resolve_occlusion
+from spice.models.mesh_view import resolve_occlusion
+
+import jaxkd as jk
 
 # Make PHOEBE-related imports optional
 try:
@@ -27,6 +29,9 @@ DAY_TO_YEAR = 0.0027378507871321013
 SOLAR_MASS_KG = 1.988409870698051e+30
 SOLAR_RAD_CM = 6.957e10
 SOLAR_RAD_M = 6.957e8
+
+def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:
+    return jk.build_tree(jnp.zeros(points_shape))
 
 class Binary(NamedTuple):
     body1: Model
@@ -62,6 +67,7 @@ class Binary(NamedTuple):
           Returns:
               Binary: a binary consisting of body1 and body2
           """
+
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
                    jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
@@ -160,10 +166,14 @@ def _add_orbit(binary: Binary, P: float, ecc: float,
     orbit_resolution_times = jnp.linspace(0, P, orbit_resolution_points)
     orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass,
                           P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma)
+    
+    new_body1_centers = (orbit[0, :, :]+orbit[2, :, :])/SOLAR_RAD_M
+    new_body2_centers = (orbit[0, :, :]+orbit[4, :, :])/SOLAR_RAD_M
+    
     return binary._replace(P=P, ecc=ecc, T=T, i=i, omega=omega, Omega=Omega, mean_anomaly=mean_anomaly, reference_time=reference_time,
                            vgamma=vgamma,
                            evaluated_times=orbit_resolution_times,
-                           body1_centers=(orbit[0, :, :]+orbit[2, :, :])/SOLAR_RAD_M, body2_centers=(orbit[0, :, :]+orbit[4, :, :])/SOLAR_RAD_M,
+                           body1_centers=new_body1_centers, body2_centers=new_body2_centers,
                            body1_velocities=(orbit[1, :, :]+orbit[3, :, :]), body2_velocities=(orbit[1, :, :]+orbit[5, :, :]))
 
 
@@ -244,14 +254,13 @@ def _interpolate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
 
 
 
-@jax.jit
-def _evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: float) -> Tuple[Model, Model]:
+@partial(jax.jit, static_argnums=(2, 3))
+def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[Model, Model]:
     """Evaluate the orbit at a specific time.
 
     Args:
         binary (Binary): Binary to evaluate
         time (ArrayLike): Time at which to evaluate the orbit
-        search_radius_factor (float): Search radius factor for KD-tree occlusion detection
 
     Returns:
         Tuple[Model, Model]: Updated primary and secondary models at the specified time
@@ -259,19 +268,18 @@ def _evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: float
     body1, body2 = _interpolate_orbit(binary, time)
 
     # Resolve occlusion using KD-trees
-    body1 = resolve_occlusion(body1, body2, search_radius_factor)
-    body2 = resolve_occlusion(body2, body1, search_radius_factor)
+    body1 = resolve_occlusion(body1, body2, n_neighbors2)
+    body2 = resolve_occlusion(body2, body1, n_neighbors1)
     
     return body1, body2
 
-@jax.jit
-def v_evaluate_orbit(binary: Binary, times: ArrayLike, search_radius_factor: float) -> Tuple[List[Model], List[Model]]:
+@partial(jax.jit, static_argnums=(2, 3))
+def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[List[Model], List[Model]]:
     """Evaluate the orbit at multiple times.
 
     Args:
         binary (Binary): Binary to evaluate
         times (ArrayLike): Times at which to evaluate the orbit
-        search_radius_factor (float): Search radius factor for KD-tree occlusion detection
 
     Returns:
         Tuple[List[Model], List[Model]]: Lists of updated primary and secondary models at the specified times,
@@ -279,7 +287,7 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, search_radius_factor: flo
     """
     # Map the evaluation function over each time point
     result_body1, result_body2 = jax.vmap(
-        lambda t: _evaluate_orbit(binary, t, search_radius_factor)
+        lambda t: _evaluate_orbit(binary, t, n_neighbors1, n_neighbors2)
     )(times)
     
     # The issue is that jax.lax.map doesn't properly handle the nested structure
@@ -302,33 +310,7 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, search_radius_factor: flo
     )
 
 
-def get_optimal_kdtree_params(m1, m2, min_radius_factor=1.5, max_radius_factor=5.0):
-    """Determine optimal parameters for KD-tree based occlusion detection.
-    
-    Args:
-        m1 (MeshModel): First mesh model
-        m2 (MeshModel): Second mesh model
-        min_radius_factor (float): Minimum radius factor to consider
-        max_radius_factor (float): Maximum radius factor to consider
-        
-    Returns:
-        float: Optimal search radius factor for KD-tree based occlusion detection
-    """
-    # Get visible areas of both meshes
-    m1_visible_areas = m1.cast_areas[m1.mus > 0]
-    m2_visible_areas = m2.cast_areas[m2.mus > 0]
-    
-    # Default to 2.0 if no visible areas
-    if m1_visible_areas.shape[0] == 0 or m2_visible_areas.shape[0] == 0:
-        return 2.0
-    
-    radius_factor = get_optimal_search_radius(m1, m2, min_radius_factor, max_radius_factor)
-    
-    print("Optimal KD-tree search radius factor:", radius_factor)
-    return radius_factor
-
-
-def evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: Optional[float] = None) -> Tuple[Model, Model]:
+def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
     """
     Evaluates the orbit of binary components at a specific time.
 
@@ -356,14 +338,14 @@ def evaluate_orbit(binary: Binary, time: ArrayLike, search_radius_factor: Option
         return PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY), \
                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY)
     else:
-        if search_radius_factor is None:
-            search_radius_factor = get_optimal_search_radius(binary.body1, binary.body2)
-            print("Using search radius factor:", search_radius_factor)
-        
-        return _evaluate_orbit(binary, time, search_radius_factor)
+        n_neighbours1 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))) - np.max(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))))
+        n_neighbours2 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))) - np.max(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))))
+        # Fixed: Use f-string formatting for debug print
+        jax.debug.print(f"n_neighbours1: {n_neighbours1}, n_neighbours2: {n_neighbours2}")
+        return _evaluate_orbit(binary, time, int(n_neighbours1), int(n_neighbours2))
 
 
-def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, search_radius_factor: Optional[float] = None) -> Tuple[List[Model], List[Model]]:
+def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Model], List[Model]]:
     """
     Evaluates the orbit of binary components at multiple specific times.
 
@@ -394,15 +376,7 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike, search_radius_fact
         return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
                [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
     else:
-        if search_radius_factor is None:
-            search_radius_factor = get_optimal_search_radius(binary.body1, binary.body2)
-            print("Using search radius factor for KD-tree:", search_radius_factor)
-        
-        # For proper occlusion detection, we need to evaluate each time point individually
-        # rather than using vectorized operations that might not properly handle the occlusion logic
-        if len(times) <= 10:  # For small number of times, use individual evaluations for better accuracy
-            return [evaluate_orbit(binary, t, search_radius_factor)[0] for t in times], \
-                   [evaluate_orbit(binary, t, search_radius_factor)[1] for t in times]
-        else:
-            # For larger arrays, use vectorized version but with caution about occlusion accuracy
-            return v_evaluate_orbit(binary, times, search_radius_factor)
+        n_neighbours1 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))) - np.max(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))))
+        n_neighbours2 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))) - np.max(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))))
+        jax.debug.print(f"n_neighbours1: {n_neighbours1}, n_neighbours2: {n_neighbours2}")
+        return v_evaluate_orbit(binary, times, int(n_neighbours1), int(n_neighbours2))
