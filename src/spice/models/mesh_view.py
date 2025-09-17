@@ -12,6 +12,81 @@ import jaxkd as jk
 from jaxtyping import Array, Float
 
 
+@jax.jit
+def point_in_triangle(pt, tri_verts):  # tri_verts: (3,2)
+    a, b, c = tri_verts[0], tri_verts[1], tri_verts[2]
+    v0 = c - a
+    v1 = b - a
+    v2 = pt - a
+    dot00 = jnp.dot(v0, v0)
+    dot01 = jnp.dot(v0, v1)
+    dot02 = jnp.dot(v0, v2)
+    dot11 = jnp.dot(v1, v1)
+    dot12 = jnp.dot(v1, v2)
+    denom = dot00 * dot11 - dot01 * dot01
+    denom = jnp.where(denom == 0.0, jnp.finfo(tri_verts.dtype).eps, denom)
+    u = (dot11 * dot02 - dot01 * dot12) / denom
+    v = (dot00 * dot12 - dot01 * dot02) / denom
+    return (u >= 0) & (v >= 0) & (u + v <= 1)
+
+@jax.jit
+def construct_triangle_to_gridpts(mesh, n_grid: int = 50):
+    # DO NOT boolean-index with mesh.mus inside jit
+    faces   = jnp.asarray(mesh.faces).astype(jnp.int32)        # (T, 3)
+    visible = (jnp.asarray(mesh.mus) > 0)                      # (T,)
+    verts2d = jnp.asarray(mesh.cast_vertices).astype(jnp.float32)  # (V, 2)
+
+    # Grid over bounds
+    x_min, y_min = jnp.min(verts2d, axis=0)
+    x_max, y_max = jnp.max(verts2d, axis=0)
+    x_grid = jnp.linspace(x_min, x_max, n_grid)
+    y_grid = jnp.linspace(y_min, y_max, n_grid)
+    xx, yy = jnp.meshgrid(x_grid, y_grid, indexing="xy")
+    grid_points = jnp.stack([xx.ravel(), yy.ravel()], axis=-1)   # (P, 2)
+
+    # Triangle vertices for all faces
+    tri_verts = verts2d[faces]  # (T, 3, 2)
+
+    # Vectorized point-in-triangle for ALL faces, then mask by 'visible'
+    vmap_pt  = jax.vmap(lambda pt, tri: point_in_triangle(pt, tri), in_axes=(0, None))
+    vmap_tri = jax.vmap(lambda tri: vmap_pt(grid_points, tri),      in_axes=(0,))
+    mask_TP  = vmap_tri(tri_verts)                                  # (T, P)
+    mask_TP  = jnp.where(visible[:, None], mask_TP, False)          # zero-out invisible faces
+
+    # For each grid point pick the first visible triangle (or -1)
+    first_true = jnp.argmax(mask_TP, axis=0)            # (P,)
+    any_true   = jnp.any(mask_TP, axis=0)               # (P,)
+    grid_tri_indices = jnp.where(any_true, first_true, -1).astype(jnp.int32)
+
+    return mask_TP, grid_tri_indices, grid_points
+
+
+@jax.jit
+def construct_points_in_circles(grid_points, circle_radius=0.25):
+    # grid_points: (N, 2)
+    centers = grid_points[:, None, :]   # (N, 1, 2)
+    pts     = grid_points[None, :, :]   # (1, N, 2)
+    dists2  = jnp.sum((centers - pts) ** 2, axis=-1)  # (N, N)
+    mask    = dists2 <= circle_radius**2              # (N, N) bool
+    return mask
+
+
+@jax.jit
+def find_triangle_counts(points_in_circles_mask, triangle_to_gridpts_mask):
+    # triangle_to_gridpts_mask: (T, P)
+    # points_in_circles_mask:   (C, P)
+
+    # For each (t, c), check if there exists a grid point p that is in both:
+    # (T, 1, P) & (1, C, P) -> (T, C, P) -> any over P -> (T, C)
+    intersects_TC = jnp.any(
+        triangle_to_gridpts_mask[:, None, :] & points_in_circles_mask[None, :, :],
+        axis=2
+    )  # bool (T, C)
+
+    # Count triangles per circle: sum over T
+    counts_C = jnp.sum(intersects_TC, axis=0).astype(jnp.int32)  # (C,)
+    return counts_C
+
 
 @register_pytree_node_class
 class Grid:
@@ -126,7 +201,7 @@ def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
 
 
 @jax.jit
-def visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]:
+def _visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]:
     """
     Compute the visible area between two polygons (vertices1 and vertices2).
     The function expects vertices1 and vertices2 to be (N, 3) arrays representing
@@ -151,6 +226,22 @@ def visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"
     return 0.5 * jnp.abs(jnp.sum(terms))  # scalar
 
 
+def visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]:
+    """
+    Compute the visible area between two polygons (vertices1 and vertices2).
+    The function expects vertices1 and vertices2 to be (N, 3) arrays representing
+    the 3D coordinates of the polygon vertices. The output is a scalar area.
+    """
+    nan1 = jnp.any(jnp.isnan(vertices1))
+    nan2 = jnp.any(jnp.isnan(vertices2))
+    return jax.lax.cond(
+        nan1 | nan2,
+        lambda _: 0.0,
+        lambda _: _visible_area(vertices1, vertices2),
+        operand=None
+    )
+
+
 # total_visible_area: (vertices1: (n1, 3), vertices2s: (n_faces2, n2, 3)) -> (n_faces2,)
 # total visible area considering multiple occluders
 total_visible_area = jax.jit(jax.vmap(visible_area, in_axes=(None, 0)))
@@ -173,15 +264,33 @@ def _resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors
     m_occluder_faces = m_occluder.faces.astype(int)  # (n_faces2, 3)
 
     # Query n_neighbors nearest occluder faces for each occluded face
-    neighbours, _ = jk.build_and_query(m_occluder_centers, m_occluded_centers, k=int(5*n_neighbors))  # (n_faces1, n_neighbors)
+    neighbours, _ = jk.build_and_query(m_occluder_centers, m_occluded_centers, k=32)  # (n_faces1, n_neighbors)
+    
+    # Calculate distances between m_occluder centers and m_occluded center neighbours
+    # m_occluded_centers: (n_faces1, 3)
+    # m_occluder_centers: (n_faces2, 3)
+    # neighbours: (n_faces1, n_neighbors) -- indices into m_occluder_centers
+    # Gather the coordinates of the neighbour occluder centers for each occluded face
+    neighbour_occluder_centers = m_occluder_centers[neighbours]  # (n_faces1, n_neighbors, 3)
+    # Expand m_occluded_centers to (n_faces1, n_neighbors, 3) for broadcasting
+    occluded_centers_expanded = jnp.expand_dims(m_occluded_centers, axis=1)  # (n_faces1, 1, 3)
+    # Compute distances
+    distances = jnp.linalg.norm(occluded_centers_expanded - neighbour_occluder_centers, axis=-1)  # (n_faces1, n_neighbors)
+    # Take only distances smaller than radii
+    # m_occluded.radii: (n_faces1,)
+    # distances: (n_faces1, n_neighbors)
+    # We want a mask: (n_faces1, n_neighbors)
+    radii_expanded = jnp.expand_dims(m_occluded.radii, axis=1)  # (n_faces1, 1)
+    neighbour_mask = distances < radii_expanded  # (n_faces1, n_neighbors)
 
     # Gather the vertices for each occluded face (all faces)
-    occluded_vertices = m_occluded.cast_vertices[m_occluded_faces]  # (n_faces1, 3, 3)
+    occluded_vertices = m_occluded.cast_vertices[m_occluded_faces.astype(int)]  # (n_faces1, 3, 3)
 
     # Gather the vertices for each neighbour occluder face for each occluded face
     # neighbours: (n_faces1, n_neighbors)
     # m_occluder_faces[neighbours]: (n_faces1, n_neighbors, 3)
-    occluder_vertices = m_occluder.cast_vertices[m_occluder_faces[neighbours]]  # (n_faces1, n_neighbors, 3, 3)
+    neighbours = jnp.where(neighbour_mask, neighbours, jnp.ones_like(neighbours) * jnp.nan)
+    occluder_vertices = m_occluder.cast_vertices[m_occluder_faces[neighbours.astype(int)]]  # (n_faces1, n_neighbors, 3, 3)
 
     # Instead of flattening and calling visible_area directly (which is not batched and causes shape errors),
     # use vmap to vectorize visible_area over the neighbor axis for each occluded face.
