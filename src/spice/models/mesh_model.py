@@ -184,6 +184,12 @@ class MeshModel(Model, MeshModelNamedTuple):
     @property
     def cast_centers(self) -> Float[Array, "n_mesh_elements 2"]:
         return cast_to_normal_plane(self.centers, self.los_vector)
+    
+    @property
+    def cast_vertex_bounding_circle_radii(self) -> Float[Array, "n_mesh_elements"]:
+        mesh_centers = self.cast_centers
+        mesh_vertices = self.cast_vertices[self.faces.astype(int)]
+        return jnp.max(jnp.linalg.norm(mesh_vertices - mesh_centers[:, None, :], axis=2), axis=1)
 
     @property
     def cast_areas(self) -> Float[Array, "n_mesh_elements"]:

@@ -12,7 +12,7 @@ from jax import tree_util
 from spice.models.model import Model
 from spice.models.mesh_transform import transform, evaluate_body_orbit
 from spice.models.orbit_utils import get_orbit_jax
-from spice.models.mesh_view import resolve_occlusion
+from spice.models.mesh_view import construct_points_in_circles, construct_triangle_to_gridpts, find_triangle_counts, resolve_occlusion
 
 import jaxkd as jk
 
@@ -55,6 +55,9 @@ class Binary(NamedTuple):
     body2_centers: ArrayLike
     body1_velocities: ArrayLike
     body2_velocities: ArrayLike
+    
+    n_neighbours1: int
+    n_neighbours2: int
 
     @classmethod
     def from_bodies(cls, body1: Model, body2: Model) -> "Binary":
@@ -67,10 +70,21 @@ class Binary(NamedTuple):
           Returns:
               Binary: a binary consisting of body1 and body2
           """
+          
+        triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body1)
+        points_in_circles = construct_points_in_circles(grid_points, jnp.max(body2.cast_vertex_bounding_circle_radii))
+        triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
+        n_neighbours1 = np.max(triangle_counts)
+        
+        triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body2)
+        points_in_circles = construct_points_in_circles(grid_points, jnp.max(body1.cast_vertex_bounding_circle_radii))
+        triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
+        n_neighbours2 = np.max(triangle_counts)
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
-                   jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities))
+                   jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities),
+                   int(n_neighbours1), int(n_neighbours2))
 
 
 @tree_util.register_pytree_node_class
@@ -338,11 +352,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
         return PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY), \
                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY)
     else:
-        n_neighbours1 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))) - np.max(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))))
-        n_neighbours2 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))) - np.max(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))))
-        # Fixed: Use f-string formatting for debug print
-        jax.debug.print(f"n_neighbours1: {n_neighbours1}, n_neighbours2: {n_neighbours2}")
-        return _evaluate_orbit(binary, time, int(n_neighbours1), int(n_neighbours2))
+        return _evaluate_orbit(binary, time, int(binary.n_neighbours1), int(binary.n_neighbours2))
 
 
 def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Model], List[Model]]:
@@ -376,7 +386,4 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
         return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
                [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
     else:
-        n_neighbours1 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))) - np.max(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))))
-        n_neighbours2 = np.argmin(np.abs(np.cumsum(np.sort(np.array(binary.body1.cast_areas[binary.body1.mus > 0]))) - np.max(np.array(binary.body2.cast_areas[binary.body2.mus > 0]))))
-        jax.debug.print(f"n_neighbours1: {n_neighbours1}, n_neighbours2: {n_neighbours2}")
-        return v_evaluate_orbit(binary, times, int(n_neighbours1), int(n_neighbours2))
+        return v_evaluate_orbit(binary, times, int(binary.n_neighbours1), int(binary.n_neighbours2))
