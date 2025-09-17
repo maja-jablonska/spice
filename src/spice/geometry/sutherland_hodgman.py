@@ -43,10 +43,10 @@ def compute_intersection(p1: ArrayLike, p2: ArrayLike, q1: ArrayLike, q2: ArrayL
     Returns:
         ArrayLike: coordinates of the intersection of two lines
     """
-    x, y = jax.lax.cond(jnp.isclose(p1[0]-p2[0], 0),
+    x, y = jax.lax.cond(jnp.all(jnp.isclose(p1[0]-p2[0], 0)),
                         x_y_first_line_vertical,
                         lambda a, b, c, d: jax.lax.cond(
-                            jnp.isclose(c[0]-d[0], 0),
+                            jnp.all(jnp.isclose(c[0]-d[0], 0)),
                             x_y_second_line_vertical,
                             x_y_no_vertical,
                             a, b, c, d),
