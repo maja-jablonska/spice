@@ -34,12 +34,14 @@ jobs:
     - name: Publish package to TestPyPI for alpha and beta releases
       if: contains(github.ref, '-alpha') || contains(github.ref, '-beta')
       uses: pypa/gh-action-pypi-publish@release/v1
+      skip-existing: true
       with:
         repository-url: https://test.pypi.org/legacy/
       # Authentication handled via OIDC
     - name: Publish package to PyPI for stable releases
       if: "!contains(github.ref, '-alpha') && !contains(github.ref, '-beta')"
       uses: pypa/gh-action-pypi-publish@release/v1
+      skip-existing: true
       # The default target is PyPI
       # Authentication handled via OIDC
   
