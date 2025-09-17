@@ -44,6 +44,10 @@ class Model:
     @property
     def cast_centers(self) -> T:
         raise NotImplementedError
+    
+    @property
+    def cast_vertex_bounding_circle_radii(self) -> T:
+        raise NotImplementedError
 
     @property
     def cast_areas(self) -> T:
