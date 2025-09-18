@@ -1,13 +1,8 @@
-from typing import Tuple, Any
-
 import jax
 import jax.numpy as jnp
-from jax.typing import ArrayLike
 from .mesh_model import MeshModel
-from spice.geometry import clip, polygon_area
-from spice.geometry.utils import append_value_to_last_nan
+from spice.geometry import clip
 from functools import partial
-from jax.tree_util import register_pytree_node_class
 import jaxkd as jk
 from jaxtyping import Array, Float
 
@@ -88,102 +83,6 @@ def find_triangle_counts(points_in_circles_mask, triangle_to_gridpts_mask):
     return counts_C
 
 
-@register_pytree_node_class
-class Grid:
-    def __init__(self,
-                 x: ArrayLike,
-                 y: ArrayLike,
-                 x_span: float,
-                 y_span: float,
-                 grid: ArrayLike,
-                 n_cells: int,
-                 n_centers_m1: int,
-                 n_centers_m2: int,
-                 n_points_m1: int,
-                 n_points_m2: int):
-        self.x = x
-        self.y = y
-        self.x_span = x_span
-        self.y_span = y_span
-        self.grid = grid
-        self.n_cells = n_cells
-        self.n_centers_m1 = n_centers_m1
-        self.n_centers_m2 = n_centers_m2
-        self.n_points_m1 = n_points_m1
-        self.n_points_m2 = n_points_m2
-
-    @classmethod
-    def construct(cls, m1: MeshModel, m2: MeshModel, n_cells: int):
-        vs1, vs2 = m1.cast_vertices[m1.faces.astype(int)], m2.cast_vertices[m2.faces.astype(int)]
-
-        x_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, 0], vs2[:, 0]])),
-                               jnp.max(jnp.concatenate([vs1[:, 0], vs2[:, 0]])), n_cells)
-        y_range = jnp.linspace(jnp.min(jnp.concatenate([vs1[:, 1], vs2[:, 1]])),
-                               jnp.max(jnp.concatenate([vs1[:, 1], vs2[:, 1]])), n_cells)
-
-        nx, ny = jnp.meshgrid(x_range, y_range)
-        x, y = jnp.meshgrid(x_range, y_range, sparse=True)
-        x, y = x.flatten(), y.flatten()
-        return cls(
-            x=x,
-            y=y,
-            x_span=x[1] - x[0],
-            y_span=y[1] - y[0],
-            grid=jnp.vstack([nx.ravel(), ny.ravel()]).T,
-            n_cells=n_cells,
-            n_centers_m1=m1.cast_centers.shape[0],
-            n_centers_m2=m2.cast_centers.shape[0],
-            n_points_m1=jnp.ceil(4 * m1.cast_centers.shape[0] / (n_cells * n_cells)).astype(int).item(),
-            n_points_m2=jnp.ceil(4 * m2.cast_centers.shape[0] / (n_cells * n_cells)).astype(int).item()
-        )
-
-    def __hash__(self) -> int:
-        return self.n_cells
-
-    def __eq__(self, __value: object) -> bool:
-        return self.__hash__() == __value.__hash__()
-
-    def __repr__(self) -> str:
-        return "Grid(n_cells={})".format(self.n_cells)
-
-    def tree_flatten(self):
-        return (self.x, self.y, self.x_span, self.y_span, self.grid, self.n_cells,
-                self.n_centers_m1, self.n_centers_m2, self.n_points_m1, self.n_points_m2), None
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        return cls(*children)
-    
-    
-@jax.jit
-def get_grid_spans(m1, m2, n_cells_array):
-    """Calculate grid cell spans for different grid sizes.
-    
-    For each number of cells in n_cells_array, calculates the span (width/height) of grid cells
-    that would cover the projected area of both meshes. Returns the minimum of x and y spans
-    to ensure square grid cells.
-    
-    Args:
-        m1 (MeshModel): First mesh model with cast_vertices and faces
-        m2 (MeshModel): Second mesh model with cast_vertices and faces 
-        n_cells_array (ArrayLike): Array of different grid cell counts to try
-        
-    Returns:
-        ArrayLike: Array of grid cell spans corresponding to each n_cells value
-    """
-    vs1, vs2 = m1.cast_vertices[m1.faces.astype(int)], m2.cast_vertices[m2.faces.astype(int)]
-
-    x_min = jnp.min(jnp.concatenate([vs1[:, 0], vs2[:, 0]]))
-    x_max = jnp.max(jnp.concatenate([vs1[:, 0], vs2[:, 0]]))
-    y_min = jnp.min(jnp.concatenate([vs1[:, 1], vs2[:, 1]]))
-    y_max = jnp.max(jnp.concatenate([vs1[:, 1], vs2[:, 1]]))
-    
-    x_spans = (x_max - x_min) / n_cells_array
-    y_spans = (y_max - y_min) / n_cells_array
-    
-    return jnp.minimum(x_spans, y_spans)
-
-
 @jax.jit
 def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
     """Cast 3D vectors of centers and center velocities to the line-of-sight
@@ -254,7 +153,6 @@ def _resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors
     # Use all mesh elements for m_occluded and all neighbours for them from m_occluder
 
     # Masks for visible faces (not used for filtering, but for later masking)
-    occluder_visible_mask = m_occluder.mus > 0
     occluded_visible_mask = m_occluded.mus > 0
 
     # Use all centers and faces (no masking)
@@ -264,7 +162,7 @@ def _resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors
     m_occluder_faces = m_occluder.faces.astype(int)  # (n_faces2, 3)
 
     # Query n_neighbors nearest occluder faces for each occluded face
-    neighbours, _ = jk.build_and_query(m_occluder_centers, m_occluded_centers, k=32)  # (n_faces1, n_neighbors)
+    neighbours, _ = jk.build_and_query(m_occluder_centers, m_occluded_centers, k=n_neighbors)  # (n_faces1, n_neighbors)
     
     # Calculate distances between m_occluder centers and m_occluded center neighbours
     # m_occluded_centers: (n_faces1, 3)
