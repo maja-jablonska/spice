@@ -215,7 +215,9 @@ def resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors:
     Returns:
         MeshModel: m1 with updated visible areas
     """
-    o = _resolve_occlusion(m_occluded, m_occluder, n_neighbors)
+    o = jax.lax.cond(jnp.all(m_occluder.los_z>m_occluded.los_z),
+                     lambda: _resolve_occlusion(m_occluded, m_occluder, n_neighbors),
+                     lambda: jnp.zeros_like(m_occluded.occluded_areas))
     return m_occluded._replace(
         occluded_areas=o
     )
