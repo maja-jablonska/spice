@@ -29,6 +29,7 @@ DAY_TO_YEAR = 0.0027378507871321013
 SOLAR_MASS_KG = 1.988409870698051e+30
 SOLAR_RAD_CM = 6.957e10
 SOLAR_RAD_M = 6.957e8
+DEFAULT_N_NEIGHBOURS = 32
 
 def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:
     return jk.build_tree(jnp.zeros(points_shape))
@@ -74,12 +75,12 @@ class Binary(NamedTuple):
         triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body1)
         points_in_circles = construct_points_in_circles(grid_points, jnp.max(body2.cast_vertex_bounding_circle_radii))
         triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours1 = np.max(triangle_counts)
+        n_neighbours1 = np.max(triangle_counts) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
         
         triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body2)
         points_in_circles = construct_points_in_circles(grid_points, jnp.max(body1.cast_vertex_bounding_circle_radii))
         triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours2 = np.max(triangle_counts)
+        n_neighbours2 = np.max(triangle_counts) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
@@ -268,7 +269,7 @@ def _interpolate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
 
 
 
-@partial(jax.jit, static_argnums=(2, 3))
+@partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2"))
 def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[Model, Model]:
     """Evaluate the orbit at a specific time.
 
@@ -282,12 +283,12 @@ def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighb
     body1, body2 = _interpolate_orbit(binary, time)
 
     # Resolve occlusion using KD-trees
-    body1 = resolve_occlusion(body1, body2, n_neighbors2)
-    body2 = resolve_occlusion(body2, body1, n_neighbors1)
+    body1 = resolve_occlusion(body1, body2, n_neighbors=n_neighbors2)
+    body2 = resolve_occlusion(body2, body1, n_neighbors=n_neighbors1)
     
     return body1, body2
 
-@partial(jax.jit, static_argnums=(2, 3))
+@partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2"))
 def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[List[Model], List[Model]]:
     """Evaluate the orbit at multiple times.
 
@@ -301,7 +302,7 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neig
     """
     # Map the evaluation function over each time point
     result_body1, result_body2 = jax.vmap(
-        lambda t: _evaluate_orbit(binary, t, n_neighbors1, n_neighbors2)
+        lambda t: _evaluate_orbit(binary, t, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2)
     )(times)
     
     # The issue is that jax.lax.map doesn't properly handle the nested structure
@@ -352,7 +353,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
         return PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY), \
                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY)
     else:
-        return _evaluate_orbit(binary, time, int(binary.n_neighbours1), int(binary.n_neighbours2))
+        return _evaluate_orbit(binary, time, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
 
 
 def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Model], List[Model]]:
@@ -381,9 +382,8 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
         This function is optimized for performance by using JAX's vectorized map (`vmap`) and just-in-time (`jit`)
         compilation features, enabling efficient computation over arrays of times.
     """
-    
     if isinstance(binary, PhoebeBinary):
         return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
                [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
     else:
-        return v_evaluate_orbit(binary, times, int(binary.n_neighbours1), int(binary.n_neighbours2))
+        return v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
