@@ -10,6 +10,9 @@ import jax
 from typing import List, Any
 
 
+float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
+
 class ModelList:
     def __init__(self, items: List[Any]):
         self.models = items
@@ -297,30 +300,41 @@ def cast_to_los(vectors: Float[Array, "batch 3"], los_vector: Float[Array, "3"])
 
 
 @jax.jit
-def cast_to_normal_plane(vectors: Float[Array, "batch 3"], los_vector: Float[Array, "3"]) -> Float[Array, "batch 2"]:
-    """Cast 3D vectors to a 2D plane determined by a normal vector
-
-    Args:
-        vectors (Float[Array, "batch 3"]): Properties to be casted (n, 3)
-        los_vector (Float[Array, "3"]): LOS vector (3,)
-
-    Returns:
-        ArrayLike: Casted vectors (n, 2)
+def cast_to_normal_plane(vectors: jnp.ndarray, los_vector: jnp.ndarray) -> jnp.ndarray:
     """
-    """Cast 3D vectors to a 2D plane determined by the line-of-sight vector"""
-    # Calculate the normal vector from the line-of-sight vector
-    n = los_vector / jnp.linalg.norm(los_vector)
+    Project 3D vectors onto the plane perpendicular to los_vector.
     
-    # Create two orthogonal vectors in the plane perpendicular to the los_vector
-    v1 = jnp.array([n[1], -n[0], 0])
-    v1 = v1 / jnp.linalg.norm(v1)
-    v2 = jnp.cross(n, v1)
-    
-    # Project the vectors onto the plane
-    x = jnp.dot(vectors, v1)
-    y = jnp.dot(vectors, v2)
-    
-    return jnp.column_stack((x, y))
+    Args:
+        vectors: (..., 3) array of 3D vectors to project (batch or single).
+        los_vector: (3,) line-of-sight vector defining the plane normal.
+        
+    Returns:
+        (..., 2) array of 2D coordinates in an orthonormal basis of the plane.
+    """
+    eps = 1e-12
+
+    # Normalize LOS safely
+    n = los_vector / (jnp.linalg.norm(los_vector) + eps)  # (3,)
+
+    # Choose a reference axis not parallel to n
+    ez = jnp.array([0.0, 0.0, 1.0], dtype=float_dtype)
+    ex = jnp.array([1.0, 0.0, 0.0], dtype=float_dtype)
+
+    # If |n·ez| < 0.99 use ez, else fall back to ex
+    use_ez = jnp.abs(jnp.dot(n, ez)) < 0.99
+    ref = jax.lax.cond(use_ez, lambda _: ez, lambda _: ex, operand=None)
+
+    # Build orthonormal basis in the plane
+    v1 = jnp.cross(n, ref)
+    v1 = v1 / (jnp.linalg.norm(v1) + eps)
+    v2 = jnp.cross(n, v1)  # already orthogonal; norm ~1
+
+    # Project
+    # Support both (batch,3) and (3,) inputs:
+    x = jnp.einsum('...i,i->...', vectors, v1)  # (...,)
+    y = jnp.einsum('...i,i->...', vectors, v2)  # (...,)
+
+    return jnp.stack([x, y], axis=-1)
 
 
 @jax.jit
