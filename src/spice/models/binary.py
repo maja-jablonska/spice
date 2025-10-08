@@ -71,21 +71,11 @@ class Binary(NamedTuple):
           Returns:
               Binary: a binary consisting of body1 and body2
           """
-          
-        triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body1)
-        points_in_circles = construct_points_in_circles(grid_points, jnp.max(body2.cast_vertex_bounding_circle_radii))
-        triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours1 = 1.5*np.max(triangle_counts) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
-        
-        triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body2)
-        points_in_circles = construct_points_in_circles(grid_points, jnp.max(body1.cast_vertex_bounding_circle_radii))
-        triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours2 = 1.5*np.max(triangle_counts) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
                    jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities),
-                   int(n_neighbours1), int(n_neighbours2))
+                   DEFAULT_N_NEIGHBOURS, DEFAULT_N_NEIGHBOURS)
 
 
 @tree_util.register_pytree_node_class
