@@ -1,11 +1,16 @@
 import jax
 import jax.numpy as jnp
+
+from spice.models.utils import cast_to_los
 from .mesh_model import MeshModel
 from spice.geometry import clip
 from functools import partial
 import jaxkd as jk
 from jaxtyping import Array, Float
 
+
+float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+jax.debug.print("float_dtype: {}", float_dtype)
 
 @jax.jit
 def point_in_triangle(pt, tri_verts):  # tri_verts: (3,2)
@@ -204,7 +209,7 @@ def _resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors
     return total_occlusion
 
 
-@partial(jax.jit, static_argnums=(2,))
+@partial(jax.jit, static_argnames=("n_neighbors",))
 def resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors: int) -> MeshModel:
     """Calculate the occlusion of m_occluded by m_occluder
 
@@ -215,7 +220,11 @@ def resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors:
     Returns:
         MeshModel: m1 with updated visible areas
     """
-    o = _resolve_occlusion(m_occluded, m_occluder, n_neighbors)
+    m_occluder_center_z = cast_to_los(m_occluder.center, m_occluder.los_vector)
+    m_occluded_center_z = cast_to_los(m_occluded.center, m_occluded.los_vector)
+    o = jax.lax.cond(jnp.all(m_occluder_center_z>m_occluded_center_z),
+                     lambda: _resolve_occlusion(m_occluded, m_occluder, n_neighbors),
+                     lambda: jnp.zeros_like(m_occluded.occluded_areas, dtype=float_dtype))
     return m_occluded._replace(
         occluded_areas=o
     )
