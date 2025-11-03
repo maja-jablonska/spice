@@ -7,7 +7,7 @@ qs=(0.5 1.0)
 eccs=(0.0 0.3 0.6)
 primary_masses=(1.0)
 n_times=100
-output_path="eclipse_grid_results"
+output_path="scr_mk27/eclipse_grid_results"
 
 # Create output directory
 mkdir -p "$output_path"

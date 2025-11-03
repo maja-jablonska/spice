@@ -1,5 +1,4 @@
 from typing import Tuple
-import warnings
 
 try:
     import jax
@@ -16,70 +15,116 @@ C_CENTIMETERS = 29979245800.
 JY_TO_ERG = 1e-23
 H_CONST_ERG_S = 6.62607015*10**(-27)
 
+dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
+
+SQRT_2PI = jnp.sqrt(2.0 * jnp.pi)
+LOG2 = jnp.log(2.0)
+LN10 = jnp.log(10.0)
 
 @jax.jit
-def _apply_spectral_resolution_log(
-    log_wavelengths: ArrayLike,
-    spectrum: ArrayLike,
-    resolution: float,
-    max_sigma: float = 4,
-):
-    """Implementation of spectral resolution application that works with jit."""
-    delta_log_wave = (log_wavelengths[-1] - log_wavelengths[0]) / (log_wavelengths.shape[0] - 1)
-    sigma = 1 / (2 * jnp.sqrt(2 * jnp.log(2)) * jnp.log(10) * resolution * delta_log_wave)
+def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
+    """
+    Apply a single Gaussian spectral resolution to one spectrum (JIT-compatible).
+
+    Parameters
+    ----------
+    log_wavelength : (N,)
+        Wavelength grid in log10(λ). Must be uniformly spaced.
+    flux : (N,)
+        Input flux array (e.g. continuum-normalized spectrum).
+    R : float
+        Resolving power (λ / Δλ_FWHM).
+    window_size : float
+        Number of Gaussian σ on either side of the kernel (controls truncation).
+
+    Returns
+    -------
+    flux_lowres : (N,)
+        Spectrum convolved to the target resolving power.
+    """
+    N = flux.shape[0]
+    delta_log = (log_wavelength[-1] - log_wavelength[0]) / (N - 1)
+
+    # Gaussian sigma in log10(λ) space
+    sigma_log = 1.0 / (2.0 * jnp.sqrt(2.0 * LOG2) * R * LN10)
+
+    # Define kernel width (static cap for JIT safety)
+    max_half_width = 2046
+    est_half_width = jnp.floor(window_size * sigma_log / delta_log).astype(int)
+    half_width = jnp.minimum(est_half_width, max_half_width)
+
+    grid = jnp.arange(-max_half_width, max_half_width + 1)
+    x = grid * delta_log
+    mask = (jnp.abs(grid) <= half_width).astype(flux.dtype)
+    kernel = jnp.exp(-0.5 * (x / sigma_log) ** 2) * mask
+    kernel /= jnp.sum(kernel)
+
+    # Reshape correctly: (kernel_width, in_channels=1, out_channels=1)
+    kernel_reshaped = kernel[:, None, None]
+    flux_reshaped = flux[None, :, None]
+
+    # Reflect padding for edges
+    pad = max_half_width
+    flux_padded = jnp.pad(flux_reshaped, ((0, 0), (pad, pad), (0, 0)), mode="mean")
+
+    # Perform 1D convolution
+    flux_conv = jax.lax.conv_general_dilated(
+        lhs=flux_padded,      # (N, W, C)
+        rhs=kernel_reshaped,  # (kernel, inC, outC)
+        window_strides=(1,),
+        padding="VALID",
+        dimension_numbers=("NWC", "WIO", "NWC"),
+        precision=jax.lax.Precision.HIGHEST
+    )
     
-    # Use a fixed kernel size instead of dynamic size
-    max_kernel_size = 100  # Fixed size for kernel
-    x_positions = jnp.arange(-max_kernel_size, max_kernel_size+1)
-    
-    # Calculate Gaussian values for all positions
-    gaussian_values = jnp.exp(-0.5 * (x_positions / sigma) ** 2)
-    
-    # Apply a window based on max_sigma
-    window_size = jnp.int32(max_sigma * sigma)
-    valid_mask = (x_positions >= -window_size) & (x_positions <= window_size)
-    gaussian_values = gaussian_values * valid_mask
-    
-    # Normalize the kernel
-    gaussian_kernel = gaussian_values / jnp.sum(gaussian_values)
-    
-    # Convert to appropriate types
-    gaussian_kernel = jnp.asarray(gaussian_kernel)
-    spectrum = jnp.asarray(spectrum)
-    
-    # Convolve spectrum with Gaussian kernel
-    degraded_spectrum = 1.0 - jax.scipy.signal.convolve(1.0 - spectrum, gaussian_kernel, mode='same')
-    
-    return degraded_spectrum
+    return flux_conv[0, :, 0]
 
 
-def apply_spectral_resolution(
-    log_wavelengths: ArrayLike,
-    spectrum: ArrayLike,
-    resolution: float,
-    max_sigma: float = 4
+@jax.jit
+def apply_variable_resolution(
+    log_wavelength: jnp.ndarray,
+    flux: jnp.ndarray,
+    R_array: jnp.ndarray,
+    segment_size: int = 512,
 ):
     """
-    Applies a spectral resolution to a spectrum by convolving it with a Gaussian kernel.
-    
-    Parameters:
-    - log_wavelengths (jnp.ndarray): 1D array of log10(wavelengths), uniformly spaced in log-space.
-    - spectrum (jnp.ndarray): 1D array of the spectrum to be degraded.
-    - resolution (float): The spectral resolution R = λ/Δλ to apply.
-    - max_sigma (float, optional): Maximum sigma for the Gaussian kernel in units of standard deviations. Default is 4.
-    
-    Returns:
-    - degraded_spectrum (jnp.ndarray): The spectrum with the applied resolution.
-    """
-    if resolution <= 0:
-        raise ValueError("Resolution must be positive.")
+    Apply wavelength-dependent spectral resolution using local convolutions (JIT-friendly).
 
-    diffs_log = jnp.diff(log_wavelengths)
-    
-    if not jnp.allclose(diffs_log, diffs_log[0]):
-        warnings.warn("Wavelengths are not uniformly spaced in log-space. This may lead to incorrect results.")
-    
-    return _apply_spectral_resolution_log(log_wavelengths, spectrum, resolution, max_sigma)
+    Parameters
+    ----------
+    log_wavelength : (N,)
+        Wavelength grid in log10(λ).
+    flux : (N,)
+        Input flux array.
+    R_array : (N,)
+        Resolving power as a function of wavelength (one per pixel).
+    segment_size : int
+        Segment width where R is locally constant.
+
+    Returns
+    -------
+    flux_lowres : (N,)
+        Spectrum convolved with variable resolution.
+    """
+    N = flux.shape[0]
+    num_segments = N // segment_size + (N % segment_size > 0)
+
+    # Indices of segments (JAX-friendly)
+    segment_idx = jnp.arange(num_segments)
+
+    def process_segment(i, _):
+        i0 = i * segment_size
+        i1 = jnp.minimum(i0 + segment_size, N)
+        lam_seg = log_wavelength[i0:i1]
+        flux_seg = flux[i0:i1]
+        R_seg = jnp.mean(R_array[i0:i1])
+        seg_flux = apply_spectral_resolution(lam_seg, flux_seg, R_seg)
+        return None, seg_flux
+
+    _, seg_results = jax.lax.scan(process_segment, None, segment_idx)
+    return jnp.concatenate(seg_results)
+
 
 
 def scale_all_abundances_by_metallicity(tpayne, metallicity):

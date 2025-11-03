@@ -3,6 +3,7 @@ chex~=0.1.88
 cmasher~=1.9.2
 jaxtyping~=0.2.36
 jax>=0.4.38
+jaxkd>=0.1.2
 jaxlib>=0.4.38
 numpy~=1.26.4
 overrides~=7.7.0
