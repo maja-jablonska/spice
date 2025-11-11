@@ -8,13 +8,7 @@ from functools import partial
 import jaxkd as jk
 from jaxtyping import Array, Float
 
-<<<<<<< HEAD
 float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
-=======
-
-float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
-jax.debug.print("float_dtype: {}", float_dtype)
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 
 @jax.jit
 def point_in_triangle(pt, tri_verts):  # tri_verts: (3,2)

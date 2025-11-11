@@ -1,8 +1,5 @@
 Troubleshooting
 ===================================
-
-<<<<<<< HEAD
-<<<<<<< HEAD
 Enable X64
 ------------------------
 
@@ -26,9 +23,6 @@ Or set the environment variable:
 
 
 =======
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
-=======
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 Resource Exhaustion
 ------------------------
 

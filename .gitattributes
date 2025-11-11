@@ -2,7 +2,8 @@ tutorial/paper_results/cepheid_data/delta_cephei_spectra_broad.pkl filter=lfs di
 tutorial/paper_results/paper_plots/pulsation_stacking.svg filter=lfs diff=lfs merge=lfs -text
 *.svg filter=lfs diff=lfs merge=lfs -text
 *.pkl filter=lfs diff=lfs merge=lfs -text
-<<<<<<< HEAD
 * !text !filter !merge !diff
-=======
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
+
+*.ipynb	diff=jupyternotebook
+
+*.ipynb	merge=jupyternotebook

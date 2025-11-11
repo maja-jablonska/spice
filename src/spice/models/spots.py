@@ -96,48 +96,29 @@ generate_spherical_spots = jax.jit(jax.vmap(generate_spherical_spot, in_axes=(No
 
 @jax.jit
 def _add_spherical_harmonic_spot(mesh: MeshModel,
-<<<<<<< HEAD
                                  m_order: int, l_degree: int,
                                  param_delta: float,
                                  param_index: int) -> MeshModel:
     spot_parameters = spherical_harmonic(m_order, l_degree, mesh.centers) * param_delta
-=======
-                                 m: int, n: int,
-                                 param_delta: float,
-                                 param_index: int) -> MeshModel:
-    spot_parameters = spherical_harmonic(m, n, mesh.centers) * param_delta
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
     
     
 @jax.jit
 def _add_spherical_harmonic_spot_with_tilt(mesh: MeshModel,
-<<<<<<< HEAD
                                  m_order: int, l_degree: int,
-=======
-                                 m: int, n: int,
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
                                  param_delta: float,
                                  param_index: int,
                                  tilt_axis: ArrayLike = jnp.array([0., 0., 1.]),
                                  tilt_angle: float = 0.) -> MeshModel:
-<<<<<<< HEAD
     spot_parameters = spherical_harmonic_with_tilt(m_order, l_degree, mesh.centers, tilt_axis, tilt_angle) * param_delta
-=======
-    spot_parameters = spherical_harmonic_with_tilt(m, n, mesh.centers, tilt_axis, tilt_angle) * param_delta
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
 
 
 def add_spherical_harmonic_spot(mesh: MeshModel,
                                 m_order: Union[Int, Float],
-<<<<<<< HEAD
                                 l_degree: Union[Int, Float],
-=======
-                                n_degree: Union[Int, Float],
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
                                 param_delta: Float,
                                 param_index: Float,
                                 tilt_axis: Float[Array, "3"] = None,
@@ -154,15 +135,8 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
             Must not be a PhoebeModel as those are read-only.
         m_order (Union[Int, Float]): The order (m) of the spherical harmonic. Must be less than or equal 
             to n_degree. Determines the number of longitudinal nodes in the pattern.
-<<<<<<< HEAD
         l_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
-=======
-        n_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
             to m_order. Determines the total number of nodes in the pattern.
-        param_delta (Float): The maximum amplitude of the parameter variation. Represents the difference 
-            between the peak of the variation and the background value.
-        param_index (Float): The index of the parameter in the mesh model's parameter array that will be 
             modified by this variation.
         tilt_axis (Float[Array, "3"], optional): The axis around which to tilt the spherical harmonic pattern.
             Defaults to None (no tilt).
@@ -178,11 +152,7 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
-<<<<<<< HEAD
     if isinstance(m_order, int) and isinstance(l_degree, int) and m_order > l_degree:
-=======
-    if isinstance(m_order, int) and isinstance(n_degree, int) and m_order > n_degree:
->>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
         raise ValueError("m must be lesser or equal to n.")
     elif _is_arraylike(m_order) and _is_arraylike(n_degree):
         m_order = int(m_order.item())
