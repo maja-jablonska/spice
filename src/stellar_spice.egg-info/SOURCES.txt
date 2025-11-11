@@ -12,7 +12,10 @@ src/spice/icosphere_cache/icosphere_5.pickle
 src/spice/models/__init__.py
 src/spice/models/binary.py
 <<<<<<< HEAD
+<<<<<<< HEAD
 src/spice/models/eclipse_utils.py
+=======
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 =======
 >>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 src/spice/models/mesh_generation.py
@@ -20,6 +23,10 @@ src/spice/models/mesh_model.py
 src/spice/models/mesh_transform.py
 src/spice/models/mesh_view.py
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+src/spice/models/mesh_view_kdtree.py
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 =======
 src/spice/models/mesh_view_kdtree.py
 >>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
@@ -34,6 +41,10 @@ src/spice/plots/__init__.py
 src/spice/plots/plot_mesh.py
 src/spice/spectrum/__init__.py
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+src/spice/spectrum/atlas9_interpolator.py
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 =======
 src/spice/spectrum/atlas9_interpolator.py
 >>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
@@ -71,8 +82,12 @@ src/stellar_spice.egg-info/dependency_links.txt
 src/stellar_spice.egg-info/requires.txt
 src/stellar_spice.egg-info/top_level.txt
 <<<<<<< HEAD
+<<<<<<< HEAD
 tests/test_kdtree_occlusion.py
 tests/test_phoebe_optional.py
+=======
+tests/test_kdtree_occlusion.py
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 =======
 tests/test_kdtree_occlusion.py
 >>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
