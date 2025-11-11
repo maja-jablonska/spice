@@ -1,4 +1,8 @@
 from typing import Tuple
+<<<<<<< HEAD
+=======
+import warnings
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 
 try:
     import jax
@@ -15,6 +19,7 @@ C_CENTIMETERS = 29979245800.
 JY_TO_ERG = 1e-23
 H_CONST_ERG_S = 6.62607015*10**(-27)
 
+<<<<<<< HEAD
 dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
@@ -125,6 +130,72 @@ def apply_variable_resolution(
     _, seg_results = jax.lax.scan(process_segment, None, segment_idx)
     return jnp.concatenate(seg_results)
 
+=======
+
+@jax.jit
+def _apply_spectral_resolution_log(
+    log_wavelengths: ArrayLike,
+    spectrum: ArrayLike,
+    resolution: float,
+    max_sigma: float = 4,
+):
+    """Implementation of spectral resolution application that works with jit."""
+    delta_log_wave = (log_wavelengths[-1] - log_wavelengths[0]) / (log_wavelengths.shape[0] - 1)
+    sigma = 1 / (2 * jnp.sqrt(2 * jnp.log(2)) * jnp.log(10) * resolution * delta_log_wave)
+    
+    # Use a fixed kernel size instead of dynamic size
+    max_kernel_size = 100  # Fixed size for kernel
+    x_positions = jnp.arange(-max_kernel_size, max_kernel_size+1)
+    
+    # Calculate Gaussian values for all positions
+    gaussian_values = jnp.exp(-0.5 * (x_positions / sigma) ** 2)
+    
+    # Apply a window based on max_sigma
+    window_size = jnp.int32(max_sigma * sigma)
+    valid_mask = (x_positions >= -window_size) & (x_positions <= window_size)
+    gaussian_values = gaussian_values * valid_mask
+    
+    # Normalize the kernel
+    gaussian_kernel = gaussian_values / jnp.sum(gaussian_values)
+    
+    # Convert to appropriate types
+    gaussian_kernel = jnp.asarray(gaussian_kernel)
+    spectrum = jnp.asarray(spectrum)
+    
+    # Convolve spectrum with Gaussian kernel
+    degraded_spectrum = 1.0 - jax.scipy.signal.convolve(1.0 - spectrum, gaussian_kernel, mode='same')
+    
+    return degraded_spectrum
+
+
+def apply_spectral_resolution(
+    log_wavelengths: ArrayLike,
+    spectrum: ArrayLike,
+    resolution: float,
+    max_sigma: float = 4
+):
+    """
+    Applies a spectral resolution to a spectrum by convolving it with a Gaussian kernel.
+    
+    Parameters:
+    - log_wavelengths (jnp.ndarray): 1D array of log10(wavelengths), uniformly spaced in log-space.
+    - spectrum (jnp.ndarray): 1D array of the spectrum to be degraded.
+    - resolution (float): The spectral resolution R = λ/Δλ to apply.
+    - max_sigma (float, optional): Maximum sigma for the Gaussian kernel in units of standard deviations. Default is 4.
+    
+    Returns:
+    - degraded_spectrum (jnp.ndarray): The spectrum with the applied resolution.
+    """
+    if resolution <= 0:
+        raise ValueError("Resolution must be positive.")
+
+    diffs_log = jnp.diff(log_wavelengths)
+    
+    if not jnp.allclose(diffs_log, diffs_log[0]):
+        warnings.warn("Wavelengths are not uniformly spaced in log-space. This may lead to incorrect results.")
+    
+    return _apply_spectral_resolution_log(log_wavelengths, spectrum, resolution, max_sigma)
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 
 
 def scale_all_abundances_by_metallicity(tpayne, metallicity):

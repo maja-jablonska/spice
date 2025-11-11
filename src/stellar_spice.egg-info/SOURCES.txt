@@ -11,11 +11,18 @@ src/spice/icosphere_cache/icosphere_4.pickle
 src/spice/icosphere_cache/icosphere_5.pickle
 src/spice/models/__init__.py
 src/spice/models/binary.py
+<<<<<<< HEAD
 src/spice/models/eclipse_utils.py
+=======
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 src/spice/models/mesh_generation.py
 src/spice/models/mesh_model.py
 src/spice/models/mesh_transform.py
 src/spice/models/mesh_view.py
+<<<<<<< HEAD
+=======
+src/spice/models/mesh_view_kdtree.py
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 src/spice/models/model.py
 src/spice/models/orbit_utils.py
 src/spice/models/phoebe_model.py
@@ -26,6 +33,10 @@ src/spice/phoebe_model/DI-Her-meshes.py
 src/spice/plots/__init__.py
 src/spice/plots/plot_mesh.py
 src/spice/spectrum/__init__.py
+<<<<<<< HEAD
+=======
+src/spice/spectrum/atlas9_interpolator.py
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 src/spice/spectrum/filter.py
 src/spice/spectrum/planck_law.py
 src/spice/spectrum/spectrum.py
@@ -59,5 +70,9 @@ src/stellar_spice.egg-info/SOURCES.txt
 src/stellar_spice.egg-info/dependency_links.txt
 src/stellar_spice.egg-info/requires.txt
 src/stellar_spice.egg-info/top_level.txt
+<<<<<<< HEAD
 tests/test_kdtree_occlusion.py
 tests/test_phoebe_optional.py
+=======
+tests/test_kdtree_occlusion.py
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da

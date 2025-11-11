@@ -1,13 +1,20 @@
 Metadata-Version: 2.4
 Name: stellar-spice
+<<<<<<< HEAD
 Version: 1.6.1
+=======
+Version: 1.5.6
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 Description-Content-Type: text/markdown
 Requires-Dist: autofig~=1.2.0
 Requires-Dist: chex~=0.1.88
 Requires-Dist: cmasher~=1.9.2
 Requires-Dist: jaxtyping~=0.2.36
 Requires-Dist: jax>=0.4.38
+<<<<<<< HEAD
 Requires-Dist: jaxkd>=0.1.2
+=======
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 Requires-Dist: jaxlib>=0.4.38
 Requires-Dist: numpy~=1.26.4
 Requires-Dist: overrides~=7.7.0
@@ -26,6 +33,7 @@ Requires-Dist: phoebe~=2.4.17; extra == "phoebe"
 
 ![spice logo](https://raw.githubusercontent.com/maja-jablonska/spice/main/docs/img/spice_pink.svg)
 
+<<<<<<< HEAD
 # SPICE: SPectral Integration Compiled Engine
 
 A comprehensive Python library for modeling and analyzing stellar spectra with inhomogeneous surfaces, supporting rotation, pulsations, spots, and binary star systems.
@@ -33,11 +41,17 @@ A comprehensive Python library for modeling and analyzing stellar spectra with i
 ## Installation
 
 Install from PyPI:
+=======
+A stellar spectra integration library.
+
+The package can be installed using PyPI:
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 
 ```bash
 pip install stellar-spice
 ```
 
+<<<<<<< HEAD
 For PHOEBE integration support:
 
 ```bash
@@ -223,3 +237,21 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 **Paper currently in preparation** - Check back for the full scientific publication!
+=======
+Paper is currently in prep.
+
+# Documentation
+
+Read the [docs](https://spice.readthedocs.io) here.
+
+# Features implemented
+
+- [x] Rotation
+- [x] Spots
+- [x] Pulsations
+- [x] PHOEBE integration
+
+## Dev log
+
+Notebooks are being updated one by one.
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
