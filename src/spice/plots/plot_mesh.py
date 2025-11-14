@@ -20,7 +20,7 @@ DEFAULT_PLOT_PROPERTY_LABELS = {
 }
 
 DEFAULT_PROPERTY_CMAPS = {
-    'los_velocities': 'cmr.redshift',
+    'los_velocities': 'cmr.redshift_r',
 }
 
 DEFAULT_CMAP = 'cmr.bubblegum'
