@@ -491,7 +491,7 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
     return _reset_pulsations(m)
 
 
-#@jax.jit
+@jax.jit
 def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, magnitude_prim: float,
                          radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
     # Ensure pulsation_angle is treated as scalar if it's a single value in an array

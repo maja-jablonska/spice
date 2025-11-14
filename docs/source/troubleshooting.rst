@@ -1,6 +1,28 @@
 Troubleshooting
 ===================================
+Enable X64
+------------------------
 
+To enable X64, you can set the JAX config:
+
+.. code-block:: python
+
+    import jax
+    jax.config.update('jax_enable_x64', True)
+
+.. warning::
+
+   Make sure to run this before importing any other SPICE modules!
+
+Or set the environment variable:
+
+.. code-block:: bash
+
+    export JAX_ENABLE_X64=1
+
+
+
+=======
 Resource Exhaustion
 ------------------------
 

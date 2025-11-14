@@ -3,6 +3,13 @@ chex~=0.1.88
 cmasher~=1.9.2
 jaxtyping~=0.2.36
 jax>=0.4.38
+<<<<<<< HEAD
+<<<<<<< HEAD
+jaxkd>=0.1.2
+=======
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
+=======
+>>>>>>> 5115cc6c5a2747447e8dd26acc4501851ea5c7da
 jaxlib>=0.4.38
 numpy~=1.26.4
 overrides~=7.7.0
