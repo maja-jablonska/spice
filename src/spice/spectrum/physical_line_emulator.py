@@ -129,13 +129,22 @@ class PhysicalLineEmulator:
         """Compatibility layer for code that still passes μ separately.
         Builds a [Teff, logg, mu] vector without any Python branching."""
         sp = jnp.atleast_1d(spectral_parameters)
-        # Pad with defaults so first two always exist (works for len 0, 1, 2, or >2)
-        defaults = jnp.array([5777.0, 4.44], dtype=sp.dtype)
-        padded = jnp.concatenate([sp, defaults], axis=0)
 
-        teff = padded[0]           # sp[0] if present, else 5777.0
-        logg = padded[1]           # sp[1] if present, else 4.44
-        mu_v = jnp.asarray(mu, dtype=sp.dtype)
+        # ``spectral_parameters`` can be empty/short when older code paths only
+        # provide Teff or (Teff, logg).  Because this function is vmapped inside
+        # ``simulate_observed_flux`` we need to stay in JAX-land and avoid shape
+        # mismatches.  Choose sensible defaults for any missing entries without
+        # concatenating arrays of different rank.
+        if sp.shape[0] == 0:
+            dtype = jnp.float64
+            teff = jnp.array(5777.0, dtype=dtype)
+            logg = jnp.array(4.44, dtype=dtype)
+        else:
+            dtype = sp.dtype
+            teff = sp[0]
+            logg = sp[1] if sp.shape[0] > 1 else jnp.array(4.44, dtype=dtype)
+
+        mu_v = jnp.squeeze(jnp.asarray(mu, dtype=dtype))
 
         sp3 = jnp.stack([teff, logg, mu_v])
         return self.__intensity(log_wavelengths, sp3)
