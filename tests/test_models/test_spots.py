@@ -100,12 +100,12 @@ class TestSpotFunctions:
         tilt_degree = 10.
 
         modified_mesh = add_spherical_harmonic_spot(
-            mesh=mock_mesh, 
-            m_order=4, 
-            n_degree=4,
+            mesh=mock_mesh,
+            m=4,
+            n=4,
             param_delta=spot_temp - base_temp,
-            param_index=0, 
-            tilt_axis=tilt_axis, 
+            param_index=0,
+            tilt_axis=tilt_axis,
             tilt_angle=tilt_degree
         )
 
@@ -113,9 +113,9 @@ class TestSpotFunctions:
         
         # Check if the tilt has been applied
         untilted_mesh = add_spherical_harmonic_spot(
-            mesh=mock_mesh, 
-            m_order=4, 
-            n_degree=4,
+            mesh=mock_mesh,
+            m=4,
+            n=4,
             param_delta=spot_temp - base_temp,
             param_index=0
         )
@@ -129,19 +129,19 @@ class TestSpotFunctions:
         tilt_degree = 0.
 
         modified_mesh = add_spherical_harmonic_spot(
-            mesh=mock_mesh, 
-            m_order=4, 
-            n_degree=4,
+            mesh=mock_mesh,
+            m=4,
+            n=4,
             param_delta=spot_temp - base_temp,
-            param_index=0, 
-            tilt_axis=tilt_axis, 
+            param_index=0,
+            tilt_axis=tilt_axis,
             tilt_angle=tilt_degree
         )
 
         untilted_mesh = add_spherical_harmonic_spot(
-            mesh=mock_mesh, 
-            m_order=4, 
-            n_degree=4,
+            mesh=mock_mesh,
+            m=4,
+            n=4,
             param_delta=spot_temp - base_temp,
             param_index=0
         )
@@ -154,22 +154,22 @@ class TestSpotFunctions:
         tilt_degree = 45.
 
         modified_mesh_x = add_spherical_harmonic_spot(
-            mesh=mock_mesh, 
-            m_order=4, 
-            n_degree=4,
+            mesh=mock_mesh,
+            m=4,
+            n=4,
             param_delta=spot_temp - base_temp,
-            param_index=0, 
-            tilt_axis=jnp.array([1., 0., 0.]), 
+            param_index=0,
+            tilt_axis=jnp.array([1., 0., 0.]),
             tilt_angle=tilt_degree
         )
 
         modified_mesh_y = add_spherical_harmonic_spot(
-            mesh=mock_mesh, 
-            m_order=4, 
-            n_degree=4,
+            mesh=mock_mesh,
+            m=4,
+            n=4,
             param_delta=spot_temp - base_temp,
-            param_index=0, 
-            tilt_axis=jnp.array([0., 1., 0.]), 
+            param_index=0,
+            tilt_axis=jnp.array([0., 1., 0.]),
             tilt_angle=tilt_degree
         )
 
@@ -240,13 +240,20 @@ class TestSpotFunctions:
         chex.assert_shape(spotted.parameters, mock_mesh.parameters.shape)
 
     def test_add_ring_spot_modifies_temperature_column(self, mock_mesh):
-        cfg = RingSpotConfig(deltaT_umb=1000.0, deltaT_plage=200.0)
+        cfg = RingSpotConfig(umbra_delta=-1000.0, plage_delta=200.0)
         spotted = add_ring_spot(mock_mesh, param_index=0, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
         assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
 
-    def test_add_ring_spot_optionally_updates_ca_parameter(self, mock_mesh):
-        cfg = RingSpotConfig(dCa_plage=0.2, dCa_umb=0.1)
-        spotted = add_ring_spot(mock_mesh, param_index=0, ca_param_index=1, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
+    def test_add_ring_spot_allows_custom_deltas(self, mock_mesh):
+        cfg = RingSpotConfig()
+        spotted = add_ring_spot(
+            mock_mesh,
+            param_index=1,
+            config=cfg,
+            umbra_delta=-0.1,
+            plage_delta=0.2,
+            spot_axis=jnp.array([0., 0., 1.])
+        )
         assert not jnp.allclose(spotted.parameters[:, 1], mock_mesh.parameters[:, 1])
 
     def test_tilt_changes_ring_spot_pattern(self, mock_mesh):

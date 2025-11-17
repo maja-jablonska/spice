@@ -9,8 +9,7 @@ This note shows how to tune `RingSpotConfig` so that the umbral core and the pla
 | `sigma_umb_deg` | Gaussian width (1σ) of the cool core around the spot axis. | Multiply by a constant factor to make the core wider or narrower. A doubling makes the e-folding radius twice as large; halve it for a tighter core. |
 | `theta0_deg` | Polar angle that places the bright ring away from the axis. | Larger values push the ring closer to the stellar limb, smaller values keep it near the pole. |
 | `sigma_plage_deg` | Gaussian width (1σ) of the plage ring. | Controls the ring thickness; scale it just like `sigma_umb_deg`. |
-| `deltaT_umb` / `deltaT_plage` | Temperature contrast between the perturbed and base map. | Keep these proportional to maintain the same fractional contrast after resizing. |
-| `dCa_umb` / `dCa_plage` and `A_plage` / `B_umb` | Abundance or spectral depth adjustments. | Use the same scale factor as the temperature contrasts if you want the Ca response to remain visually consistent with the temperature map. |
+| `umbra_delta` / `plage_delta` | Additive perturbations that describe how strongly the core and ring deviate from the base map. | Keep these proportional to maintain the same fractional contrast after resizing. |
 
 Because the weights are Gaussian, the radius that encloses ~76% of the umbral power is `r ≈ sqrt(2) * sigma` (measured in the same units you use for `sigma`). If you prefer to specify a full-width at half-maximum (FWHM), convert it to `sigma` via `sigma = fwhm / 2.355` before writing the config.
 
@@ -32,10 +31,8 @@ Because the weights are Gaussian, the radius that encloses ~76% of the umbral po
    ```python
    scaled = replace(
        scaled,
-       deltaT_umb=cfg.deltaT_umb * s,
-       deltaT_plage=cfg.deltaT_plage * s,
-       dCa_plage=cfg.dCa_plage * s,
-       A_plage=cfg.A_plage * s,
+       umbra_delta=cfg.umbra_delta * s,
+       plage_delta=cfg.plage_delta * s,
    )
    ```
    Scaling the contrasts is not required—skip this block if you prefer to keep the original amplitudes.
@@ -52,8 +49,8 @@ compact_core = replace(
     sigma_umb_deg=10.0,
     theta0_deg=30.0,
     sigma_plage_deg=4.0,
-    deltaT_umb=800.0,
-    deltaT_plage=100.0,
+    umbra_delta=-800.0,
+    plage_delta=100.0,
 )
 
 wide_ring = replace(
@@ -61,9 +58,8 @@ wide_ring = replace(
     sigma_umb_deg=28.0,
     theta0_deg=65.0,
     sigma_plage_deg=15.0,
-    deltaT_umb=1500.0,
-    deltaT_plage=250.0,
-    A_plage=1.0,
+    umbra_delta=-1500.0,
+    plage_delta=250.0,
 )
 ```
 
@@ -80,6 +76,15 @@ mesh = IcosphereModel.construct(
 
 compact_mesh = add_ring_spot(mesh, param_index=0, config=compact_core)
 wide_mesh = add_ring_spot(mesh, param_index=0, config=wide_ring)
+
+# Apply the same geometry to a second parameter (e.g. Ca abundance)
+ca_mesh = add_ring_spot(
+    wide_mesh,
+    param_index=1,
+    config=RingSpotConfig(sigma_umb_deg=28.0, theta0_deg=65.0, sigma_plage_deg=15.0),
+    umbra_delta=-0.3,
+    plage_delta=0.5,
+)
 ```
 
 ## 4. Quick diagnostics
@@ -106,7 +111,7 @@ The printed radii should follow the scaling multiplier you chose in step 2. Repe
 
 1. Choose a multiplier `s` and update the config using section 2.
 2. Optionally dial in custom contrasts like the presets shown above.
-3. Apply `add_ring_spot` on your mesh (temperature column plus optional Ca column) to bake the perturbation into the model parameters.
+3. Apply `add_ring_spot` on your mesh (call it once per parameter column you want to perturb) to bake the pattern into the model parameters.
 4. Forward the spotted mesh to your SPICE emulator, or pull the weights directly through `ring_spot_weights` for bespoke workflows.
 
 Following these steps lets you quickly generate both compact polar rings and extended equatorial belts without rewriting your spot machinery—just rescale the configuration parameters and reuse the same mesh transform.
