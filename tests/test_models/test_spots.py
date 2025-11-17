@@ -2,7 +2,14 @@ import pickle
 
 import pytest
 import jax.numpy as jnp
-from spice.models.spots import add_spot, add_spherical_harmonic_spots, add_spherical_harmonic_spot, add_spots
+from spice.models.spots import (
+    RingSpotConfig,
+    add_ring_spot,
+    add_spot,
+    add_spherical_harmonic_spot,
+    add_spherical_harmonic_spots,
+    add_spots,
+)
 from tests.test_models.utils import default_icosphere
 
 import chex
@@ -231,3 +238,25 @@ class TestSpotFunctions:
                                              param_deltas, param_indices, tilt_angles=tilt_angles, tilt_axes=tilt_axes)
         chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
         chex.assert_shape(spotted.parameters, mock_mesh.parameters.shape)
+
+    def test_add_ring_spot_modifies_temperature_column(self, mock_mesh):
+        cfg = RingSpotConfig(deltaT_umb=1000.0, deltaT_plage=200.0)
+        spotted = add_ring_spot(mock_mesh, param_index=0, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
+        assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
+
+    def test_add_ring_spot_optionally_updates_ca_parameter(self, mock_mesh):
+        cfg = RingSpotConfig(dCa_plage=0.2, dCa_umb=0.1)
+        spotted = add_ring_spot(mock_mesh, param_index=0, ca_param_index=1, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
+        assert not jnp.allclose(spotted.parameters[:, 1], mock_mesh.parameters[:, 1])
+
+    def test_tilt_changes_ring_spot_pattern(self, mock_mesh):
+        cfg = RingSpotConfig()
+        untilted = add_ring_spot(mock_mesh, param_index=0, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
+        tilted = add_ring_spot(
+            mock_mesh,
+            param_index=0,
+            config=cfg,
+            tilt_axis=jnp.array([0., 1., 0.]),
+            tilt_angle=45.,
+        )
+        assert not jnp.allclose(untilted.parameters, tilted.parameters)

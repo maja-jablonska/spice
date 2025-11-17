@@ -1,14 +1,55 @@
 from typing import Optional, Union
 
+from spice.utils.ring_spot import RingSpotConfig, ring_spot_weights
+
 import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
 from spice.models.phoebe_model import PhoebeModel
 from .mesh_model import MeshModel
-from .utils import spherical_harmonic, spherical_harmonic_with_tilt
+from .utils import (
+    spherical_harmonic,
+    spherical_harmonic_with_tilt,
+    evaluate_rotation_matrix,
+    rotation_matrix,
+)
 
 from jaxtyping import Array, Int, Float
+
+DEFAULT_SPOT_AXIS = jnp.array([0.0, 0.0, 1.0])
+
+
+def _normalize_vector(vec: ArrayLike) -> Array:
+    vec = jnp.asarray(vec)
+    norm = jnp.linalg.norm(vec)
+    norm = jnp.where(norm > 0, norm, 1.0)
+    return vec / norm
+
+
+def _resolve_ring_spot_axis(
+    dtype: jnp.dtype,
+    spot_axis: Optional[ArrayLike],
+    tilt_axis: Optional[ArrayLike],
+    tilt_angle: Optional[float],
+) -> Array:
+    if spot_axis is not None:
+        return _normalize_vector(jnp.asarray(spot_axis, dtype=dtype))
+
+    axis = DEFAULT_SPOT_AXIS.astype(dtype)
+    if tilt_axis is None or tilt_angle is None or tilt_angle == 0.0:
+        return axis
+
+    tilt_axis = _normalize_vector(jnp.asarray(tilt_axis, dtype=dtype))
+    rot = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    return rot @ axis
+
+
+def _mesh_surface_normals(mesh: MeshModel) -> Array:
+    centers = mesh.d_centers
+    norms = jnp.linalg.norm(centers, axis=1, keepdims=True)
+    norms = jnp.where(norms > 0, norms, 1.0)
+    return centers / norms
 
 
 def _is_arraylike(x):
@@ -118,7 +159,7 @@ def _add_spherical_harmonic_spot_with_tilt(mesh: MeshModel,
 
 def add_spherical_harmonic_spot(mesh: MeshModel,
                                 m_order: Union[Int, Float],
-                                l_degree: Union[Int, Float],
+                                n_degree: Union[Int, Float],
                                 param_delta: Float,
                                 param_index: Float,
                                 tilt_axis: Float[Array, "3"] = None,
@@ -133,9 +174,9 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
     Args:
         mesh (MeshModel): The mesh model to which the spherical harmonic variation will be applied.
             Must not be a PhoebeModel as those are read-only.
-        m_order (Union[Int, Float]): The order (m) of the spherical harmonic. Must be less than or equal 
+        m_order (Union[Int, Float]): The order (m) of the spherical harmonic. Must be less than or equal
             to n_degree. Determines the number of longitudinal nodes in the pattern.
-        l_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
+        n_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
             to m_order. Determines the total number of nodes in the pattern.
             modified by this variation.
         tilt_axis (Float[Array, "3"], optional): The axis around which to tilt the spherical harmonic pattern.
@@ -152,14 +193,14 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
-    if isinstance(m_order, int) and isinstance(l_degree, int) and m_order > l_degree:
+    if isinstance(m_order, int) and isinstance(n_degree, int) and m_order > n_degree:
         raise ValueError("m must be lesser or equal to n.")
     elif _is_arraylike(m_order) and _is_arraylike(n_degree):
         m_order = int(m_order.item())
         n_degree = int(n_degree.item())
         if jnp.any(jnp.greater(m_order, n_degree)):
             raise ValueError("m must be lesser or equal to n.")
-        
+
     if tilt_axis is not None:
         tilt_angle = 0.0 if tilt_angle is None else tilt_angle
         return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, n_degree, param_delta, param_index, tilt_axis, tilt_angle)
@@ -272,8 +313,11 @@ def _add_spherical_harmonic_spots(mesh: MeshModel,
                                   param_indices: ArrayLike) -> MeshModel:
     def scan(carry, params):
         return _add_spherical_harmonic_spot(
-            carry, m=params[0].astype(int), n=params[1].astype(int),
-            param_delta=params[2], param_index=params[3].astype(int)
+            carry,
+            params[0].astype(int),
+            params[1].astype(int),
+            params[2],
+            params[3].astype(int),
         ), params
 
     updated_mesh, _ = jax.lax.scan(scan, mesh, jnp.vstack([m, n, param_deltas, param_indices]).T)
@@ -291,9 +335,13 @@ def _add_spherical_harmonic_spots_with_tilt(mesh: MeshModel,
         # Extract tilt axis from params[4:7] since it's 3 components
         tilt_axis = params[4:7]
         return _add_spherical_harmonic_spot_with_tilt(
-            carry, m=params[0].astype(int), n=params[1].astype(int),
-            param_delta=params[2], param_index=params[3].astype(int),
-            tilt_axis=tilt_axis, tilt_angle=params[7]
+            carry,
+            params[0].astype(int),
+            params[1].astype(int),
+            params[2],
+            params[3].astype(int),
+            tilt_axis=tilt_axis,
+            tilt_angle=params[7],
         ), params
 
     # Reshape tilt_axes to flatten the last dimension
@@ -349,3 +397,61 @@ def add_spherical_harmonic_spots(mesh: MeshModel,
         return _add_spherical_harmonic_spots_with_tilt(mesh, m_orders, n_degrees, param_deltas, param_indices, tilt_axes, tilt_angles)
     else:
         return _add_spherical_harmonic_spots(mesh, m_orders, n_degrees, param_deltas, param_indices)
+
+
+def add_ring_spot(
+    mesh: MeshModel,
+    param_index: int,
+    config: Optional[RingSpotConfig] = None,
+    ca_param_index: Optional[int] = None,
+    spot_axis: Optional[ArrayLike] = None,
+    tilt_axis: Optional[ArrayLike] = None,
+    tilt_angle: Optional[float] = None,
+) -> MeshModel:
+    """Apply the analytic ring spot perturbation directly on a mesh model.
+
+    Parameters
+    ----------
+    mesh:
+        Target :class:`~spice.models.mesh_model.MeshModel`. Must not be a
+        :class:`~spice.models.phoebe_model.PhoebeModel`.
+    param_index:
+        Column in ``mesh.parameters`` that stores the temperature (or other)
+        field that should be modified by the umbra/plage pattern.
+    config:
+        :class:`~spice.utils.ring_spot.RingSpotConfig` describing the geometry
+        and contrasts. Defaults to ``RingSpotConfig()``.
+    ca_param_index:
+        Optional second column index that will receive the Ca abundance
+        perturbation described by ``config``.
+    spot_axis:
+        Unit vector pointing towards the centre of the spot. If omitted, the
+        spot is aligned with the +Z axis unless ``tilt_axis``/``tilt_angle``
+        are provided.
+    tilt_axis / tilt_angle:
+        Alternative way to orient the spot by rotating the default +Z axis.
+
+    Returns
+    -------
+    MeshModel
+        A shallow copy of ``mesh`` with updated parameter columns.
+    """
+
+    if isinstance(mesh, PhoebeModel):
+        raise ValueError("PHOEBE models are read-only.")
+
+    cfg = RingSpotConfig() if config is None else config
+    dtype = mesh.parameters.dtype
+    s_hat = _resolve_ring_spot_axis(dtype, spot_axis, tilt_axis, tilt_angle)
+    n_hat = _mesh_surface_normals(mesh)
+    w_umb, w_plage = ring_spot_weights(n_hat, s_hat, cfg)
+
+    params = mesh.parameters
+    temperature = params[:, param_index] - cfg.deltaT_umb * w_umb + cfg.deltaT_plage * w_plage
+    params = params.at[:, param_index].set(temperature)
+
+    if ca_param_index is not None:
+        ca_values = params[:, ca_param_index] + cfg.dCa_plage * w_plage - cfg.dCa_umb * w_umb
+        params = params.at[:, ca_param_index].set(ca_values)
+
+    return mesh._replace(parameters=params)
