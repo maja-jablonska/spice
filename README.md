@@ -4,6 +4,8 @@
 
 A comprehensive Python library for modeling and analyzing stellar spectra with inhomogeneous surfaces, supporting rotation, pulsations, spots, and binary star systems.
 
+The paper is not submitted and available as a [preprint](https://arxiv.org/abs/2511.10998).
+
 ## Installation
 
 Install from PyPI:
@@ -171,12 +173,14 @@ spectrum = simulate_observed_flux(intensity_function, pb, wavelengths)
 If you use stellar-spice in your research, please cite:
 
 ```bibtex
-@article{spice,
-  title={SPICE - software for modelling synthetic spectra of stars with
-non-homogenous surfaces},
-  author={Jabłońska, M. et al.},
-  journal={In preparation},
-  year={2025}
+@misc{spice,
+      title={SPICE -- modelling synthetic spectra of stars with non-homogeneous surfaces}, 
+      author={M. Jabłońska, T. Różański, L. Casagrande, H. Shah, P. A. Kołaczek-Szymański, M. Rychlicki and Yuan-Sen Ting},
+      year={2025},
+      eprint={2511.10998},
+      archivePrefix={arXiv},
+      primaryClass={astro-ph.SR},
+      url={https://arxiv.org/abs/2511.10998}, 
 }
 ```
 
