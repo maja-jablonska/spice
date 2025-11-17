@@ -90,10 +90,10 @@ class TestMeshTransformations:
 
     def test_pulsation_functions(self, mesh_model):
         t = 1.0
-        m_order, n_degree = 1, 1
+        m_order, l_degree = 1, 1
         pulsation_period = 1
         fourier_series_parameters = jnp.array([[1, 1]])
-        pulsated_mesh = add_pulsation(mesh_model, m_order, n_degree, pulsation_period,
+        pulsated_mesh = add_pulsation(mesh_model, m_order, l_degree, pulsation_period,
                                       fourier_series_parameters)
         evaluated_pulsation_mesh = evaluate_pulsations(pulsated_mesh, t)
         assert not jnp.all(jnp.isclose(pulsated_mesh.los_velocities, evaluated_pulsation_mesh.los_velocities)), "Pulsation should be added to the mesh model."
@@ -103,10 +103,10 @@ class TestMeshTransformations:
         
     def test_pulsation_functions_fourier_as_array(self, mesh_model):
         t = 1.0
-        m_order, n_degree = jnp.array([1]), jnp.array([1])
+        m_order, l_degree = jnp.array([1]), jnp.array([1])
         pulsation_period = 1
         fourier_series_parameters = jnp.array([[1, 1]])
-        pulsated_mesh = add_pulsation(mesh_model, m_order, n_degree, pulsation_period,
+        pulsated_mesh = add_pulsation(mesh_model, m_order, l_degree, pulsation_period,
                                       fourier_series_parameters)
         evaluated_pulsation_mesh = evaluate_pulsations(pulsated_mesh, t)
         assert not jnp.all(jnp.isclose(pulsated_mesh.los_velocities, evaluated_pulsation_mesh.los_velocities)), "Pulsation should be added to the mesh model."
@@ -129,14 +129,14 @@ class TestMeshTransformations:
         
     def test_pulsation_with_tilt(self, mesh_model):
         t = 1800
-        m_order, n_degree = 1, 1
+        m_order, l_degree = 1, 1
         pulsation_period = 3600  # 1 hour
         fourier_series_parameters = jnp.array([[0.1, 0.0]])  # Amplitude 0.1, phase 0.0
         pulsation_axis = jnp.array([0.0, 1.0, 0.0])  # Y-axis
         pulsation_angle = 45.  # 45 degrees tilt
 
         # Add pulsation with tilt
-        pulsated_mesh = add_pulsation(mesh_model, m_order, n_degree, pulsation_period,
+        pulsated_mesh = add_pulsation(mesh_model, m_order, l_degree, pulsation_period,
                                       fourier_series_parameters, pulsation_axis, pulsation_angle)
         
         # Evaluate pulsation
@@ -152,7 +152,7 @@ class TestMeshTransformations:
             "Pulsation velocities should be non-zero"
         
         # Check if pulsation axis and angle are correctly set
-        harmonic_ind = m_order + mesh_model.max_pulsation_mode * n_degree
+        harmonic_ind = m_order + mesh_model.max_pulsation_mode * l_degree
         assert jnp.allclose(pulsated_mesh.pulsation_axes[harmonic_ind], 
                             pulsation_axis), \
             "Pulsation axis should be correctly set"
@@ -230,7 +230,7 @@ class TestMeshTransformations:
     def test_pulsation_dimensions(self, mesh_model):
         """Test dimensions of pulsation function outputs"""
         m_order = 1
-        n_degree = 1
+        l_degree = 1
         period = 3600.0
         fourier_params = jnp.array([[0.1, 0.0]])
         pulsation_axis = jnp.array([0., 1., 0.])
@@ -238,10 +238,10 @@ class TestMeshTransformations:
         t = 1800.0
 
         # Test add_pulsation
-        pulsated = add_pulsation(mesh_model, m_order, n_degree, period, 
+        pulsated = add_pulsation(mesh_model, m_order, l_degree, period,
                                 fourier_params, pulsation_axis, pulsation_angle)
         
-        max_ind = m_order + mesh_model.max_pulsation_mode * n_degree
+        max_ind = m_order + mesh_model.max_pulsation_mode * l_degree
         chex.assert_shape(pulsated.pulsation_axes[max_ind], (3,))
         chex.assert_shape(pulsated.fourier_series_parameters[max_ind], 
                          (mesh_model.max_fourier_order, 2))
