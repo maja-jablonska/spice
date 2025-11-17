@@ -61,7 +61,7 @@ class Binary(NamedTuple):
     n_neighbours2: int
 
     @classmethod
-    def from_bodies(cls, body1: Model, body2: Model) -> "Binary":
+    def from_bodies(cls, body1: Model, body2: Model, n_neighbours1: Optional[int] = None, n_neighbours2: Optional[int] = None) -> "Binary":
         """Construct a Binary object from two mesh models.
 
           Args:
@@ -75,12 +75,12 @@ class Binary(NamedTuple):
         triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body1)
         points_in_circles = construct_points_in_circles(grid_points, jnp.max(body2.cast_vertex_bounding_circle_radii))
         triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours1 = jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
+        n_neighbours1 = n_neighbours1 or jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
         
         triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body2)
         points_in_circles = construct_points_in_circles(grid_points, jnp.max(body1.cast_vertex_bounding_circle_radii))
         triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours2 = jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
+        n_neighbours2 = n_neighbours2 or jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
