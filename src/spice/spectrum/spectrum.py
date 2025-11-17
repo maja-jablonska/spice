@@ -148,7 +148,30 @@ def __spectrum_flash_sum_with_padding(intensity_fn,
 
 @partial(jax.jit, static_argnums=(1,))
 def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
-    return jnp.concatenate([x, jnp.zeros((chunk_size - x.shape[0] % chunk_size, *x.shape[1:]))], axis=0)
+    """Pad the leading dimension so ``x`` can be chunked evenly.
+
+    The padding size is the smallest number that makes ``x.shape[0]`` divisible by
+    ``chunk_size``.  When ``x`` already fits into an integer number of chunks no
+    padding is appended.  One-dimensional arrays (areas, μs, velocities) are
+    padded with zeros so the additional entries contribute nothing to the
+    spectrum.  Higher dimensional arrays (e.g. the per-face parameter vectors)
+    are padded by repeating the final valid row so that intensity evaluators do
+    not see unphysical zeros that could lead to NaNs before the zero-area mask
+    is applied.
+    """
+
+    pad_len = (-x.shape[0]) % chunk_size
+    if pad_len == 0:
+        return x
+
+    pad_shape = (pad_len, *x.shape[1:])
+    if x.ndim == 1:
+        pad_values = jnp.zeros(pad_shape, dtype=x.dtype)
+    else:
+        pad_row = jnp.broadcast_to(x[-1], x.shape[1:])
+        pad_values = jnp.repeat(pad_row[jnp.newaxis, ...], pad_len, axis=0)
+
+    return jnp.concatenate([x, pad_values], axis=0)
 
 
 # TODO: think: change to simulate_obseved_monochromatic_flux?
