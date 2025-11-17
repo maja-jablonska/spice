@@ -15,6 +15,23 @@ def humlicek_wofz(z: jnp.ndarray) -> jnp.ndarray:
     return jnp.exp(-z * z) * (1.0 + 1.128379167 * a)
 
 
+def _safe_voigt_profile(delta_lambda: jnp.ndarray,
+                        sigma: float,
+                        gamma: float) -> jnp.ndarray:
+    """Return a normalized Voigt profile without dividing by ~0 peaks."""
+
+    # Guard against exactly zero widths so the denominator stays finite even if
+    # callers try extreme combinations of microturbulent or thermal widths.
+    sigma = jnp.maximum(sigma, 1e-12)
+
+    z = (delta_lambda + 1j * gamma) / (sigma * jnp.sqrt(2.0))
+    V = jnp.real(humlicek_wofz(z))
+
+    peak = jnp.max(jnp.abs(V))
+    normalized = jnp.where(peak > 1e-12, V / peak, jnp.zeros_like(V))
+    return normalized
+
+
 @jax.jit
 def line_profile(
     wavelengths: jnp.ndarray,
@@ -46,9 +63,9 @@ def line_profile(
         return 1.0 / (1.0 + (Δλ / gamma) ** 2)
 
     def voigt(_):
-        z = (Δλ + 1j * gamma) / (sigma * jnp.sqrt(2))
-        V = jnp.real(humlicek_wofz(z))
-        return V / jnp.max(V)
+        return _safe_voigt_profile(Δλ, sigma, gamma)
 
     profile = jax.lax.switch(kind_id, [gaussian, lorentzian, voigt], None)
-    return 1.0 - depth * profile
+    profile = jnp.clip(profile, 0.0, 1.0)
+    clipped_depth = jnp.clip(depth, 0.0, 1.0)
+    return 1.0 - clipped_depth * profile
