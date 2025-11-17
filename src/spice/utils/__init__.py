@@ -3,7 +3,7 @@
 from .ring_spot import (
     RingSpotConfig,
     apply_ca_irt_scaling_local,
-    apply_ring_spot_ca_abundance,
+    apply_ring_spot_parameter,
     apply_ring_spot_temperature,
     apply_ring_spot_to_labels,
     ca_irt_scale_map,
@@ -16,7 +16,7 @@ __all__ = [
     "JAXWarning",
     "RingSpotConfig",
     "apply_ca_irt_scaling_local",
-    "apply_ring_spot_ca_abundance",
+    "apply_ring_spot_parameter",
     "apply_ring_spot_temperature",
     "apply_ring_spot_to_labels",
     "ca_irt_scale_map",

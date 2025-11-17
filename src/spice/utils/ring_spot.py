@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Mapping, Tuple
+from typing import Dict, Mapping, Tuple
 
 import jax.numpy as jnp
 
@@ -20,29 +20,19 @@ class RingSpotConfig:
         Polar angle of the bright ring centre relative to the spot axis in degrees.
     sigma_plage_deg:
         Width (1σ) of the plage ring in degrees.
-    deltaT_umb:
-        Temperature decrement to apply to the umbral core in Kelvin.
-    deltaT_plage:
-        Temperature increment to apply to the plage ring in Kelvin.
-    A_plage:
-        Multiplicative scaling applied to Ca II IRT line depths within the ring.
-    B_umb:
-        Multiplicative scaling applied to Ca II IRT line depths within the umbra.
-    dCa_plage:
-        Abundance enhancement (dex) applied to the plage.
-    dCa_umb:
-        Abundance decrement (dex) applied to the umbra.
+    umbra_delta:
+        Additive perturbation applied inside the umbral core. Use a negative
+        value to cool a temperature column or reduce an abundance.
+    plage_delta:
+        Additive perturbation applied to the plage ring. Use a positive value to
+        brighten or enhance the chosen parameter.
     """
 
     sigma_umb_deg: float = 17.0
     theta0_deg: float = 50.0
     sigma_plage_deg: float = 8.0
-    deltaT_umb: float = 1100.0
-    deltaT_plage: float = 150.0
-    A_plage: float = 0.7
-    B_umb: float = 0.3
-    dCa_plage: float = 0.5
-    dCa_umb: float = 0.0
+    umbra_delta: float = -1100.0
+    plage_delta: float = 150.0
 
 
 def _angle_between(v1: jnp.ndarray, v2: jnp.ndarray) -> jnp.ndarray:
@@ -72,33 +62,33 @@ def ring_spot_weights(
     return w_umb, w_plage
 
 
+def apply_ring_spot_parameter(
+    base: jnp.ndarray | float,
+    n_hat: jnp.ndarray,
+    s_hat: jnp.ndarray,
+    cfg: RingSpotConfig,
+    umbra_delta: float | None = None,
+    plage_delta: float | None = None,
+) -> jnp.ndarray:
+    """Apply the ring-spot perturbation to an arbitrary per-element field."""
+
+    base = jnp.asarray(base)
+    w_umb, w_plage = ring_spot_weights(n_hat, s_hat, cfg)
+
+    if base.ndim == 0:
+        base = jnp.full(w_umb.shape, base)
+
+    du = cfg.umbra_delta if umbra_delta is None else umbra_delta
+    dp = cfg.plage_delta if plage_delta is None else plage_delta
+    return base + du * w_umb + dp * w_plage
+
+
 def apply_ring_spot_temperature(
     T_base: jnp.ndarray | float, n_hat: jnp.ndarray, s_hat: jnp.ndarray, cfg: RingSpotConfig
 ) -> jnp.ndarray:
-    """Apply the ring spot temperature perturbation to a base field."""
+    """Backwards-compatible alias that targets the temperature column."""
 
-    T_base = jnp.asarray(T_base)
-    w_umb, w_plage = ring_spot_weights(n_hat, s_hat, cfg)
-
-    if T_base.ndim == 0:
-        T_base = jnp.full(w_umb.shape, T_base)
-
-    return T_base - cfg.deltaT_umb * w_umb + cfg.deltaT_plage * w_plage
-
-
-def apply_ring_spot_ca_abundance(
-    Ca_base: jnp.ndarray | float, n_hat: jnp.ndarray, s_hat: jnp.ndarray, cfg: RingSpotConfig
-) -> jnp.ndarray:
-    """Apply Ca abundance perturbations for the ring spot."""
-
-    Ca_base = jnp.asarray(Ca_base)
-    w_umb, w_plage = ring_spot_weights(n_hat, s_hat, cfg)
-
-    if Ca_base.ndim == 0:
-        Ca_base = jnp.full(w_umb.shape, Ca_base)
-
-    dCa = cfg.dCa_plage * w_plage - cfg.dCa_umb * w_umb
-    return Ca_base + dCa
+    return apply_ring_spot_parameter(T_base, n_hat, s_hat, cfg)
 
 
 def apply_ring_spot_to_labels(
@@ -106,7 +96,7 @@ def apply_ring_spot_to_labels(
     n_hat: jnp.ndarray,
     s_hat: jnp.ndarray,
     cfg: RingSpotConfig,
-    ca_keys: Iterable[str] | None = None,
+    label_deltas: Mapping[str, Tuple[float, float]] | None = None,
 ) -> Dict[str, jnp.ndarray]:
     """Return a spotted copy of a label dictionary suitable for SPICE.
 
@@ -116,29 +106,33 @@ def apply_ring_spot_to_labels(
         Mapping of per-element label arrays. Must contain ``"T_eff"``.
     n_hat, s_hat:
         Surface-normal array and spot direction in stellar coordinates.
-    ca_keys:
-        Optional override for which keys should be treated as Ca abundances.
+    label_deltas:
+        Optional mapping from label names to ``(umbra_delta, plage_delta)``
+        tuples. Defaults to modifying only ``"T_eff"`` using the values stored
+        in ``cfg``.
     """
 
     spotted = dict(labels)
-    spotted["T_eff"] = apply_ring_spot_temperature(labels["T_eff"], n_hat, s_hat, cfg)
+    deltas = label_deltas or {"T_eff": (cfg.umbra_delta, cfg.plage_delta)}
 
-    keys = ca_keys if ca_keys is not None else ("Ca_H", "Ca_Fe", "Ca_over_Fe")
-    for key in keys:
+    for key, (du, dp) in deltas.items():
         if key in labels:
-            spotted[key] = apply_ring_spot_ca_abundance(labels[key], n_hat, s_hat, cfg)
-            break
+            spotted[key] = apply_ring_spot_parameter(labels[key], n_hat, s_hat, cfg, du, dp)
 
     return spotted
 
 
 def ca_irt_scale_map(
-    n_hat: jnp.ndarray, s_hat: jnp.ndarray, cfg: RingSpotConfig
+    n_hat: jnp.ndarray,
+    s_hat: jnp.ndarray,
+    cfg: RingSpotConfig,
+    plage_scale: float = 0.0,
+    umbra_scale: float = 0.0,
 ) -> jnp.ndarray:
-    """Return a per-element Ca II IRT scaling map."""
+    """Return a per-element scaling map for arbitrary masked features."""
 
     w_umb, w_plage = ring_spot_weights(n_hat, s_hat, cfg)
-    return 1.0 + cfg.A_plage * w_plage - cfg.B_umb * w_umb
+    return 1.0 + plage_scale * w_plage + umbra_scale * w_umb
 
 
 def apply_ca_irt_scaling_local(
@@ -161,8 +155,8 @@ def apply_ca_irt_scaling_local(
 __all__ = [
     "RingSpotConfig",
     "ring_spot_weights",
+    "apply_ring_spot_parameter",
     "apply_ring_spot_temperature",
-    "apply_ring_spot_ca_abundance",
     "apply_ring_spot_to_labels",
     "ca_irt_scale_map",
     "apply_ca_irt_scaling_local",
