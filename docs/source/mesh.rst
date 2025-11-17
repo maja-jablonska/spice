@@ -338,7 +338,7 @@ In both cases, you can also add multiple spots to the mesh. Either by adding two
     m_harm_spots = add_spherical_harmonic_spots(
         mesh=m,
         m_orders=jnp.array([2, 3.]),
-        n_degrees=jnp.array([2, 3.]),
+        l_degrees=jnp.array([2, 3.]),
         param_deltas=jnp.array([1000, 1000.]),
         param_indices=jnp.array([0, 0])
     )

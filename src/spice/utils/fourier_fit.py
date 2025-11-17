@@ -2,7 +2,7 @@ import numpy as np
 from scipy import optimize
 import matplotlib.pyplot as plt
 
-def fit_fourier_series(radius, phases, period=None, n_terms=4, plot=False, m_order=None, n_degree=None):
+def fit_fourier_series(radius, phases, period=None, n_terms=4, plot=False, m_order=None, l_degree=None):
     """
     Fit a Fourier series to radius variation data and return results compatible with add_pulsation.
     
@@ -20,8 +20,8 @@ def fit_fourier_series(radius, phases, period=None, n_terms=4, plot=False, m_ord
         Whether to display a plot of the original data and the fit (default: False)
     m_order : int, optional
         The order (m) of the spherical harmonics for pulsation
-    n_degree : int, optional
-        The degree (n) of the spherical harmonics for pulsation
+    l_degree : int, optional
+        The degree (l) of the spherical harmonics for pulsation
         
     Returns:
     --------
@@ -33,7 +33,7 @@ def fit_fourier_series(radius, phases, period=None, n_terms=4, plot=False, m_ord
         - 'fitted_function': function that can evaluate the fit at any phase
         - 'pulsation_params': dict with parameters ready for add_pulsation:
             - 'm_order': order of spherical harmonics (if provided)
-            - 'n_degree': degree of spherical harmonics (if provided)
+            - 'l_degree': degree of spherical harmonics (if provided)
             - 'period': period in seconds (if provided)
             - 'fourier_series_parameters': numpy array of shape (n_terms, 2)
     """
