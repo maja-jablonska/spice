@@ -3,33 +3,37 @@ import jax.numpy as jnp
 
 KIND_MAP = {"gaussian": 0, "lorentzian": 1, "voigt": 2}
 
-
 def get_line_profile_id(kind: str) -> int:
     return KIND_MAP[kind]
 
 
-def humlicek_wofz(z: jnp.ndarray) -> jnp.ndarray:
-    """Approximation to the Faddeeva function (JAX-compatible)."""
-    t = jnp.abs(z)
-    a = jnp.where(t < 15, 1.0 / (z * z + 0.5), 1.0 / (z * z + 1.5))
-    return jnp.exp(-z * z) * (1.0 + 1.128379167 * a)
+def _pseudo_voigt_shape(Δλ: jnp.ndarray, sigma: float, gamma: float) -> jnp.ndarray:
+    """
+    Pseudo-Voigt kernel shape S(Δλ) with S(0)=1, wings→0.
 
+    Uses the Thompson, Cox & Hastings (1987) approximation.
+    """
+    # FWHM of Gaussian and Lorentzian
+    ln2 = jnp.log(2.0)
+    F_G = 2.0 * jnp.sqrt(2.0 * ln2) * sigma   # Gaussian FWHM
+    F_L = 2.0 * gamma                         # Lorentzian FWHM
 
-def _safe_voigt_profile(delta_lambda: jnp.ndarray,
-                        sigma: float,
-                        gamma: float) -> jnp.ndarray:
-    """Return a normalized Voigt profile without dividing by ~0 peaks."""
+    # Overall FWHM of Voigt
+    F = (F_L**5 + 2.69269 * F_L**4 * F_G + 2.42843 * F_L**3 * F_G**2
+         + 4.47163 * F_L**2 * F_G**3 + 0.07842 * F_L * F_G**4 + F_G**5) ** (1.0 / 5.0)
 
-    # Guard against exactly zero widths so the denominator stays finite even if
-    # callers try extreme combinations of microturbulent or thermal widths.
-    sigma = jnp.maximum(sigma, 1e-12)
+    # Mixing parameter eta
+    eta = 1.36603 * (F_L / F) - 0.47719 * (F_L / F) ** 2 + 0.11116 * (F_L / F) ** 3
+    eta = jnp.clip(eta, 0.0, 1.0)
 
-    z = (delta_lambda + 1j * gamma) / (sigma * jnp.sqrt(2.0))
-    V = jnp.real(humlicek_wofz(z))
+    x = 2.0 * Δλ / F  # dimensionless
 
-    peak = jnp.max(jnp.abs(V))
-    normalized = jnp.where(peak > 1e-12, V / peak, jnp.zeros_like(V))
-    return normalized
+    # Normalized Gaussian and Lorentzian parts with peak = 1
+    G = jnp.exp(-4.0 * ln2 * x**2)
+    L = 1.0 / (1.0 + x**2)
+
+    S = eta * L + (1.0 - eta) * G  # still S(0)=1
+    return S
 
 
 @jax.jit
@@ -38,34 +42,33 @@ def line_profile(
     center: float,
     sigma: float,
     depth: float,
-    kind_id: int = 0,  # 0=gaussian, 1=lorentzian, 2=voigt
+    kind_id: int = 0,
     gamma: float = 0.05,
 ) -> jnp.ndarray:
     """
-    Normalized absorption line profile.
-    Args:
-        wavelengths (jnp.ndarray): Wavelengths in Angstroms
-        center (float): Line center in Angstroms
-        sigma (float): Line width in Angstroms
-        depth (float): Line depth (0 = no line, 1 = complete absorption)
-        kind_id (int): Line profile kind (0 = gaussian, 1 = lorentzian, 2 = voigt)
-        gamma (float): Lorentzian width in Angstroms
+    Normalized absorption line profile (multiplicative).
 
-    Returns:
-        jnp.ndarray: Line profile
+    Returns I/I_cont with:
+        wings ~ 1
+        core  ~ 1 - depth
     """
     Δλ = wavelengths - center
+    depth_clipped = jnp.clip(depth, 0.0, 1.0)
 
     def gaussian(_):
+        # shape S: 1 at centre, 0 in wings
         return jnp.exp(-0.5 * (Δλ / sigma) ** 2)
 
     def lorentzian(_):
         return 1.0 / (1.0 + (Δλ / gamma) ** 2)
 
     def voigt(_):
-        return _safe_voigt_profile(Δλ, sigma, gamma)
+        return _pseudo_voigt_shape(Δλ, sigma, gamma)
 
-    profile = jax.lax.switch(kind_id, [gaussian, lorentzian, voigt], None)
-    profile = jnp.clip(profile, 0.0, 1.0)
-    clipped_depth = jnp.clip(depth, 0.0, 1.0)
-    return 1.0 - clipped_depth * profile
+    # S(Δλ) ∈ [0, 1]
+    shape = jax.lax.switch(kind_id, [gaussian, lorentzian, voigt], None)
+    shape = jnp.clip(shape, 0.0, 1.0)
+
+    # wings: S≈0 → 1 - d*0 = 1
+    # core : S=1 → 1 - d*1 = 1 - d
+    return 1.0 - depth_clipped * shape
