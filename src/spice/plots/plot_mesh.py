@@ -781,7 +781,8 @@ def animate_single_star(meshes: List[MeshModel],
                         draw_los_vector: bool = True,
                         draw_rotation_axis: bool = True,
                         view_angles: Optional[Tuple[float, float]] = None,
-                        fixed_norm: bool = True):
+                        fixed_norm: bool = True,
+                        log_property: bool = False):
     """
     Create an animation of a single star model over time (e.g., pulsating star).
     
@@ -817,6 +818,8 @@ def animate_single_star(meshes: List[MeshModel],
         Tuple of (elevation, azimuth) viewing angles. If None, uses default view
     fixed_norm : bool, default: True
         Whether to keep color normalization fixed across all frames
+    log_property : bool, default: False
+        Whether to apply a log10 transformation to the property
         
     Returns
     -------
@@ -852,12 +855,16 @@ def animate_single_star(meshes: List[MeshModel],
         all_property_values = []
         for mesh in meshes:
             prop_values, _ = _evaluate_to_be_mapped_property(mesh, property, property_label)
+            if log_property:
+                prop_values = np.log10(prop_values)
             all_property_values.append(prop_values)
         all_property_values = np.concatenate(all_property_values)
         vmin, vmax = np.nanmin(all_property_values), np.nanmax(all_property_values)
     else:
         # Just get the property label from the first mesh
         prop_values, _ = _evaluate_to_be_mapped_property(mesh, property, property_label)
+        if log_property:
+            prop_values = np.log10(prop_values)
         vmin, vmax = np.nanmin(prop_values), np.nanmax(prop_values)
     
     _, cbar_label = _evaluate_to_be_mapped_property(mesh, property, property_label)
@@ -882,6 +889,8 @@ def animate_single_star(meshes: List[MeshModel],
     
     # Set up colorbar
     cbar = fig.colorbar(mappable, cax=cbar_ax)
+    if log_property:
+        cbar_label = 'log10(' + cbar_label + ')'
     cbar.set_label(cbar_label, fontsize=12)
     
     # Title for timestamps

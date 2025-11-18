@@ -161,17 +161,21 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     """
 
     pad_len = (-x.shape[0]) % chunk_size
-    if pad_len == 0:
-        return x
 
-    pad_shape = (pad_len, *x.shape[1:])
-    if x.ndim == 1:
-        pad_values = jnp.zeros(pad_shape, dtype=x.dtype)
-    else:
-        pad_row = jnp.broadcast_to(x[-1], x.shape[1:])
-        pad_values = jnp.repeat(pad_row[jnp.newaxis, ...], pad_len, axis=0)
+    def _pad_array(_: None):
+        pad_shape = (pad_len, *x.shape[1:])
+        zero_pad = jnp.zeros(pad_shape, dtype=x.dtype)
+        repeated_pad = jnp.broadcast_to(x[-1][jnp.newaxis, ...], pad_shape)
+        pad_values = lax.cond(x.ndim == 1,
+                              lambda __: zero_pad,
+                              lambda __: repeated_pad,
+                              operand=None)
+        return jnp.concatenate([x, pad_values], axis=0)
 
-    return jnp.concatenate([x, pad_values], axis=0)
+    return lax.cond(pad_len == 0,
+                    lambda _: x,
+                    _pad_array,
+                    operand=None)
 
 
 # TODO: think: change to simulate_obseved_monochromatic_flux?
