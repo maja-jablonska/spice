@@ -63,7 +63,8 @@ wide_ring = replace(
 )
 ```
 
-Apply either preset to a mesh column (parameter index `0` is commonly the effective temperature):
+Apply either preset to a mesh column (parameter index `0` is commonly the effective temperature). The orientation matches
+`add_spot`, so specify the spot centre with `(theta, phi)` in radians:
 
 ```python
 mesh = IcosphereModel.construct(
@@ -74,12 +75,29 @@ mesh = IcosphereModel.construct(
     parameter_names=bb.parameter_names,
 )
 
-compact_mesh = add_ring_spot(mesh, param_index=0, config=compact_core)
-wide_mesh = add_ring_spot(mesh, param_index=0, config=wide_ring)
+spot_center_theta = 0.0
+spot_center_phi = 0.0
+
+compact_mesh = add_ring_spot(
+    mesh,
+    spot_center_theta=spot_center_theta,
+    spot_center_phi=spot_center_phi,
+    param_index=0,
+    config=compact_core,
+)
+wide_mesh = add_ring_spot(
+    mesh,
+    spot_center_theta=spot_center_theta,
+    spot_center_phi=spot_center_phi,
+    param_index=0,
+    config=wide_ring,
+)
 
 # Apply the same geometry to a second parameter (e.g. Ca abundance)
 ca_mesh = add_ring_spot(
     wide_mesh,
+    spot_center_theta=spot_center_theta,
+    spot_center_phi=spot_center_phi,
     param_index=1,
     config=RingSpotConfig(sigma_umb_deg=28.0, theta0_deg=65.0, sigma_plage_deg=15.0),
     umbra_delta=-0.3,
@@ -96,7 +114,13 @@ import jax.numpy as jnp
 from spice.utils.ring_spot import ring_spot_weights
 
 n_hat = mesh.d_centers / jnp.linalg.norm(mesh.d_centers, axis=1, keepdims=True)
-spot_axis = jnp.array([0.0, 0.0, 1.0])
+spot_center_theta = 0.0
+spot_center_phi = 0.0
+spot_axis = jnp.array([
+    jnp.sin(spot_center_theta) * jnp.cos(spot_center_phi),
+    jnp.sin(spot_center_theta) * jnp.sin(spot_center_phi),
+    jnp.cos(spot_center_theta),
+])
 
 w_umb_small, w_plage_small = ring_spot_weights(n_hat, spot_axis, compact_core)
 w_umb_wide, w_plage_wide = ring_spot_weights(n_hat, spot_axis, wide_ring)

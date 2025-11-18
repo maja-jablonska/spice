@@ -241,29 +241,42 @@ class TestSpotFunctions:
 
     def test_add_ring_spot_modifies_temperature_column(self, mock_mesh):
         cfg = RingSpotConfig(umbra_delta=-1000.0, plage_delta=200.0)
-        spotted = add_ring_spot(mock_mesh, param_index=0, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
+        spotted = add_ring_spot(
+            mock_mesh,
+            spot_center_theta=0.0,
+            spot_center_phi=0.0,
+            param_index=0,
+            config=cfg,
+        )
         assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
 
     def test_add_ring_spot_allows_custom_deltas(self, mock_mesh):
         cfg = RingSpotConfig()
         spotted = add_ring_spot(
             mock_mesh,
+            spot_center_theta=0.0,
+            spot_center_phi=0.0,
             param_index=1,
             config=cfg,
             umbra_delta=-0.1,
             plage_delta=0.2,
-            spot_axis=jnp.array([0., 0., 1.])
         )
         assert not jnp.allclose(spotted.parameters[:, 1], mock_mesh.parameters[:, 1])
 
     def test_tilt_changes_ring_spot_pattern(self, mock_mesh):
         cfg = RingSpotConfig()
-        untilted = add_ring_spot(mock_mesh, param_index=0, config=cfg, spot_axis=jnp.array([0., 0., 1.]))
-        tilted = add_ring_spot(
+        untilted = add_ring_spot(
             mock_mesh,
+            spot_center_theta=0.0,
+            spot_center_phi=0.0,
             param_index=0,
             config=cfg,
-            tilt_axis=jnp.array([0., 1., 0.]),
-            tilt_angle=45.,
+        )
+        tilted = add_ring_spot(
+            mock_mesh,
+            spot_center_theta=jnp.deg2rad(45.0),
+            spot_center_phi=0.0,
+            param_index=0,
+            config=cfg,
         )
         assert not jnp.allclose(untilted.parameters, tilted.parameters)
