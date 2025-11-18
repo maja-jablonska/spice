@@ -11,8 +11,6 @@ from .mesh_model import MeshModel
 from .utils import (
     spherical_harmonic,
     spherical_harmonic_with_tilt,
-    evaluate_rotation_matrix,
-    rotation_matrix,
 )
 
 from jaxtyping import Array, Int, Float
@@ -27,22 +25,31 @@ def _normalize_vector(vec: ArrayLike) -> Array:
     return vec / norm
 
 
-def _resolve_ring_spot_axis(
+def _spot_axis_from_angles(
     dtype: jnp.dtype,
-    spot_axis: Optional[ArrayLike],
-    tilt_axis: Optional[ArrayLike],
-    tilt_angle: Optional[float],
+    spot_center_theta: Optional[float],
+    spot_center_phi: Optional[float],
 ) -> Array:
-    if spot_axis is not None:
-        return _normalize_vector(jnp.asarray(spot_axis, dtype=dtype))
+    """Return a unit vector pointing towards ``(theta, phi)`` on the sphere."""
 
-    axis = DEFAULT_SPOT_AXIS.astype(dtype)
-    if tilt_axis is None or tilt_angle is None or tilt_angle == 0.0:
-        return axis
+    if spot_center_theta is None and spot_center_phi is None:
+        return DEFAULT_SPOT_AXIS.astype(dtype)
+    if spot_center_theta is None or spot_center_phi is None:
+        raise ValueError(
+            "Both spot_center_theta and spot_center_phi must be provided to orient the ring spot."
+        )
 
-    tilt_axis = _normalize_vector(jnp.asarray(tilt_axis, dtype=dtype))
-    rot = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
-    return rot @ axis
+    theta = jnp.asarray(spot_center_theta, dtype=dtype)
+    phi = jnp.asarray(spot_center_phi, dtype=dtype)
+    axis = jnp.array(
+        [
+            jnp.sin(theta) * jnp.cos(phi),
+            jnp.sin(theta) * jnp.sin(phi),
+            jnp.cos(theta),
+        ],
+        dtype=dtype,
+    )
+    return _normalize_vector(axis)
 
 
 def _mesh_surface_normals(mesh: MeshModel) -> Array:
@@ -425,13 +432,12 @@ def add_spherical_harmonic_spots(
 
 def add_ring_spot(
     mesh: MeshModel,
+    spot_center_theta: float,
+    spot_center_phi: float,
     param_index: int,
     config: Optional[RingSpotConfig] = None,
     umbra_delta: Optional[float] = None,
     plage_delta: Optional[float] = None,
-    spot_axis: Optional[ArrayLike] = None,
-    tilt_axis: Optional[ArrayLike] = None,
-    tilt_angle: Optional[float] = None,
 ) -> MeshModel:
     """Apply the analytic ring spot perturbation directly on a mesh model.
 
@@ -440,6 +446,10 @@ def add_ring_spot(
     mesh:
         Target :class:`~spice.models.mesh_model.MeshModel`. Must not be a
         :class:`~spice.models.phoebe_model.PhoebeModel`.
+    spot_center_theta / spot_center_phi:
+        Spherical coordinates (radians) of the spot centre, matching the
+        ``add_spot`` API. Set both to ``0`` to align the ring with the +Z
+        pole.
     param_index:
         Column in ``mesh.parameters`` that stores the target field you want to
         perturb.
@@ -449,12 +459,6 @@ def add_ring_spot(
     umbra_delta / plage_delta:
         Optional overrides that replace the additive perturbations stored in
         ``config`` for the umbral core and plage ring respectively.
-    spot_axis:
-        Unit vector pointing towards the centre of the spot. If omitted, the
-        spot is aligned with the +Z axis unless ``tilt_axis``/``tilt_angle``
-        are provided.
-    tilt_axis / tilt_angle:
-        Alternative way to orient the spot by rotating the default +Z axis.
 
     Returns
     -------
@@ -469,7 +473,7 @@ def add_ring_spot(
     du = cfg.umbra_delta if umbra_delta is None else umbra_delta
     dp = cfg.plage_delta if plage_delta is None else plage_delta
     dtype = mesh.parameters.dtype
-    s_hat = _resolve_ring_spot_axis(dtype, spot_axis, tilt_axis, tilt_angle)
+    s_hat = _spot_axis_from_angles(dtype, spot_center_theta, spot_center_phi)
     n_hat = _mesh_surface_normals(mesh)
     w_umb, w_plage = ring_spot_weights(n_hat, s_hat, cfg)
 
