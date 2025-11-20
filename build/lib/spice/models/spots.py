@@ -118,7 +118,7 @@ def _add_spherical_harmonic_spot_with_tilt(mesh: MeshModel,
 
 def add_spherical_harmonic_spot(mesh: MeshModel,
                                 m_order: Union[Int, Float],
-                                n_degree: Union[Int, Float],
+                                l_degree: Union[Int, Float],
                                 param_delta: Float,
                                 param_index: Float,
                                 tilt_axis: Float[Array, "3"] = None,
@@ -134,8 +134,8 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
         mesh (MeshModel): The mesh model to which the spherical harmonic variation will be applied.
             Must not be a PhoebeModel as those are read-only.
         m_order (Union[Int, Float]): The order (m) of the spherical harmonic. Must be less than or equal 
-            to n_degree. Determines the number of longitudinal nodes in the pattern.
-        n_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
+            to l_degree. Determines the number of longitudinal nodes in the pattern.
+        l_degree (Union[Int, Float]): The degree (n) of the spherical harmonic. Must be greater than or equal
             to m_order. Determines the total number of nodes in the pattern.
         param_delta (Float): The maximum amplitude of the parameter variation. Represents the difference 
             between the peak of the variation and the background value.
@@ -151,22 +151,22 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
             harmonic variation.
 
     Raises:
-        ValueError: If mesh is a PhoebeModel, or if m_order > n_degree.
+        ValueError: If mesh is a PhoebeModel, or if m_order > l_degree.
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
-    if isinstance(m_order, int) and isinstance(n_degree, int) and m_order > n_degree:
+    if isinstance(m_order, int) and isinstance(l_degree, int) and m_order > l_degree:
         raise ValueError("m must be lesser or equal to n.")
-    elif _is_arraylike(m_order) and _is_arraylike(n_degree):
+    elif _is_arraylike(m_order) and _is_arraylike(l_degree):
         m_order = int(m_order.item())
-        n_degree = int(n_degree.item())
-        if jnp.any(jnp.greater(m_order, n_degree)):
+        l_degree = int(l_degree.item())
+        if jnp.any(jnp.greater(m_order, l_degree)):
             raise ValueError("m must be lesser or equal to n.")
         
     if tilt_axis is not None:
         tilt_angle = 0.0 if tilt_angle is None else tilt_angle
-        return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, n_degree, param_delta, param_index, tilt_axis, tilt_angle)
-    return _add_spherical_harmonic_spot(mesh, m_order, n_degree, param_delta, param_index)
+        return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, l_degree, param_delta, param_index, tilt_axis, tilt_angle)
+    return _add_spherical_harmonic_spot(mesh, m_order, l_degree, param_delta, param_index)
 
 
 @jax.jit
@@ -317,7 +317,7 @@ def _add_spherical_harmonic_spots_with_tilt(mesh: MeshModel,
 
 def add_spherical_harmonic_spots(mesh: MeshModel,
                                  m_orders: Float[Array, "n_orders"],
-                                 n_degrees: Float[Array, "n_orders"],
+                                 l_degrees: Float[Array, "n_orders"],
                                  param_deltas: Float[Array, "n_orders"],
                                  param_indices: Float[Array, "n_orders"],
                                  tilt_axes: Optional[Float[Array, "n_orders 3"]] = None,
@@ -326,14 +326,14 @@ def add_spherical_harmonic_spots(mesh: MeshModel,
     Add multiple spherical harmonic spots to a mesh model.
 
     This function iteratively applies spherical harmonic modifications to a mesh model based on the provided parameters.
-    Each spot is defined by spherical harmonic indices (m_order, n_degree), a parameter delta indicating the modification strength,
+    Each spot is defined by spherical harmonic indices (m_order, l_degree), a parameter delta indicating the modification strength,
     and a parameter index specifying which parameter of the mesh model is modified. The function checks if the mesh model
     is not a PHOEBE model, as they are read-only, and raises an error if it is.
 
     Args:
         mesh (MeshModel): The mesh model to which the spots will be added.
         m_orders (Float[Array, "n_orders"]): An array of m indices (orders) for the spherical harmonics.
-        n_degrees (Float[Array, "n_orders"]): An array of n indices (degrees) for the spherical harmonics.
+        l_degrees (Float[Array, "n_orders"]): An array of n indices (degrees) for the spherical harmonics.
         param_deltas (Float[Array, "n_orders"]): An array of deltas specifying the strength of the modification for each spot.
         param_indices (Float[Array, "n_orders"]): An array of parameter indices specifying which parameter of the mesh is modified by each spot.
         tilt_axes (Optional[Float[Array, "n_orders 3"]], optional): An array of tilt axes for each spot. Shape should be (n_orders, 3). Defaults to None (no tilt).
@@ -349,6 +349,6 @@ def add_spherical_harmonic_spots(mesh: MeshModel,
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
     if (tilt_axes is not None) and (tilt_angles is not None):
-        return _add_spherical_harmonic_spots_with_tilt(mesh, m_orders, n_degrees, param_deltas, param_indices, tilt_axes, tilt_angles)
+        return _add_spherical_harmonic_spots_with_tilt(mesh, m_orders, l_degrees, param_deltas, param_indices, tilt_axes, tilt_angles)
     else:
-        return _add_spherical_harmonic_spots(mesh, m_orders, n_degrees, param_deltas, param_indices)
+        return _add_spherical_harmonic_spots(mesh, m_orders, l_degrees, param_deltas, param_indices)

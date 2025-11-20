@@ -287,13 +287,13 @@ Rotation Functions
 Pulsation Functions
 ~~~~~~~~~~~~~~~~~
 
-.. function:: add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degrees: Float[Array, "n_pulsations"], periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"], pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel
+.. function:: add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degrees: Float[Array, "n_pulsations"], periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"], pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel
 
    Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
    :param m: The mesh model to add pulsation effects to
    :param m_orders: Array of orders (m) of the spherical harmonics
-   :param n_degrees: Array of degrees (n) of the spherical harmonics  
+   :param l_degrees: Array of degrees (l) of the spherical harmonics
    :param periods: Array of pulsation periods in seconds
    :param fourier_series_parameters: Array of dynamic parameters for the Fourier series
    :param pulsation_axes: Array of pulsation axes (defaults to rotation axis)
@@ -405,29 +405,29 @@ Spot Functions
    :return: The modified mesh model with all spots applied
    :raises ValueError: If mesh is a PhoebeModel
 
-.. function:: add_spherical_harmonic_spot(mesh: MeshModel, m_order: Union[Int, Float], n_degree: Union[Int, Float], param_delta: Float, param_index: Float, tilt_axis: Float[Array, "3"] = None, tilt_degree: Float = None) -> MeshModel
+.. function:: add_spherical_harmonic_spot(mesh: MeshModel, m_order: Union[Int, Float], l_degree: Union[Int, Float], param_delta: Float, param_index: Float, tilt_axis: Float[Array, "3"] = None, tilt_degree: Float = None) -> MeshModel
 
    Add a spherical harmonic variation to a parameter of the mesh model.
 
    Creates a spot-like feature using spherical harmonic function Y_n^m(θ,φ) to modify surface parameters.
 
    :param mesh: The mesh model to modify
-   :param m_order: Order (m) of spherical harmonic, must be ≤ n_degree
-   :param n_degree: Degree (n) of spherical harmonic
+   :param m_order: Order (m) of spherical harmonic, must be ≤ l_degree
+   :param l_degree: Degree (l) of spherical harmonic
    :param param_delta: Maximum amplitude of parameter variation
    :param param_index: Index of parameter to modify
    :param tilt_axis: Optional axis for tilting the pattern
    :param tilt_degree: Optional tilt angle in degrees
    :return: Modified mesh model with spherical harmonic variation
-   :raises ValueError: If m_order > n_degree or mesh is PhoebeModel
+   :raises ValueError: If m_order > l_degree or mesh is PhoebeModel
 
-.. function:: add_spherical_harmonic_spots(mesh: MeshModel, m_orders: Float[Array, "n_orders"], n_degrees: Float[Array, "n_orders"], param_deltas: Float[Array, "n_orders"], param_indices: Float[Array, "n_orders"], tilt_axes: Optional[Float[Array, "n_orders 3"]] = None, tilt_angles: Optional[Float[Array, "n_orders"]] = None) -> MeshModel
+.. function:: add_spherical_harmonic_spots(mesh: MeshModel, m_orders: Float[Array, "n_orders"], l_degrees: Float[Array, "n_orders"], param_deltas: Float[Array, "n_orders"], param_indices: Float[Array, "n_orders"], tilt_axes: Optional[Float[Array, "n_orders 3"]] = None, tilt_angles: Optional[Float[Array, "n_orders"]] = None) -> MeshModel
 
    Add multiple spherical harmonic spots to a mesh model.
 
    :param mesh: The mesh model to modify
    :param m_orders: Array of m indices for spherical harmonics
-   :param n_degrees: Array of n indices for spherical harmonics
+   :param l_degrees: Array of l indices for spherical harmonics
    :param param_deltas: Array of modification strengths
    :param param_indices: Array of parameter indices to modify
    :param tilt_axes: Optional array of tilt axes for each spot
