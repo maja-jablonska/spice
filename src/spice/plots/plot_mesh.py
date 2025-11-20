@@ -1003,7 +1003,8 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
                              linewidth=0.1,
                              axes_lim=None,
                              timestamps=None,
-                             timestamp_label=None):
+                             timestamp_label=None,
+                             plot_legend=True):
     """
     Create an animation showing both a 3D mesh model and its corresponding spectrum over time.
     
@@ -1039,6 +1040,8 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
         List of timestamps corresponding to each mesh
     timestamp_label : Optional[str], default: None
         Label to accompany timestamps (e.g., "hours", "days")
+    plot_legend: bool, default: True
+        Whether to plot the legend
         
     Returns
     -------
@@ -1162,7 +1165,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
             fig.suptitle(title, y=0.85)
         
         # Only show legend in the first frame or if explicitly asked
-        if frame == 0 and (draw_los_vector or draw_rotation_axis):
+        if plot_legend and (draw_los_vector or draw_rotation_axis):
             mesh_ax.legend(loc='upper right', fontsize=10)
         
         return [mesh_collection, spectrum_line]
