@@ -46,6 +46,17 @@ def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLik
                     jnp.power(rot_velocities, 2) / (695700000.0*jnp.linalg.norm(d_centers, axis=1))) / 9.80665)
 
 
+def _mesh_volume(vertices: Float[Array, "n_vertices 3"],
+                 faces: Float[Array, "n_faces 3"]) -> Float[Array, ""]:
+    triangles = vertices[faces.astype(jnp.int32)]
+    signed_tetrahedra_volumes = jnp.einsum(
+        "ij,ij->i",
+        triangles[:, 0, :],
+        jnp.cross(triangles[:, 1, :], triangles[:, 2, :])
+    ) / 6.0
+    return jnp.abs(jnp.sum(signed_tetrahedra_volumes))
+
+
 MeshModelNamedTuple = namedtuple("MeshModel",
                                  ["center", "radius", "mass",
                                   "d_vertices", "faces", "d_centers",
@@ -237,6 +248,17 @@ class IcosphereModel(MeshModel):
         vertices, faces, areas, centers = icosphere(n_vertices)
         vertices = vertices * radius
         centers = centers * radius
+
+        mesh_volume = _mesh_volume(vertices, faces)
+        target_sphere_volume = (4.0 / 3.0) * jnp.pi * jnp.power(radius, 3)
+        volume_scale = jnp.where(
+            mesh_volume > 0,
+            jnp.power(target_sphere_volume / mesh_volume, 1.0 / 3.0),
+            1.0
+        )
+        vertices = vertices * volume_scale
+        centers = centers * volume_scale
+        areas = areas * jnp.power(volume_scale, 2)
 
         parameters = jnp.atleast_1d(parameters)
         if len(parameters.shape) == 1:
