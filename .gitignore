@@ -6,6 +6,8 @@ __pycache__
 .pytest_cache/
 .cache
 
+build/*
+
 tutorial/paper_results/phoebe_checks/
 tutorial/paper_results/phoebe_lc_checks/
 tutorial/paper_results/*.pkl
