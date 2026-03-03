@@ -13,6 +13,15 @@ SOLAR_MASS_KG = 1.988409870698051e+30
 
 
 class TestIcosphere:
+    @staticmethod
+    def _mesh_volume(vertices, faces):
+        triangles = vertices[faces.astype(jnp.int32)]
+        signed_tetrahedra_volumes = jnp.einsum(
+            "ij,ij->i",
+            triangles[:, 0, :],
+            jnp.cross(triangles[:, 1, :], triangles[:, 2, :])
+        ) / 6.0
+        return jnp.abs(jnp.sum(signed_tetrahedra_volumes))
 
     def test_icosphere_no_velocity(self):
         model = IcosphereModel.construct(
@@ -38,6 +47,20 @@ class TestIcosphere:
 
         assert jnp.all(jnp.isclose(model.centers, model.d_centers))
         assert jnp.all(jnp.isclose(model.vertices, model.d_vertices))
+
+    def test_icosphere_volume_conserved_on_creation(self):
+        radius = 1.0
+        model = IcosphereModel.construct(
+                n_vertices=1000,
+                radius=radius,
+                mass=1.,
+                parameters=[5777.],
+                parameter_names=['teff']
+                )
+
+        mesh_volume = self._mesh_volume(model.d_vertices, model.faces)
+        sphere_volume = (4.0 / 3.0) * jnp.pi * radius**3
+        assert jnp.isclose(mesh_volume, sphere_volume, rtol=1e-5, atol=1e-8)
 
     def test_icosphere_parameters_from_list(self):
         model = IcosphereModel.construct(
