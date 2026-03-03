@@ -290,6 +290,16 @@ class ZarrGridLoader:
         params = np.asarray(self.store["params"][:])
         logger.info("Params loaded: shape=%s, dtype=%s", params.shape, params.dtype)
 
+        mu_selected = None
+        if "mu_selected" in self.store:
+            logger.info("Loading mu_selected array...")
+            mu_selected = np.asarray(self.store["mu_selected"][:], dtype=np.float32)
+            logger.info(
+                "mu_selected loaded: shape=%s, dtype=%s",
+                mu_selected.shape,
+                mu_selected.dtype,
+            )
+
         n_rows = flux.shape[0]
         logger.info("Total grid rows: %d", n_rows)
 
@@ -336,6 +346,16 @@ class ZarrGridLoader:
         logger.info("Reshaping continuum to grid shape %s...", grid_shape)
         continuum_cube = continuum[order].reshape(*grid_shape, -1)
 
+        mu_selected_cube = None
+        if mu_selected is not None:
+            if mu_selected.shape[0] != n_rows_total:
+                raise ValueError(
+                    "mu_selected row count must match flux/params rows, got "
+                    f"{mu_selected.shape[0]} and {n_rows_total}."
+                )
+            logger.info("Reshaping mu_selected to grid shape %s...", grid_shape)
+            mu_selected_cube = mu_selected[order].reshape(*grid_shape, 1)
+
         logger.info("Grid axes: %s", axis_names)
         logger.info("Grid shape: %s", grid_shape)
         logger.info("Flux cube shape: %s", flux_cube.shape)
@@ -347,6 +367,9 @@ class ZarrGridLoader:
         self.flux_cube_jnp = jnp.asarray(flux_cube)
         self.continuum_cube_jnp = jnp.asarray(continuum_cube)
         self.wavelength_jnp = jnp.asarray(wavelength)
+        self.mu_selected_cube_jnp = (
+            jnp.asarray(mu_selected_cube) if mu_selected_cube is not None else None
+        )
 
         (
             self._interpolate_spectrum_jit,
