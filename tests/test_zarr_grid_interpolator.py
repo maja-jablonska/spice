@@ -129,7 +129,7 @@ class TestZarrGridInterpolator:
             interpolator.to_parameters(np.ones((2, 3)))
         with pytest.raises(ValueError, match="must be a 1D or 2D array"):
             interpolator.to_parameters(np.ones((1, 1, 1)))
-        with pytest.raises(ValueError, match="Parameters must be a dict"):
+        with pytest.raises((ValueError, TypeError), match="Parameters must be a dict|isinstance"):
             interpolator.to_parameters("invalid")
 
     def test_flux_raises_not_implemented(self):

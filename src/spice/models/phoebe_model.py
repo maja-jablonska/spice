@@ -57,7 +57,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def velocities(self) -> ArrayLike:
-        return self.center_velocities
+        return -self.center_velocities
 
     @property
     def mus(self) -> ArrayLike:
@@ -126,7 +126,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         except ValueError:
             pass
 
-        los_vector = np.array([0., 0., -1.])
+        los_vector = np.array([0., 0., 1.])
 
         mus = phoebe_config.get_mus(time, component)
 

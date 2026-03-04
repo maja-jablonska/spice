@@ -217,7 +217,9 @@ def add_rotation(mesh: MeshModel,
 
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
-    rotation_velocity_km_s = mesh.rotation_velocity
+    # Convention: negative user-provided rotation velocity maps to the
+    # approaching (blueshifted) limb for the default LOS/rotation setup.
+    rotation_velocity_km_s = -mesh.rotation_velocity
     theta = (rotation_velocity_km_s * t) / (mesh.radius * 695700.0)
     
     t_rotation_matrix = evaluate_rotation_matrix(mesh.rotation_matrix, theta)
