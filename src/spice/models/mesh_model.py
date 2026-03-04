@@ -178,7 +178,8 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def los_velocities(self) -> Float[Array, "n_mesh_elements"]:
-        return cast_to_los(self.velocities, self.los_vector)
+        # Sign convention: approaching (blueshifted) LOS velocity is negative.
+        return -cast_to_los(self.velocities, self.los_vector)
 
     @property
     def los_z(self) -> Float[Array, "n_mesh_elements"]:

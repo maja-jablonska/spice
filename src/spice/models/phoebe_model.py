@@ -69,7 +69,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def los_velocities(self) -> ArrayLike:
-        return cast_to_los(self.velocities, self.los_vector)
+        # Sign convention: approaching (blueshifted) LOS velocity is negative.
+        return -cast_to_los(self.velocities, self.los_vector)
 
     @property
     def los_z(self) -> ArrayLike:
@@ -126,7 +127,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         except ValueError:
             pass
 
-        los_vector = np.array([0., 0., 1.])
+        los_vector = np.array([0., 0., -1.])
 
         mus = phoebe_config.get_mus(time, component)
 

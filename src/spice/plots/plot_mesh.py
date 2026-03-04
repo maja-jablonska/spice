@@ -20,7 +20,7 @@ DEFAULT_PLOT_PROPERTY_LABELS = {
 }
 
 DEFAULT_PROPERTY_CMAPS = {
-    'los_velocities': 'cmr.redshift_r',
+    'los_velocities': 'cmr.redshift',
 }
 
 DEFAULT_CMAP = 'cmr.bubblegum'
@@ -56,6 +56,16 @@ def _single_mesh_arrow_vectors(mesh: MeshModel) -> Tuple[np.ndarray, np.ndarray,
     rotation_start = center + 1.10 * mesh.radius * normalized_rotation_axis
     rotation_vec = 0.35 * mesh.radius * normalized_rotation_axis
     return los_start, los_vec, rotation_start, rotation_vec
+
+
+def _set_los_view(plot_ax: plt.axes,
+                  mesh: MeshModel,
+                  view_angles: Optional[Tuple[float, float]] = None) -> None:
+    """Apply custom view only when explicitly requested."""
+    if view_angles is None:
+        return
+    elev, azim = view_angles
+    plot_ax.view_init(elev=elev, azim=azim)
 
 
 def _evaluate_to_be_mapped_property(mesh: MeshModel,
@@ -209,6 +219,7 @@ def plot_3D(mesh: MeshModel,
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+    _set_los_view(plot_ax, mesh)
 
     # Draw vectors if requested
     los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
@@ -334,6 +345,7 @@ def plot_3D_binary(mesh1: MeshModel,
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+    _set_los_view(plot_ax, mesh1)
 
     # Draw vectors if requested
     if draw_los_vector:
@@ -508,6 +520,7 @@ def plot_3D_sequence(meshes: List[MeshModel],
     for plot_ax, (to_be_mapped, (i, mesh)) in zip(plot_axes, zip(to_be_mapped_arrays, enumerate(meshes))):
         center = _mesh_center(mesh)
         _set_axes_centered(plot_ax, center, axes_lim)
+        _set_los_view(plot_ax, mesh)
         # Draw los vector and rotation axis
         los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
 
@@ -727,6 +740,7 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    _set_los_view(mesh_ax, mesh)
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
@@ -756,6 +770,7 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    _set_los_view(mesh_ax, mesh)
     
     spec_ax.plot(wavelengths, spectrum, color='black')
         
@@ -900,11 +915,7 @@ def animate_single_star(meshes: List[MeshModel],
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        plot_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(plot_ax, mesh, view_angles)
     
     # Set up colormap normalization
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
@@ -931,13 +942,9 @@ def animate_single_star(meshes: List[MeshModel],
         plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
         plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            plot_ax.view_init(elev=elev, azim=azim)
-        
         # Get current mesh
         mesh = meshes[frame]
+        _set_los_view(plot_ax, mesh, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -1107,6 +1114,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    _set_los_view(mesh_ax, meshes[0])
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
@@ -1146,6 +1154,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
         
         # Get current mesh and property data
         mesh = meshes[frame]
+        _set_los_view(mesh_ax, mesh)
         to_be_mapped = to_be_mapped_arrays[frame]
         
         # Draw los vector and rotation axis
@@ -1329,11 +1338,7 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        plot_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(plot_ax, mesh1, view_angles)
     
     # Set up colormap
     if cmap is None:
@@ -1364,14 +1369,10 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
         plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
         plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            plot_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(plot_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -1567,11 +1568,7 @@ def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelen
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        mesh_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(mesh_ax, mesh1, view_angles)
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
@@ -1613,14 +1610,10 @@ def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelen
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            mesh_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(mesh_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -1844,11 +1837,7 @@ def animate_binary_and_separate_spectra(binary1_meshes, binary2_meshes, spectra1
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        mesh_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(mesh_ax, mesh1, view_angles)
     
     # Spectrum subplot
     spec_ax_1 = fig.add_subplot(gs[1:3, 3])
@@ -1897,14 +1886,10 @@ def animate_binary_and_separate_spectra(binary1_meshes, binary2_meshes, spectra1
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            mesh_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(mesh_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -2140,11 +2125,7 @@ def animate_binary_and_lightcurve(binary1_meshes, binary2_meshes,
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        mesh_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(mesh_ax, mesh1, view_angles)
     
     # Lightcurve subplot
     lc_ax = fig.add_subplot(gs[1:3, 3])
@@ -2190,14 +2171,10 @@ def animate_binary_and_lightcurve(binary1_meshes, binary2_meshes,
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            mesh_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(mesh_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
