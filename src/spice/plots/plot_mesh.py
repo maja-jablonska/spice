@@ -20,10 +20,52 @@ DEFAULT_PLOT_PROPERTY_LABELS = {
 }
 
 DEFAULT_PROPERTY_CMAPS = {
-    'los_velocities': 'cmr.redshift_r',
+    'los_velocities': 'cmr.redshift',
 }
 
 DEFAULT_CMAP = 'cmr.bubblegum'
+
+
+def _mesh_center(mesh: MeshModel) -> np.ndarray:
+    """Return a 3D center vector for plotting, even if center is scalar."""
+    center = np.asarray(mesh.center, dtype=float)
+    if center.shape == ():
+        scalar = float(center)
+        return np.array([scalar, scalar, scalar], dtype=float)
+    center = center.reshape(-1)
+    if center.size < 3:
+        return np.pad(center, (0, 3 - center.size), mode='constant')
+    return center[:3]
+
+
+def _set_axes_centered(plot_ax: plt.axes, center: np.ndarray, axes_lim: float) -> None:
+    plot_ax.set_xlim3d(center[0] - axes_lim, center[0] + axes_lim)
+    plot_ax.set_ylim3d(center[1] - axes_lim, center[1] + axes_lim)
+    plot_ax.set_zlim3d(center[2] - axes_lim, center[2] + axes_lim)
+
+
+def _single_mesh_arrow_vectors(mesh: MeshModel) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return LOS/rotation arrow start points and vectors for a single mesh plot."""
+    center = _mesh_center(mesh)
+    normalized_los_vector = mesh.los_vector / np.linalg.norm(mesh.los_vector)
+    normalized_rotation_axis = mesh.rotation_axis / np.linalg.norm(mesh.rotation_axis)
+
+    # Keep arrows detached from the stellar surface while staying inside +/-1.5R axes.
+    los_start = center - 1.45 * mesh.radius * normalized_los_vector
+    los_vec = 0.35 * mesh.radius * normalized_los_vector
+    rotation_start = center + 1.10 * mesh.radius * normalized_rotation_axis
+    rotation_vec = 0.35 * mesh.radius * normalized_rotation_axis
+    return los_start, los_vec, rotation_start, rotation_vec
+
+
+def _set_los_view(plot_ax: plt.axes,
+                  mesh: MeshModel,
+                  view_angles: Optional[Tuple[float, float]] = None) -> None:
+    """Apply custom view only when explicitly requested."""
+    if view_angles is None:
+        return
+    elev, azim = view_angles
+    plot_ax.view_init(elev=elev, azim=azim)
 
 
 def _evaluate_to_be_mapped_property(mesh: MeshModel,
@@ -172,17 +214,17 @@ def plot_3D(mesh: MeshModel,
     
     # Set up axes limits and labels
     axes_lim = 1.5*mesh.radius
-    plot_ax.set_xlim3d(-axes_lim, axes_lim)
-    plot_ax.set_ylim3d(-axes_lim, axes_lim)
-    plot_ax.set_zlim3d(-axes_lim, axes_lim)
+    center = _mesh_center(mesh)
+    _set_axes_centered(plot_ax, center, axes_lim)
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+    _set_los_view(plot_ax, mesh)
 
     # Draw vectors if requested
+    los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
     if draw_los_vector:
-        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
-        plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+        plot_ax.quiver(*los_start, *los_vec,
                    color='red', linewidth=3., label='LOS vector')
     
     if draw_rotation_axis:
@@ -192,8 +234,7 @@ def plot_3D(mesh: MeshModel,
         else:
             arrow_color = 'black'
         
-        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
-        plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+        plot_ax.quiver(*rotation_start, *rotation_vec,
                     color=arrow_color, linewidth=3., label='Rotation axis')
         
     # Add legend if vectors were drawn
@@ -304,6 +345,7 @@ def plot_3D_binary(mesh1: MeshModel,
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
+    _set_los_view(plot_ax, mesh1)
 
     # Draw vectors if requested
     if draw_los_vector:
@@ -463,11 +505,8 @@ def plot_3D_sequence(meshes: List[MeshModel],
         except ValueError:
             raise ValueError("Pass either no axes or a tuple (figure, list_of_axes, colorbar_axis)")
     
-    # Set up common axis properties
+    # Set up common axis labels
     for plot_ax in plot_axes:
-        plot_ax.set_xlim3d(-axes_lim, axes_lim)
-        plot_ax.set_ylim3d(-axes_lim, axes_lim)
-        plot_ax.set_zlim3d(-axes_lim, axes_lim)
         plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
         plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
@@ -479,15 +518,17 @@ def plot_3D_sequence(meshes: List[MeshModel],
 
     # Plot each mesh
     for plot_ax, (to_be_mapped, (i, mesh)) in zip(plot_axes, zip(to_be_mapped_arrays, enumerate(meshes))):
+        center = _mesh_center(mesh)
+        _set_axes_centered(plot_ax, center, axes_lim)
+        _set_los_view(plot_ax, mesh)
         # Draw los vector and rotation axis
-        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
-        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
+        los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
 
         if draw_los_vector:
-            plot_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+            plot_ax.quiver(*los_start, *los_vec,
                         color='red', linewidth=3., label='LOS vector')
         if draw_rotation_axes:
-            plot_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+            plot_ax.quiver(*rotation_start, *rotation_vec,
                         color='black', linewidth=3., label='Rotation axis')
 
         # Visualize according to mode
@@ -686,6 +727,7 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
     # Determine axis limits
     if axes_lim is None:
         axes_lim = 1.5 * mesh.radius
+    center = _mesh_center(mesh)
     
     # Create figure with two subplots: 3D mesh and spectrum
     fig = plt.figure(figsize=figsize)
@@ -694,12 +736,11 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
 
     # 3D mesh subplot
     mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
-    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
-    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
-    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    _set_axes_centered(mesh_ax, center, axes_lim)
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    _set_los_view(mesh_ax, mesh)
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
@@ -725,24 +766,22 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
     
         
     # Reset axis properties
-    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
-    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
-    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    _set_axes_centered(mesh_ax, center, axes_lim)
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    _set_los_view(mesh_ax, mesh)
     
     spec_ax.plot(wavelengths, spectrum, color='black')
         
     # Draw los vector and rotation axis
+    los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
     if draw_los_vector:
-        normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
-        mesh_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+        mesh_ax.quiver(*los_start, *los_vec,
                     color='red', linewidth=3., label='LOS vector')
     
     if draw_rotation_axis:
-        normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
-        mesh_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+        mesh_ax.quiver(*rotation_start, *rotation_vec,
                     color='black', linewidth=3., label='Rotation axis')
     
     # Visualize mesh according to mode
@@ -871,17 +910,12 @@ def animate_single_star(meshes: List[MeshModel],
     
     # Setup axis limits
     axes_lim = 1.5 * mesh.radius
-    plot_ax.set_xlim3d(-axes_lim, axes_lim)
-    plot_ax.set_ylim3d(-axes_lim, axes_lim)
-    plot_ax.set_zlim3d(-axes_lim, axes_lim)
+    center = _mesh_center(mesh)
+    _set_axes_centered(plot_ax, center, axes_lim)
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        plot_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(plot_ax, mesh, view_angles)
     
     # Set up colormap normalization
     norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
@@ -902,20 +936,15 @@ def animate_single_star(meshes: List[MeshModel],
         plot_ax.clear()
         
         # Reset axis properties after clearing
-        plot_ax.set_xlim3d(-axes_lim, axes_lim)
-        plot_ax.set_ylim3d(-axes_lim, axes_lim)
-        plot_ax.set_zlim3d(-axes_lim, axes_lim)
+        center = _mesh_center(meshes[frame])
+        _set_axes_centered(plot_ax, center, axes_lim)
         plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
         plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
         plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            plot_ax.view_init(elev=elev, azim=azim)
-        
         # Get current mesh
         mesh = meshes[frame]
+        _set_los_view(plot_ax, mesh, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -926,16 +955,13 @@ def animate_single_star(meshes: List[MeshModel],
         to_be_mapped, _ = _evaluate_to_be_mapped_property(mesh, property, property_label)
         
         # Draw vectors
+        los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
         if draw_los_vector:
-            normalized_los_vector = mesh.los_vector / np.linalg.norm(mesh.los_vector)
-            los_vector = plot_ax.quiver(*(-2.0 * mesh.radius * normalized_los_vector), 
-                                      *(mesh.radius * normalized_los_vector),
+            los_vector = plot_ax.quiver(*los_start, *los_vec,
                                       color='red', linewidth=3., label='LOS vector')
         
         if draw_rotation_axis:
-            normalized_rotation_axis = mesh.rotation_axis / np.linalg.norm(mesh.rotation_axis)
-            rotation_axis = plot_ax.quiver(*(0.75 * mesh.radius * normalized_rotation_axis), 
-                                         *(mesh.radius * normalized_rotation_axis),
+            rotation_axis = plot_ax.quiver(*rotation_start, *rotation_vec,
                                          color='black', linewidth=3., label='Rotation axis')
         
         # Visualize the mesh
@@ -1076,6 +1102,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     # Determine axis limits
     if axes_lim is None:
         axes_lim = 1.5 * max([mesh.radius for mesh in meshes])
+    first_center = _mesh_center(meshes[0])
     
     # Create figure with two subplots: 3D mesh and spectrum
     fig = plt.figure(figsize=figsize)
@@ -1083,12 +1110,11 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
 
     # 3D mesh subplot
     mesh_ax = fig.add_subplot(gs[:, 0], projection='3d')
-    mesh_ax.set_xlim3d(-axes_lim, axes_lim)
-    mesh_ax.set_ylim3d(-axes_lim, axes_lim)
-    mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+    _set_axes_centered(mesh_ax, first_center, axes_lim)
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
+    _set_los_view(mesh_ax, meshes[0])
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
@@ -1120,26 +1146,25 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
         mesh_ax.clear()
         
         # Reset axis properties
-        mesh_ax.set_xlim3d(-axes_lim, axes_lim)
-        mesh_ax.set_ylim3d(-axes_lim, axes_lim)
-        mesh_ax.set_zlim3d(-axes_lim, axes_lim)
+        center = _mesh_center(meshes[frame])
+        _set_axes_centered(mesh_ax, center, axes_lim)
         mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
         # Get current mesh and property data
         mesh = meshes[frame]
+        _set_los_view(mesh_ax, mesh)
         to_be_mapped = to_be_mapped_arrays[frame]
         
         # Draw los vector and rotation axis
+        los_start, los_vec, rotation_start, rotation_vec = _single_mesh_arrow_vectors(mesh)
         if draw_los_vector:
-            normalized_los_vector = mesh.los_vector/np.linalg.norm(mesh.los_vector)
-            mesh_ax.quiver(*(-2.0*mesh.radius*normalized_los_vector), *(mesh.radius*normalized_los_vector),
+            mesh_ax.quiver(*los_start, *los_vec,
                         color='red', linewidth=3., label='LOS vector')
         
         if draw_rotation_axis:
-            normalized_rotation_axis = mesh.rotation_axis/np.linalg.norm(mesh.rotation_axis)
-            mesh_ax.quiver(*(0.75*mesh.radius*normalized_rotation_axis), *(mesh.radius*normalized_rotation_axis),
+            mesh_ax.quiver(*rotation_start, *rotation_vec,
                         color='black', linewidth=3., label='Rotation axis')
         
         # Visualize mesh according to mode
@@ -1313,11 +1338,7 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
     plot_ax.set_xlabel('$X [R_\\odot]$', fontsize=14)
     plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
     plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        plot_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(plot_ax, mesh1, view_angles)
     
     # Set up colormap
     if cmap is None:
@@ -1348,14 +1369,10 @@ def animate_binary(binary1_meshes, binary2_meshes, filename,
         plot_ax.set_ylabel('$Y [R_\\odot]$', fontsize=14)
         plot_ax.set_zlabel('$Z [R_\\odot]$', fontsize=14)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            plot_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(plot_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -1551,11 +1568,7 @@ def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelen
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        mesh_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(mesh_ax, mesh1, view_angles)
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
@@ -1597,14 +1610,10 @@ def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelen
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            mesh_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(mesh_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -1828,11 +1837,7 @@ def animate_binary_and_separate_spectra(binary1_meshes, binary2_meshes, spectra1
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        mesh_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(mesh_ax, mesh1, view_angles)
     
     # Spectrum subplot
     spec_ax_1 = fig.add_subplot(gs[1:3, 3])
@@ -1881,14 +1886,10 @@ def animate_binary_and_separate_spectra(binary1_meshes, binary2_meshes, spectra1
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            mesh_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(mesh_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:
@@ -2124,11 +2125,7 @@ def animate_binary_and_lightcurve(binary1_meshes, binary2_meshes,
     mesh_ax.set_xlabel('$X [R_\\odot]$', fontsize=10)
     mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
     mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
-    
-    # Set custom view angle if provided
-    if view_angles is not None:
-        elev, azim = view_angles
-        mesh_ax.view_init(elev=elev, azim=azim)
+    _set_los_view(mesh_ax, mesh1, view_angles)
     
     # Lightcurve subplot
     lc_ax = fig.add_subplot(gs[1:3, 3])
@@ -2174,14 +2171,10 @@ def animate_binary_and_lightcurve(binary1_meshes, binary2_meshes,
         mesh_ax.set_ylabel('$Y [R_\\odot]$', fontsize=10)
         mesh_ax.set_zlabel('$Z [R_\\odot]$', fontsize=10)
         
-        # Set custom view angle if provided
-        if view_angles is not None:
-            elev, azim = view_angles
-            mesh_ax.view_init(elev=elev, azim=azim)
-        
         # Get current meshes
         mesh1 = binary1_meshes[frame]
         mesh2 = binary2_meshes[frame]
+        _set_los_view(mesh_ax, mesh1, view_angles)
         
         # Update timestamp if available
         if timestamps is not None:

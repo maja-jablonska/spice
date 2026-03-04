@@ -14,12 +14,20 @@ class TestSpectrumFunctions:
         mesh = default_icosphere()
         wavelengths = jnp.logspace(3, 4, 100)  # 1000-10000 Angstroms
         log_wavelengths = jnp.log10(wavelengths)
+        chunk_size = int(mesh.parameters.shape[0])
+        wavelengths_chunk_size = int(log_wavelengths.shape[0])
         
         # Mock intensity function that returns constant values
         def mock_intensity(wavelengths, mu, params):
             return jnp.ones((wavelengths.shape[0], 2))
         
-        flux = simulate_observed_flux(mock_intensity, mesh, log_wavelengths)
+        flux = simulate_observed_flux(
+            mock_intensity,
+            mesh,
+            log_wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=wavelengths_chunk_size
+        )
         
         assert flux.shape == (100, 2)  # Check output shape
         assert jnp.all(jnp.isfinite(flux))  # Check for non-finite values
@@ -30,12 +38,20 @@ class TestSpectrumFunctions:
         mesh = default_icosphere()
         wavelengths = jnp.logspace(3, 4, 100)
         log_wavelengths = jnp.log10(wavelengths)
+        chunk_size = int(mesh.parameters.shape[0])
+        wavelengths_chunk_size = int(log_wavelengths.shape[0])
         
         # Mock flux function
         def mock_flux(wavelengths, params):
             return jnp.ones((wavelengths.shape[0], 2))
         
-        lum = simulate_monochromatic_luminosity(mock_flux, mesh, log_wavelengths)
+        lum = simulate_monochromatic_luminosity(
+            mock_flux,
+            mesh,
+            log_wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=wavelengths_chunk_size
+        )
         
         assert lum.shape == (100, 2)
         assert jnp.all(jnp.isfinite(lum))
@@ -45,12 +61,20 @@ class TestSpectrumFunctions:
         """Test bolometric luminosity calculation"""
         mesh = default_icosphere()
         wavelengths = jnp.logspace(3, 4, 100)
+        chunk_size = int(mesh.parameters.shape[0])
+        wavelengths_chunk_size = int(wavelengths.shape[0])
         
         # Mock flux function
         def mock_flux(wavelengths, params):
             return jnp.ones((wavelengths.shape[0], 2))
         
-        bol_lum = luminosity(mock_flux, mesh, wavelengths)
+        bol_lum = luminosity(
+            mock_flux,
+            mesh,
+            wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=wavelengths_chunk_size
+        )
         
         assert jnp.isscalar(bol_lum)
         assert jnp.isfinite(bol_lum)
@@ -91,15 +115,29 @@ class TestSpectrumFunctions:
         mesh = default_icosphere()
         wavelengths = jnp.logspace(3, 4, 100)
         log_wavelengths = jnp.log10(wavelengths)
+        chunk_size = int(mesh.parameters.shape[0])
+        wavelengths_chunk_size = int(log_wavelengths.shape[0])
         
         def mock_intensity(wavelengths, mu, params):
             return jnp.ones((wavelengths.shape[0], 2))
         
         # Compare with and without Doppler shift
-        flux_with_doppler = simulate_observed_flux(mock_intensity, mesh, log_wavelengths, 
-                                                disable_doppler_shift=False)
-        flux_without_doppler = simulate_observed_flux(mock_intensity, mesh, log_wavelengths,
-                                                    disable_doppler_shift=True)
+        flux_with_doppler = simulate_observed_flux(
+            mock_intensity,
+            mesh,
+            log_wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=wavelengths_chunk_size,
+            disable_doppler_shift=False
+        )
+        flux_without_doppler = simulate_observed_flux(
+            mock_intensity,
+            mesh,
+            log_wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=wavelengths_chunk_size,
+            disable_doppler_shift=True
+        )
         
         # Fluxes should be different if mesh has non-zero velocities
         if jnp.any(mesh.los_velocities != 0):
@@ -139,5 +177,7 @@ class TestSpectrumFunctions:
             test_mesh = default_icosphere()
             mono_lum = simulate_monochromatic_luminosity(mock_intensity,
                                                        test_mesh,
-                                                       test_log_wavelengths)
+                                                       test_log_wavelengths,
+                                                       chunk_size=int(test_mesh.parameters.shape[0]),
+                                                       wavelengths_chunk_size=int(test_log_wavelengths.shape[0]))
             chex.assert_shape(mono_lum, (50, 2))

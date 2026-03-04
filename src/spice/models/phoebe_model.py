@@ -57,7 +57,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def velocities(self) -> ArrayLike:
-        return self.center_velocities
+        return -self.center_velocities
 
     @property
     def mus(self) -> ArrayLike:
@@ -69,7 +69,8 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
 
     @property
     def los_velocities(self) -> ArrayLike:
-        return cast_to_los(self.velocities, self.los_vector)
+        # Sign convention: approaching (blueshifted) LOS velocity is negative.
+        return -cast_to_los(self.velocities, self.los_vector)
 
     @property
     def los_z(self) -> ArrayLike:

@@ -217,6 +217,8 @@ def add_rotation(mesh: MeshModel,
 
 @jax.jit
 def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
+    # Preserve user rotation direction; LOS sign convention is handled when
+    # projecting velocities to the line of sight.
     rotation_velocity_km_s = mesh.rotation_velocity
     theta = (rotation_velocity_km_s * t) / (mesh.radius * 695700.0)
     

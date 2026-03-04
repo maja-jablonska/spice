@@ -6,7 +6,9 @@ src/spice/geometry/sutherland_hodgman.py
 src/spice/geometry/utils.py
 src/spice/icosphere_cache/icosphere_1.pickle
 src/spice/icosphere_cache/icosphere_2.pickle
+src/spice/icosphere_cache/icosphere_2_compat.pickle
 src/spice/icosphere_cache/icosphere_3.pickle
+src/spice/icosphere_cache/icosphere_3_compat.pickle
 src/spice/icosphere_cache/icosphere_4.pickle
 src/spice/icosphere_cache/icosphere_5.pickle
 src/spice/models/__init__.py
@@ -37,6 +39,8 @@ src/spice/spectrum/spectrum_emulator.py
 src/spice/spectrum/spectrum_korg.py
 src/spice/spectrum/user_spectrum_interpolator.py
 src/spice/spectrum/utils.py
+src/spice/spectrum/zarr_grid_interpolator.py
+src/spice/spectrum/zarr_grid_loader.py
 src/spice/spectrum/filter_data/2MASSH.dat
 src/spice/spectrum/filter_data/2MASSJ.dat
 src/spice/spectrum/filter_data/2MASSK.dat
@@ -65,3 +69,5 @@ src/stellar_spice.egg-info/requires.txt
 src/stellar_spice.egg-info/top_level.txt
 tests/test_kdtree_occlusion.py
 tests/test_phoebe_optional.py
+tests/test_zarr_grid_interpolator.py
+tests/test_zarr_grid_loader.py

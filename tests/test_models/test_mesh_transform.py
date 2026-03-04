@@ -1,6 +1,10 @@
 import pickle
 
 import pytest
+from jax import config
+
+config.update("jax_enable_x64", True)
+
 import jax.numpy as jnp
 from src.spice.models.mesh_transform import add_pulsations, transform, add_rotation, evaluate_rotation, add_pulsation, reset_pulsations, \
     evaluate_pulsations, update_parameters
@@ -83,6 +87,19 @@ class TestMeshTransformations:
         evaluated_mesh = evaluate_rotation(rotation_model, t)
         assert not jnp.all(jnp.isclose(rotation_model.cast_centers, evaluated_mesh.cast_centers)), "Evaluate rotation should update the mesh model."
 
+    def test_negative_rotation_is_blueshift_with_default_geometry(self, mesh_model):
+        negative_rotation = evaluate_rotation(
+            add_rotation(mesh_model, rotation_velocity=-20.0, rotation_axis=jnp.array([0., 0., 1.])),
+            t=0.0
+        )
+        positive_rotation = evaluate_rotation(
+            add_rotation(mesh_model, rotation_velocity=20.0, rotation_axis=jnp.array([0., 0., 1.])),
+            t=0.0
+        )
+
+        # Rotation sign must invert LOS velocity sign everywhere.
+        assert jnp.allclose(negative_rotation.los_velocities, -positive_rotation.los_velocities)
+
     def test_evaluate_rotation_phoebe_model_raises_error(self, phoebe_model):
         t = 1.0
         with pytest.raises(ValueError):
@@ -131,8 +148,8 @@ class TestMeshTransformations:
         t = 1800
         m_order, n_degree = 1, 1
         pulsation_period = 3600  # 1 hour
-        fourier_series_parameters = jnp.array([[0.1, 0.0]])  # Amplitude 0.1, phase 0.0
-        pulsation_axis = jnp.array([0.0, 1.0, 0.0])  # Y-axis
+        fourier_series_parameters = jnp.array([[0.1, 0.0]], dtype=jnp.float64)  # Amplitude 0.1, phase 0.0
+        pulsation_axis = jnp.array([0.0, 1.0, 0.0], dtype=jnp.float64)  # Y-axis
         pulsation_angle = 45.  # 45 degrees tilt
 
         # Add pulsation with tilt
@@ -164,16 +181,16 @@ class TestMeshTransformations:
         t = 1800
         m_orders = jnp.array([1, 2])
         l_degrees = jnp.array([1, 2])
-        periods = jnp.array([3600.0, 7200.0])  # 1 hour and 2 hours
+        periods = jnp.array([3600.0, 7200.0], dtype=jnp.float64)  # 1 hour and 2 hours
         fourier_series_parameters = jnp.array([
             [0.1, 0.0],  # Amplitude 0.1, phase 0.0 for first pulsation
             [0.05, jnp.pi/2]  # Amplitude 0.05, phase pi/2 for second pulsation
-        ])
+        ], dtype=jnp.float64)
         pulsation_axes = jnp.array([
             [0.0, 1.0, 0.0],  # Y-axis for first pulsation
             [0.0, 0.0, 1.0]   # Z-axis for second pulsation
-        ])
-        pulsation_angles = jnp.array([45., 30.])  # 45 and 30 degrees tilts
+        ], dtype=jnp.float64)
+        pulsation_angles = jnp.array([45., 30.], dtype=jnp.float64)  # 45 and 30 degrees tilts
 
         # Add multiple pulsations with tilts
         pulsated_mesh = add_pulsations(mesh_model, m_orders, l_degrees, periods,
