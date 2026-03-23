@@ -4,7 +4,7 @@
 
 A comprehensive Python library for modeling and analyzing stellar spectra with inhomogeneous surfaces, supporting rotation, pulsations, spots, and binary star systems.
 
-The paper is not submitted and available as a [preprint](https://arxiv.org/abs/2511.10998).
+The paper is submitted and available as a [preprint](https://arxiv.org/abs/2511.10998).
 
 ## Installation
 
