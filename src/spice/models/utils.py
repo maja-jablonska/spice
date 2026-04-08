@@ -1,13 +1,9 @@
 import jax.numpy as jnp
 import jax
 from jax.typing import ArrayLike
-from typing import Tuple
+from typing import List, Any, Tuple
 
 from jaxtyping import Array, Float
-
-
-import jax
-from typing import List, Any
 
 
 float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
@@ -172,11 +168,84 @@ def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0.,
     # Add epsilon to prevent division by zero
     norm = jnp.where(norm > 1e-10, norm, 1e-10)
     tilt_axis = tilt_axis / norm
-    
+
     r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
     rotated_coords = jnp.matmul(coordinates, r_matrix)
 
     return spherical_harmonic(m, n, rotated_coords)
+
+
+@jax.jit
+def spherical_harmonic_tangential_gradient(m, n, coordinates):
+    """Compute the tangential gradient of Y_l^m on the sphere as 3D Cartesian vectors.
+
+    Uses finite differences in the Cartesian frame to compute the full gradient
+    of Y_l^m, then projects out the radial component to obtain the tangential part.
+    This avoids coordinate singularities at the poles.
+
+    Args:
+        m: Azimuthal order of the spherical harmonic.
+        n: Degree of the spherical harmonic.
+        coordinates: (n_vertices, 3) Cartesian coordinates.
+
+    Returns:
+        (n_vertices, 3) tangential gradient vectors in Cartesian coordinates.
+    """
+    eps = 1e-4
+
+    # Compute Cartesian gradient via central finite differences along x, y, z
+    Y0 = spherical_harmonic(m, n, coordinates)  # (n,)
+
+    dx = jnp.array([eps, 0.0, 0.0])
+    dy = jnp.array([0.0, eps, 0.0])
+    dz = jnp.array([0.0, 0.0, eps])
+
+    dYdx = (spherical_harmonic(m, n, coordinates + dx) -
+            spherical_harmonic(m, n, coordinates - dx)) / (2.0 * eps)
+    dYdy = (spherical_harmonic(m, n, coordinates + dy) -
+            spherical_harmonic(m, n, coordinates - dy)) / (2.0 * eps)
+    dYdz = (spherical_harmonic(m, n, coordinates + dz) -
+            spherical_harmonic(m, n, coordinates - dz)) / (2.0 * eps)
+
+    grad_cart = jnp.stack([dYdx, dYdy, dYdz], axis=-1)  # (n, 3)
+
+    # Project out the radial component: tangential = grad - (grad . r_hat) r_hat
+    r_hat = coordinates / (jnp.linalg.norm(coordinates, axis=1, keepdims=True) + 1e-10)
+    radial_component = jnp.sum(grad_cart * r_hat, axis=1, keepdims=True) * r_hat
+
+    return grad_cart - radial_component
+
+
+@jax.jit
+def spherical_harmonic_gradient_with_tilt(m, n, coordinates,
+                                          tilt_axis=jnp.array([0., 0., 1.]),
+                                          tilt_angle=0.):
+    """Compute the tangential gradient of Y_l^m with a tilted pulsation axis.
+
+    Rotates coordinates into the tilted frame, computes the tangential gradient
+    there, and rotates the resulting vectors back.
+
+    Args:
+        m: Azimuthal order.
+        n: Degree.
+        coordinates: (n_vertices, 3) Cartesian coordinates.
+        tilt_axis: Rotation axis for the tilt.
+        tilt_angle: Tilt angle in degrees.
+
+    Returns:
+        (n_vertices, 3) tangential gradient vectors in the original frame.
+    """
+    norm = jnp.linalg.norm(tilt_axis)
+    norm = jnp.where(norm > 1e-10, norm, 1e-10)
+    tilt_axis = tilt_axis / norm
+
+    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    rotated_coords = jnp.matmul(coordinates, r_matrix)
+
+    rotated_grad = spherical_harmonic_tangential_gradient(m, n, rotated_coords)
+
+    # Rotate gradient vectors back to the original frame
+    return jnp.matmul(rotated_grad, r_matrix.T)
 
 
 @jax.jit

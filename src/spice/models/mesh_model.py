@@ -12,7 +12,6 @@ from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast
 from spice.geometry.utils import get_cast_areas
 
 from jaxtyping import Array, Float
-import jax
 
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
@@ -68,7 +67,8 @@ MeshModelNamedTuple = namedtuple("MeshModel",
                                   "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
                                   "pulsation_periods", "fourier_series_parameters",
-                                  "pulsation_axes", "pulsation_angles"])
+                                  "pulsation_axes", "pulsation_angles",
+                                  "pulsation_horizontal_ratios"])
 
 
 class MeshModel(Model, MeshModelNamedTuple):
@@ -134,6 +134,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     
     pulsation_axes: Float[Array, "n_puls_orders 3"]
     pulsation_angles: Float[Array, "n_puls_orders"]
+    pulsation_horizontal_ratios: Float[Array, "n_puls_orders"]
 
     @property
     def areas(self) -> Float[Array, "n_mesh_elements"]:
@@ -314,4 +315,5 @@ class IcosphereModel(MeshModel):
                                  fourier_series_parameters=jnp.nan * jnp.ones(
                                      (harmonics_params.shape[0], max_fourier_order, 2), dtype=float_dtype), # D_n, phi_n
                                  pulsation_axes=DEFAULT_ROTATION_AXIS.reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
-                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=float_dtype))
+                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=float_dtype),
+                                 pulsation_horizontal_ratios=jnp.zeros(harmonics_params.shape[0], dtype=float_dtype))

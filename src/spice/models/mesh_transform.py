@@ -15,7 +15,8 @@ from .utils import (ModelList, rotation_matrix, rotation_matrix_prim,
                     calculate_axis_radii,
                     evaluate_many_fouriers_for_value,
                     evaluate_many_fouriers_prim_for_value,
-                    spherical_harmonic_with_tilt)
+                    spherical_harmonic_with_tilt,
+                    spherical_harmonic_gradient_with_tilt)
 
 from jaxtyping import Array, Float
 
@@ -306,7 +307,8 @@ def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
 def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
                    pulsation_periods: ArrayLike, fourier_series_parameters: ArrayLike,
                    total_pad_len: int,
-                   pulsation_axes: ArrayLike, pulsation_angles: ArrayLike) -> MeshModel:
+                   pulsation_axes: ArrayLike, pulsation_angles: ArrayLike,
+                   horizontal_ratio: float = 0.0) -> MeshModel:
     harmonic_ind = spherical_harmonics_parameters[0] + \
         m.max_pulsation_mode * spherical_harmonics_parameters[1]
     return m._replace(
@@ -317,13 +319,16 @@ def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
         ),
         pulsation_axes=m.pulsation_axes.at[harmonic_ind].set(pulsation_axes),
         pulsation_angles=m.pulsation_angles.at[harmonic_ind].set(
-            pulsation_angles)
+            pulsation_angles),
+        pulsation_horizontal_ratios=m.pulsation_horizontal_ratios.at[harmonic_ind].set(
+            horizontal_ratio)
     )
 
 
 def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
                   period: Float, fourier_series_parameters: Float[Array, "n_terms 2"],
-                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None) -> MeshModel:
+                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None,
+                  horizontal_ratio: float = 0.0) -> MeshModel:
     """
     Adds pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -341,6 +346,9 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
             and each row contains [amplitude, phase] for that term.
         pulsation_axes (Float[Array, "3"]): Axes of the pulsation. Defaults to the rotation axis of the mesh model.
         pulsation_angles (Float): Angles of the pulsation. Defaults to zero.
+        horizontal_ratio (float): Ratio of horizontal to radial displacement (xi_h / xi_r).
+            For p-modes this is typically small (~0.01-0.1); for g-modes it can be >>1.
+            Defaults to 0.0 (purely radial pulsation).
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -367,7 +375,7 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
     return _add_pulsation(m, jnp.array([m_order, l_degree]), period, fourier_series_parameters,
                           int(m.max_fourier_order -
                               fourier_series_parameters.shape[0]),
-                          pulsation_axes, pulsation_angles)
+                          pulsation_axes, pulsation_angles, horizontal_ratio)
 
 
 @partial(jax.jit, static_argnums=(4,))
@@ -377,11 +385,12 @@ def _add_pulsations(m: MeshModel,
                     harmonic_indices: ArrayLike,
                     total_pad_len: int,
                     pulsation_axes: ArrayLike,
-                    pulsation_angles: ArrayLike) -> MeshModel:
+                    pulsation_angles: ArrayLike,
+                    horizontal_ratios: ArrayLike = None) -> MeshModel:
 
     def update_pulsation(carry, inputs):
-        m, harmonic_ind, period, fourier_params, pulsation_axes, pulsation_angles = carry, *inputs
-        
+        m, harmonic_ind, period, fourier_params, pulsation_axes, pulsation_angles, horizontal_ratio = carry, *inputs
+
         # Better handling of shape for fourier_params
         # Check if fourier_params is already 2D with shape (n, 2)
         if len(fourier_params.shape) == 2 and fourier_params.shape[1] == 2:
@@ -389,7 +398,7 @@ def _add_pulsations(m: MeshModel,
         else:
             # Safely reshape to (-1, 2), ensuring we have pairs of values
             reshape_params = fourier_params.reshape((-1, 2))
-            
+
         # Use the total_pad_len parameter that was passed to the function
         # This avoids dynamic computation inside the jitted function
         padded_fourier_params = jnp.pad(reshape_params, ((0, total_pad_len), (0, 0)))
@@ -399,23 +408,27 @@ def _add_pulsations(m: MeshModel,
             padded_fourier_params)
         new_axes = m.pulsation_axes.at[harmonic_ind].set(pulsation_axes)
         new_angles = m.pulsation_angles.at[harmonic_ind].set(pulsation_angles)
+        new_horizontal_ratios = m.pulsation_horizontal_ratios.at[harmonic_ind].set(horizontal_ratio)
 
         return m._replace(pulsation_periods=new_periods,
                           fourier_series_parameters=new_fourier_params,
                           pulsation_axes=new_axes,
-                          pulsation_angles=new_angles), None
+                          pulsation_angles=new_angles,
+                          pulsation_horizontal_ratios=new_horizontal_ratios), None
 
     updated_m, _ = jax.lax.scan(update_pulsation, m,
                                 (harmonic_indices,
                                  pulsation_periods, fourier_series_parameters,
-                                 pulsation_axes, pulsation_angles))
+                                 pulsation_axes, pulsation_angles,
+                                 horizontal_ratios))
 
     return updated_m
 
 
 def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degrees: Float[Array, "n_pulsations"],
                    periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"],
-                   pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel:
+                   pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None,
+                   horizontal_ratios: Float[Array, "n_pulsations"] = None) -> MeshModel:
     """
     Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
@@ -432,6 +445,8 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
             N is the number of terms for each pulsation, and each inner array contains [amplitude, phase] for that term.
         pulsation_axes (Float[Array, "n_pulsations 3"]): Array of pulsation axes. Defaults to the rotation axis of the mesh model.
         pulsation_angles (Float[Array, "n_pulsations"]): Array of pulsation angles. Defaults to zero.
+        horizontal_ratios (Float[Array, "n_pulsations"]): Array of horizontal-to-radial displacement ratios
+            (xi_h / xi_r) per mode. Defaults to zeros (purely radial).
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -451,9 +466,11 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
             (1, 3)).repeat(len(m_orders), axis=0)
     if pulsation_angles is None:
         pulsation_angles = jnp.zeros_like(m_orders)
+    if horizontal_ratios is None:
+        horizontal_ratios = jnp.zeros_like(m_orders, dtype=float)
 
     harmonic_indices = m_orders + m.max_pulsation_mode * l_degrees
-    
+
     # Fix inconsistency: fourier_series_parameters shape is (n_pulsations, n_terms, 2)
     # We need the second dimension (n_terms) for padding calculation
     total_pad_len = int(m.max_fourier_order -
@@ -461,7 +478,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
 
     return _add_pulsations(m, periods,
                            fourier_series_parameters, harmonic_indices, total_pad_len,
-                           pulsation_axes, pulsation_angles)
+                           pulsation_axes, pulsation_angles, horizontal_ratios)
 
 
 @jax.jit
@@ -476,7 +493,8 @@ def _reset_pulsations(m: MeshModel) -> MeshModel:
         jnp.ones_like(m.fourier_series_parameters),
         pulsation_axes=DEFAULT_ROTATION_AXIS.reshape(
             (1, 3)).repeat(m.pulsation_periods.shape[0], axis=0),
-        pulsation_angles=jnp.zeros_like(m.pulsation_periods)
+        pulsation_angles=jnp.zeros_like(m.pulsation_periods),
+        pulsation_horizontal_ratios=jnp.zeros_like(m.pulsation_horizontal_ratios)
     )
 
 
@@ -506,7 +524,8 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
 
 @jax.jit
 def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, magnitude_prim: float,
-                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
+                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike,
+                         horizontal_ratio: float = 0.0):
     # Ensure pulsation_angle is treated as scalar if it's a single value in an array
     # Use jnp.where to handle the scalar extraction in a jax-friendly way
     scalar_pulsation_angle = jnp.where(
@@ -514,7 +533,7 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude
         pulsation_angle.reshape(()),  # Reshape to scalar
         pulsation_angle  # Keep as is if not a single-element array
     )
-    
+
     vertex_harmonic_mags = spherical_harmonic_with_tilt(harmonic_parameters[0], harmonic_parameters[1], m.d_vertices,
                                                         pulsation_axis, scalar_pulsation_angle)[:,
                                                                                          jnp.newaxis]
@@ -535,12 +554,39 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude
         jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
     center_direction_vectors = m.d_centers / \
         jnp.linalg.norm(m.d_centers, axis=1).reshape((-1, 1))
-    new_vertices = (radius * magnitude *
-                    vertex_harmonic_mags * direction_vectors)
+
+    # Radial displacement: ξ_r * Y_l^m * r̂
+    radial_displacement = vertex_harmonic_mags * direction_vectors
+
+    # Horizontal (tangential) displacement: ξ_h * ∇_tangential(Y_l^m)
+    vertex_tangential_grad = spherical_harmonic_gradient_with_tilt(
+        harmonic_parameters[0], harmonic_parameters[1], m.d_vertices,
+        pulsation_axis, scalar_pulsation_angle)
+    center_tangential_grad = spherical_harmonic_gradient_with_tilt(
+        harmonic_parameters[0], harmonic_parameters[1], m.d_centers,
+        pulsation_axis, scalar_pulsation_angle)
+
+    # Normalize tangential gradients consistently with the harmonic magnitude normalization
+    vertex_tang_norm = jnp.max(jnp.linalg.norm(vertex_tangential_grad, axis=1)) + 1e-8
+    center_tang_norm = jnp.max(jnp.linalg.norm(center_tangential_grad, axis=1)) + 1e-8
+    vertex_tangential_grad = vertex_tangential_grad / vertex_tang_norm
+    center_tangential_grad = center_tangential_grad / center_tang_norm
+
+    # Total displacement = radial + horizontal_ratio * tangential
+    new_vertices = radius * magnitude * (
+        radial_displacement + horizontal_ratio * vertex_tangential_grad
+    )
     new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(new_vertices + m.d_vertices,
                                                                                m.faces.astype(jnp.int32))
+
+    # Pulsation velocity: same decomposition with time derivative of amplitude
+    radial_velocity = center_harmonic_mags * center_direction_vectors
+    total_pulsation_velocity = radius * magnitude_prim * (
+        radial_velocity + horizontal_ratio * center_tangential_grad
+    )
+
     return jnp.nan_to_num(new_vertices), jnp.nan_to_num(new_areas - m.base_areas), jnp.nan_to_num(
-        new_centers - m.d_centers), jnp.nan_to_num(radius * magnitude_prim * center_harmonic_mags * center_direction_vectors)
+        new_centers - m.d_centers), jnp.nan_to_num(total_pulsation_velocity)
 
 
 def calculate_numerical_pulsation_velocity(m: MeshModel, t: float, dt: float = 1e-6):
@@ -649,13 +695,14 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
     
     # Apply vmap to calculate pulsations for each harmonic
     vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(calculate_pulsations,
-                                                                              in_axes=(None, 0, 0, 0, None, 0, 0))(m,
+                                                                              in_axes=(None, 0, 0, 0, None, 0, 0, 0))(m,
                                                                                                                    harmonic_params,
                                                                                                                    pulsation_magnitudes,
                                                                                                                    pulsation_velocity_magnitudes,
                                                                                                                    m.radius,
                                                                                                                    m.pulsation_axes,
-                                                                                                                   m.pulsation_angles)
+                                                                                                                   m.pulsation_angles,
+                                                                                                                   m.pulsation_horizontal_ratios)
     # Use nan_to_num for safer summation
     return m._replace(
         vertices_pulsation_offsets=jnp.nan_to_num(jnp.sum(vert_offsets, axis=0)),
