@@ -6,9 +6,6 @@ LAW_IDS = {"linear": 0, "quadratic": 1, "square_root": 2, "logarithmic": 3, "non
 def get_limb_darkening_law_id(law: str) -> int:
     return LAW_IDS[law]
 
-import jax
-import jax.numpy as jnp
-
 @jax.jit
 def limb_darkening(mu, law_id: int, coeffs):
     """

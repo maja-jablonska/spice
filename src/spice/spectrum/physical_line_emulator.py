@@ -1,6 +1,5 @@
 from functools import partial
 from typing import Dict, Any, Sequence
-import wave
 
 import jax.numpy as jnp
 from jax import jit
