@@ -1,6 +1,9 @@
 *checkpoint.ipynb
+**/.ipynb_checkpoints/
 */__pycache__
 __pycache__
+*.egg-info/
+*.code-workspace
 .DS_Store
 .vscode/
 .pytest_cache/
