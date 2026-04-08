@@ -5,4 +5,4 @@ from .gaussian_line_emulator import GaussianLineEmulator
 from .limb_darkening import limb_darkening, get_limb_darkening_law_id
 from .line_profile import get_line_profile_id, line_profile
 from .physical_line_emulator import PhysicalLineEmulator
-from .lazy_zarr_interpolator import GridIndex, LazyZarrInterpolator, IntensityLazyZarrInterpolator, FluxLazyZarrInterpolator
+from .lazy_zarr_interpolator import GridIndex, SparseGridIndex, LazyZarrInterpolator, IntensityLazyZarrInterpolator, FluxLazyZarrInterpolator

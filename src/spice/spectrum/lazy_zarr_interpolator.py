@@ -1,13 +1,11 @@
-from itertools import product
 from typing import Any, Dict, List
 import warnings
 import jax
-from jax._src.typing import ArrayLike
+from jax.typing import ArrayLike
 import jax.numpy as jnp
 import numpy as np
 from jax import lax
 from functools import partial
-import os
 from tqdm.auto import tqdm
 import zarr
 import pandas as pd
@@ -19,14 +17,14 @@ DEVICE = jax.devices()[0]
 
 @jax.jit
 def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
-    n = values.shape[0]
+    n = jnp.int32(values.shape[0])
 
     # --- match detection (no dynamic shapes) ---
     mask = jnp.isclose(values, value, atol=atol, rtol=rtol)
     has_match = jnp.any(mask)
 
     # first True index (safe because argmax returns 0 if all False)
-    idx = jnp.argmax(mask)
+    idx = jnp.int32(jnp.argmax(mask))
 
     # --- match case ---
     def match_case(_):
@@ -36,11 +34,11 @@ def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
         def multiple(_):
             return lax.cond(
                 idx == 0,
-                lambda _: (0, 1),
+                lambda _: (jnp.int32(0), jnp.int32(1)),
                 lambda _: lax.cond(
                     idx == n - 1,
-                    lambda _: (n - 2, n - 1),
-                    lambda _: (idx - 1, idx + 1),
+                    lambda _: (n - jnp.int32(2), n - jnp.int32(1)),
+                    lambda _: (idx - jnp.int32(1), idx + jnp.int32(1)),
                     operand=None,
                 ),
                 operand=None,
@@ -50,9 +48,9 @@ def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
 
     # --- no match case ---
     def no_match_case(_):
-        hi = jnp.searchsorted(values, value, side="right")
-        hi = jnp.clip(hi, 1, n - 1)
-        return hi - 1, hi
+        hi = jnp.int32(jnp.searchsorted(values, value, side="right"))
+        hi = jnp.clip(hi, jnp.int32(1), n - jnp.int32(1))
+        return hi - jnp.int32(1), hi
 
     return lax.cond(has_match, match_case, no_match_case, operand=None)
 
@@ -116,6 +114,155 @@ def compute_brackets_batched(axis_values, queries, atol=1e-6, rtol=1e-6):
 
 def make_corners(d):
     return jnp.array(np.array(list(np.ndindex(*(2,) * d)), dtype=np.int32))
+
+
+@jax.jit
+def _sparse_lookup_single(keys, values, query_key):
+    """Lookup a single key in the sorted keys array. Returns row index or -1."""
+    pos = jnp.searchsorted(keys, query_key)
+    pos = jnp.clip(pos, 0, keys.shape[0] - 1)
+    found = keys[pos] == query_key
+    return jnp.where(found, values[pos], jnp.int32(-1))
+
+
+@partial(jax.jit, static_argnums=(4,))
+def sparse_weighted_rows_from_brackets(keys, values, strides, brackets, corners_dimension):
+    """
+    keys: (S,) int64, sorted encoded multi-dim indices
+    values: (S,) int32, row indices
+    strides: (d,) int64, mixed-radix strides
+    brackets: (d, 3) array -> [lo, hi, t] per axis
+    corners_dimension: int
+
+    returns:
+        rows: (2^d,) int32
+        weights: (2^d,) float
+    """
+    brackets = jnp.asarray(brackets)
+    lo = brackets[:, 0].astype(jnp.int32)
+    hi = brackets[:, 1].astype(jnp.int32)
+    t = brackets[:, 2]
+
+    corners = make_corners(corners_dimension)
+
+    # grid indices for each corner
+    indices = jnp.where(corners == 0, lo, hi)  # (2^d, d)
+
+    # encode each corner to a flat key
+    corner_keys = jnp.dot(indices.astype(jnp.int64), strides)  # (2^d,)
+
+    # lookup each corner
+    rows = jax.vmap(lambda k: _sparse_lookup_single(keys, values, k))(corner_keys)  # (2^d,)
+
+    # multilinear weights
+    weights = jnp.where(corners == 0, 1.0 - t, t)
+    weights = jnp.prod(weights, axis=1)  # (2^d,)
+
+    # mask invalid
+    valid = (weights > 0.0) & (rows >= 0)
+    rows = jnp.where(valid, rows, -1)
+    weights = jnp.where(valid, weights, 0.0)
+
+    # normalize
+    total = jnp.sum(weights)
+    weights = jnp.where(total > 0, weights / total, weights)
+
+    return rows, weights
+
+
+@partial(jax.jit, static_argnums=(4,))
+def sparse_weighted_rows_from_brackets_batched(keys, values, strides, brackets, d):
+    """
+    brackets: (B, d, 3)
+    returns: rows (B, 2^d), weights (B, 2^d)
+    """
+    def per_query(b):
+        return sparse_weighted_rows_from_brackets(keys, values, strides, b, d)
+
+    return jax.vmap(per_query)(brackets)
+
+
+class SparseGridIndex:
+    """Grid index using sorted flat keys instead of a dense N-d array.
+
+    Works with grids of many parameters where a dense array would be
+    too large to allocate.
+    """
+
+    def __init__(self, keys, values, axes, columns, strides, device=DEVICE):
+        self.axes_np = [np.asarray(ax) for ax in axes]
+        self.columns = columns
+
+        self.axes = tuple(
+            jax.device_put(ax, device=device) for ax in self.axes_np
+        )
+        self.keys = jax.device_put(keys, device=device)
+        self.values = jax.device_put(values, device=device)
+        self.strides = jax.device_put(strides, device=device)
+
+        self.d = len(self.axes)
+        self.num_rows = int(np.max(values) + 1) if len(values) > 0 else 0
+
+        self.keys.block_until_ready()
+
+    @classmethod
+    def from_dataframe(cls, df, columns, device=DEVICE):
+        print('Building sparse grid index...', flush=True)
+
+        axes = [np.unique(df[c].to_numpy()) for c in columns]
+
+        # compute mixed-radix strides
+        axis_lengths = [len(ax) for ax in axes]
+        strides = np.ones(len(columns), dtype=np.int64)
+        for i in range(len(columns) - 2, -1, -1):
+            strides[i] = strides[i + 1] * axis_lengths[i + 1]
+
+        # check for int64 overflow
+        total_size = int(strides[0]) * axis_lengths[0] if axis_lengths else 0
+        assert total_size >= 0, (
+            f"Grid too large for int64 encoding: strides would overflow. "
+            f"Axis lengths: {axis_lengths}"
+        )
+
+        # compute multi-dim indices for each row
+        indices = np.stack([
+            np.searchsorted(axes[i], df[columns[i]].to_numpy())
+            for i in range(len(columns))
+        ], axis=1)  # (S, d)
+
+        # encode to flat keys
+        keys = indices.astype(np.int64) @ strides  # (S,)
+        row_idx = df.row_idx.to_numpy(dtype=np.int32, copy=False)
+
+        # sort by key
+        order = np.argsort(keys)
+        keys = keys[order]
+        row_idx = row_idx[order]
+
+        print('Sparse grid index ready.', flush=True)
+        return cls(keys, row_idx, axes, columns, strides, device=device)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def lookup(self, query_values, atol=1e-6, rtol=1e-6):
+        brackets = _compute_brackets(self.axes, query_values, atol, rtol)
+
+        rows, weights = sparse_weighted_rows_from_brackets(
+            self.keys, self.values, self.strides,
+            brackets, self.d,
+        )
+
+        return rows, weights
+
+    def batched_lookup(self, queries, atol=1e-6, rtol=1e-6):
+        brackets = compute_brackets_batched(self.axes, queries, atol, rtol)
+
+        rows, weights = sparse_weighted_rows_from_brackets_batched(
+            self.keys, self.values, self.strides,
+            brackets, self.d,
+        )
+
+        return rows, weights
+
 
 @partial(jax.jit, static_argnums=(2, 3))
 def weighted_rows_from_brackets(grid, brackets, corners_dimension, num_rows):
@@ -304,80 +451,6 @@ def combine_rows_jax(row_indices, weights, data):
 
     return combined
 
-def _prepare_global_rows(rows, weights):
-    """
-    rows: (B, K)
-    weights: (B, K)
-
-    returns:
-        unique_rows: (U,)
-        inverse: (B, K) → indices into unique_rows
-        weights_masked: (B, K)
-    """
-    B, K = rows.shape
-
-    flat_rows = rows.reshape(-1)
-
-    valid = flat_rows >= 0
-    flat_rows = jnp.where(valid, flat_rows, 0.0)
-
-    unique_rows, inverse = jnp.unique(flat_rows, return_inverse=True, size=B*K, fill_value=-1)
-
-    inverse = jnp.where(valid, inverse, 0.0)
-    
-    # rebuild inverse with padding
-    full_inverse = jnp.full((B * K,), -1, dtype=jnp.int32)
-    full_inverse = full_inverse = jnp.where(valid, inverse, -1)
-    full_inverse = full_inverse.reshape(B, K)
-
-    weights_masked = jnp.where(rows >= 0, weights, 0.0)
-
-    return unique_rows, full_inverse, weights_masked
-
-@jax.jit
-def batch_kernel(row_indices, weights, flux, continuum):
-    flux_out = combine_rows_jax(row_indices, weights, flux)
-    cont_out = combine_rows_jax(row_indices, weights, continuum)
-    return flux_out, cont_out
-
-@jax.jit
-def _accumulate_batch(inverse, weights, flux_chunk, cont_chunk):
-    """
-    inverse: (B, K) → indices into chunk
-    weights: (B, K)
-    flux_chunk: (U, L)
-    cont_chunk: (U, L)
-
-    returns:
-        flux_out: (B, L)
-        cont_out: (B, L)
-    """
-
-    B, K = inverse.shape
-    L = flux_chunk.shape[1]
-
-    # mask invalid
-    valid = inverse >= 0
-
-    safe_idx = jnp.where(valid, inverse, 0)
-
-    gathered_flux = flux_chunk[safe_idx]   # (B, K, L)
-    gathered_cont = cont_chunk[safe_idx]
-
-    w = jnp.where(valid, weights, 0.0)     # (B, K)
-    w = w[..., None]                       # (B, K, 1)
-
-    flux_out = jnp.sum(gathered_flux * w, axis=1)
-    cont_out = jnp.sum(gathered_cont * w, axis=1)
-
-    norm = jnp.sum(weights, axis=1, keepdims=True)
-    norm = jnp.where(norm > 0, norm, 1.0)
-
-    flux_out = flux_out / norm
-    cont_out = cont_out / norm
-
-    return flux_out, cont_out
-
 
 def _parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> ArrayLike:
     """Convert passed values to the accepted parameters format
@@ -414,59 +487,21 @@ def _parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> 
     return parameters
 
 
-def _load_chunk(rowwise_data, start, end):
-    flux = rowwise_data['flux'][start:end]
-    cont = rowwise_data['continuum'][start:end]
-
-    return (
-        jax.device_put(np.asarray(flux)),
-        jax.device_put(np.asarray(cont)),
-    )
-    
-@jax.jit
-def _accumulate_from_chunk(rows, weights, flux_chunk, cont_chunk, offset):
-    """
-    rows: (B, K) global indices
-    weights: (B, K)
-    flux_chunk: (C, L)
-    offset: int (start index of chunk)
-    """
-
-    B, K = rows.shape
-    C, L = flux_chunk.shape
-
-    # map global → local indices
-    local_idx = rows - offset
-
-    # valid mask
-    valid = (local_idx >= 0) & (local_idx < C)
-
-    # clamp to safe range
-    local_idx_safe = jnp.clip(local_idx, 0, C - 1)
-
-    # gather
-    gathered_flux = flux_chunk[local_idx_safe]      # (B, K, L)
-    gathered_cont = cont_chunk[local_idx_safe]
-
-    # mask invalid rows
-    weights_masked = jnp.where(valid, weights, 0.0)
-
-    # weighted sum
-    flux_out = jnp.sum(gathered_flux * weights_masked[..., None], axis=1)
-    cont_out = jnp.sum(gathered_cont * weights_masked[..., None], axis=1)
-
-    return flux_out, cont_out
 
 
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, sparse=False):
         arrays = ['wavelength', 'flux', 'continuum']
         self.store = zarr.open(zarr_path, mode='r')
         self.length = int(self.store['flux'].shape[0])
         if params is None:
             params = self.store['param_names']
 
-        self.grid_index = GridIndex.from_dataframe(pd.read_parquet(f'{zarr_path}/index.parquet'), columns=params, device=device)
+        df = pd.read_parquet(f'{zarr_path}/index.parquet')
+        if sparse:
+            self.grid_index = SparseGridIndex.from_dataframe(df, columns=params, device=device)
+        else:
+            self.grid_index = GridIndex.from_dataframe(df, columns=params, device=device)
         
         self.solar_parameters = solar_parameters
         self.stellar_parameter_names = params
@@ -483,64 +518,68 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                 self.rowwise_data[k] = arr
             else:
                 self.static_data[k] = jax.device_put(np.asarray(arr[:]), device=device)
-        self._row_cache = {k: {} for k in self.rowwise_data}
-    
-    def _accumulate_all_chunks(self, rows, weights, chunk_size=1024):
-        B = rows.shape[0]
 
-        # get wavelength length
+    def _accumulate_direct(self, rows, weights):
         L = self.static_data['wavelength'].shape[0]
+        rowwise_data = self.rowwise_data
 
-        flux_total = jnp.zeros((B, L))
-        cont_total = jnp.zeros((B, L))
+        def _host_fn(rows_np, weights_np):
+            # broadcast_all: vmap adds a leading batch dim → (vmap_B, B_inner, K)
+            # non-vmapped: (B_inner, K)
+            orig_shape = rows_np.shape
+            K = orig_shape[-1]
+            if rows_np.ndim == 3:
+                vmap_B, B_inner = orig_shape[0], orig_shape[1]
+                rows_flat = rows_np.reshape(-1, K)
+                weights_flat = weights_np.reshape(-1, K)
+            else:
+                vmap_B = None
+                B_inner = orig_shape[0]
+                rows_flat = rows_np
+                weights_flat = weights_np
 
-        n_chunks = (self.length + chunk_size - 1) // chunk_size
+            total_B = rows_flat.shape[0]
+            valid_mask = rows_flat >= 0
+            unique_rows = np.unique(rows_flat[valid_mask])
 
-        for i in range(n_chunks):
-            start = i * chunk_size
-            end = min((i + 1) * chunk_size, self.length)
+            if len(unique_rows) == 0:
+                flux_out = np.zeros((total_B, L), dtype=np.float32)
+                cont_out = np.zeros((total_B, L), dtype=np.float32)
+            else:
+                flux_subset = np.asarray(rowwise_data['flux'][unique_rows])
+                cont_subset = np.asarray(rowwise_data['continuum'][unique_rows])
 
-            flux_chunk, cont_chunk = _load_chunk(self.rowwise_data, start, end)
+                local_indices = np.searchsorted(unique_rows, np.where(valid_mask, rows_flat, 0))
+                safe_idx = np.where(valid_mask, local_indices, 0)
 
-            flux_part, cont_part = _accumulate_from_chunk(
-                rows,
-                weights,
-                flux_chunk,
-                cont_chunk,
-                start,
-            )
+                gathered_flux = flux_subset[safe_idx]
+                gathered_cont = cont_subset[safe_idx]
+                w = np.where(valid_mask, weights_flat, 0.0)[..., np.newaxis]
 
-            flux_total = flux_total + flux_part
-            cont_total = cont_total + cont_part
+                flux_out = np.sum(gathered_flux * w, axis=1).astype(np.float32)
+                cont_out = np.sum(gathered_cont * w, axis=1).astype(np.float32)
 
-        return flux_total, cont_total
-        
-    def solar_parameters(self) -> ArrayLike:
-        return self.solar_parameters
+            if vmap_B is not None:
+                return (flux_out.reshape(vmap_B, B_inner, L),
+                        cont_out.reshape(vmap_B, B_inner, L))
+            return flux_out, cont_out
+
+        B = rows.shape[0]
+        result_shape = (
+            jax.ShapeDtypeStruct((B, L), jnp.float32),
+            jax.ShapeDtypeStruct((B, L), jnp.float32),
+        )
+        return jax.pure_callback(_host_fn, result_shape, rows, weights, vmap_method='broadcast_all')
 
     def is_in_bounds(self, parameters: ArrayLike) -> bool:
         return jnp.all(parameters >= self.min_stellar_parameters) and jnp.all(parameters <= self.max_stellar_parameters)
     
-    def stellar_parameter_names(self) -> List:
-        return self.stellar_parameter_names
-        
     @override
     def to_parameters(self, parameters=None):
         if parameters is None:
             return self.solar_parameters
         return _parameter_helper(self, parameters)
         
-    def _load_rows(self, unique_rows):
-        rows_host = jax.device_get(unique_rows)
-
-        flux = self.rowwise_data['flux'][rows_host]
-        cont = self.rowwise_data['continuum'][rows_host]
-
-        return (
-            jax.device_put(flux),
-            jax.device_put(cont),
-        )
-
     def get_weighted_batch(self, queries):
         """
         queries: (B, d)
@@ -548,7 +587,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
         rows, weights = self.grid_index.batched_lookup(queries)
 
-        flux_out, cont_out = self._accumulate_all_chunks(rows, weights)
+        flux_out, cont_out = self._accumulate_direct(rows, weights)
 
         return {
             **self.static_data,
@@ -571,12 +610,22 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
 
 class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, sparse=False):
         if 'mu' not in params:
             raise ValueError("mu must be included in params")
-        super().__init__(zarr_path, solar_parameters, params, device)
+        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse)
         self.stellar_parameter_names = [p for p in params if p != 'mu']
-    
+        self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self.stellar_parameter_names])
+        self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self.stellar_parameter_names])
+
+    @override
+    def to_parameters(self, parameters=None):
+        if parameters is None:
+            return self.solar_parameters
+        if isinstance(parameters, dict):
+            parameters = {k: v for k, v in parameters.items() if k != 'mu'}
+        return _parameter_helper(self, parameters)
+
     @override
     def intensity(self, log_wavelengths, mu, parameters):
         query = jnp.concatenate([jnp.atleast_1d(parameters), jnp.atleast_1d(jnp.squeeze(mu))])
@@ -647,8 +696,8 @@ def get_limb_darkening_law_id(law: str) -> int:
 
 
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, limb_darkening_law=None, limb_darkening_coeffs=None):
-        super().__init__(zarr_path, solar_parameters, params, device)
+    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, limb_darkening_law=None, limb_darkening_coeffs=None, sparse=False):
+        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse)
         if limb_darkening_law is None:
             self.limb_darkening_law = get_limb_darkening_law_id('linear')
         else:
