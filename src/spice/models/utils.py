@@ -96,6 +96,31 @@ def phi_to_lon(phi: float) -> float:
     return jnp.rad2deg(phi)  # Convert azimuth to longitude
 
 
+def horizontal_to_radial_ratio(mass: float, radius: float, pulsation_period: float) -> float:
+    """
+    Compute the horizontal-to-radial displacement ratio K from stellar parameters.
+
+    From the outer mechanical boundary condition (Smeyers & Tassoul 1987):
+        K = GM / (omega^2 * R^3)
+
+    For p-modes K << 1 (radial dominates); for g-modes K >> 1 (horizontal dominates).
+
+    Args:
+        mass (float): Stellar mass in solar masses.
+        radius (float): Stellar radius in solar radii.
+        pulsation_period (float): Pulsation period in days.
+
+    Returns:
+        float: The ratio K = xi_h / xi_r, suitable for use as `horizontal_ratio`
+            in `add_pulsation()`.
+    """
+    G = 6.674e-11       # m^3 kg^-1 s^-2
+    M = mass * 1.989e30  # kg
+    R = radius * 6.957e8 # m
+    omega = 2 * jnp.pi / (pulsation_period * 86400.0)  # rad/s
+    return G * M / (omega**2 * R**3)
+
+
 def velocity_to_period(velocity: float, radius: float) -> float:
     """
     Convert rotational velocity to rotation period.
