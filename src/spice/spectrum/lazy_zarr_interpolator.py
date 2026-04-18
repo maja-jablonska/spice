@@ -1,19 +1,26 @@
 from typing import Any, Dict, List
+import time as _time
+import sys as _sys
 import warnings
+
+_jax_already_loaded = "jax" in _sys.modules
+_t0 = _time.perf_counter()
 import jax
 from jax.typing import ArrayLike
 import jax.numpy as jnp
-import numpy as np
 from jax import lax
-from functools import partial
-from tqdm.auto import tqdm
-import zarr
-import pandas as pd
+if not _jax_already_loaded:
+    print(f"[spice] JAX loaded in {_time.perf_counter() - _t0:.1f} s", flush=True)
+
+import numpy as np
+from functools import partial, lru_cache
 from overrides import override
 
 from spice.spectrum.spectrum_emulator import SpectrumEmulator
 
-DEVICE = jax.devices()[0]
+
+def _default_device():
+    return jax.devices()[0]
 
 @jax.jit
 def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
@@ -112,8 +119,13 @@ def compute_brackets_batched(axis_values, queries, atol=1e-6, rtol=1e-6):
     return jax.vmap(per_query)(queries)
 
 
+@lru_cache(maxsize=16)
+def _make_corners_np(d):
+    return np.array(list(np.ndindex(*(2,) * d)), dtype=np.int32)
+
+
 def make_corners(d):
-    return jnp.array(np.array(list(np.ndindex(*(2,) * d)), dtype=np.int32))
+    return jnp.array(_make_corners_np(d))
 
 
 @jax.jit
@@ -189,7 +201,8 @@ class SparseGridIndex:
     too large to allocate.
     """
 
-    def __init__(self, keys, values, axes, columns, strides, device=DEVICE):
+    def __init__(self, keys, values, axes, columns, strides, device=None):
+        device = device or _default_device()
         self.axes_np = [np.asarray(ax) for ax in axes]
         self.columns = columns
 
@@ -201,12 +214,14 @@ class SparseGridIndex:
         self.strides = jax.device_put(strides, device=device)
 
         self.d = len(self.axes)
+        self._num_corners = 2 ** self.d
         self.num_rows = int(np.max(values) + 1) if len(values) > 0 else 0
 
         self.keys.block_until_ready()
 
     @classmethod
-    def from_dataframe(cls, df, columns, device=DEVICE):
+    def from_dataframe(cls, df, columns, device=None):
+        device = device or _default_device()
         print('Building sparse grid index...', flush=True)
 
         axes = [np.unique(df[c].to_numpy()) for c in columns]
@@ -326,10 +341,11 @@ def weighted_rows_from_brackets_batched(grid, brackets, d, num_rows):
     return jax.vmap(per_query)(brackets)
 
 class GridIndex:
-    def __init__(self, grid, axes, columns, device=DEVICE):
+    def __init__(self, grid, axes, columns, device=None):
         """
         axes: list/tuple of 1D arrays (one per dimension)
         """
+        device = device or _default_device()
         self.axes_np = [np.asarray(ax) for ax in axes]
         self.grid_np = np.asarray(grid)
         self.columns = columns
@@ -340,15 +356,17 @@ class GridIndex:
         self.grid = jax.device_put(self.grid_np, device=device)
 
         self.d = len(self.axes)
+        self._num_corners = 2 ** self.d
         self.num_rows = int(self.grid.max() + 1)
 
         self.grid.block_until_ready()
 
     @classmethod
-    def from_dataframe(cls, df, columns, device=DEVICE):
+    def from_dataframe(cls, df, columns, device=None):
         """
         columns: list of column names defining the grid axes
         """
+        device = device or _default_device()
         print('Building grid index...', flush=True)
 
         axes = [np.unique(df[c].to_numpy()) for c in columns]
@@ -390,14 +408,12 @@ class GridIndex:
             self.num_rows,
         )
 
-        max_corners = 2 ** self.d
-
-        rows = jnp.nonzero(weights_dense > 0, size=max_corners, fill_value=-1)[0]
+        rows = jnp.nonzero(weights_dense > 0, size=self._num_corners, fill_value=-1)[0]
         weights = weights_dense[rows]
         weights = jnp.where(rows >= 0, weights, 0.0)
 
         return rows, weights
-    
+
     def batched_lookup(self, queries, atol=1e-6, rtol=1e-6):
         brackets = compute_brackets_batched(self.axes, queries, atol, rtol)
 
@@ -408,7 +424,7 @@ class GridIndex:
             self.num_rows,
         )
 
-        max_corners = 2 ** self.d
+        max_corners = self._num_corners
 
         def extract(w):
             rows = jnp.nonzero(w > 0, size=max_corners, fill_value=-1)[0]
@@ -465,21 +481,18 @@ def _parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> 
     
     if not parameter_values:
         return interpolator.solar_parameters
-    
-    # Initialize parameters with solar values
-    parameters = jnp.array(interpolator.solar_parameters)
 
-    if parameter_values:
-        if isinstance(parameter_values, dict):
-            # Convert parameter names to indices for direct access
-            parameter_indices = {label: i for i, label in enumerate(interpolator.stellar_parameter_names)}
-            
-            for label, value in parameter_values.items():
-                # Get the index of the parameter
-                idx = parameter_indices[label]
-                parameters = parameters.at[idx].set(value)
-        else:
-            parameters = jnp.array(parameter_values)
+    # Initialize parameters with solar values
+    if isinstance(parameter_values, dict):
+        parameters = jnp.array(interpolator.solar_parameters)
+        # Convert parameter names to indices for direct access
+        parameter_indices = {label: i for i, label in enumerate(interpolator.stellar_parameter_names)}
+
+        for label, value in parameter_values.items():
+            idx = parameter_indices[label]
+            parameters = parameters.at[idx].set(value)
+    else:
+        parameters = jnp.array(parameter_values)
     
     if not (jnp.all(parameters >= interpolator.min_stellar_parameters) and jnp.all(parameters <= interpolator.max_stellar_parameters)):
         warnings.warn("Possible exceeding parameter bonds - extrapolating.")
@@ -490,7 +503,24 @@ def _parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> 
 
 
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, sparse=False):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=False):
+        _zarr_loaded = "zarr" in _sys.modules
+        _t = _time.perf_counter()
+        import zarr
+        if not _zarr_loaded:
+            print(f"[spice] zarr loaded in {_time.perf_counter() - _t:.1f} s", flush=True)
+
+        _pd_loaded = "pandas" in _sys.modules
+        _t = _time.perf_counter()
+        import pandas as pd
+        if not _pd_loaded:
+            print(f"[spice] pandas loaded in {_time.perf_counter() - _t:.1f} s", flush=True)
+
+        from tqdm.auto import tqdm
+
+        device = device or _default_device()
+        print(f"[spice] Loading spectral grid from {zarr_path}...", flush=True)
+        _t_total = _time.perf_counter()
         arrays = ['wavelength', 'flux', 'continuum']
         self.store = zarr.open(zarr_path, mode='r')
         self.length = int(self.store['flux'].shape[0])
@@ -504,7 +534,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             self.grid_index = GridIndex.from_dataframe(df, columns=params, device=device)
         
         self.solar_parameters = solar_parameters
-        self.stellar_parameter_names = params
+        self._stellar_parameter_names = params
         # Read min/max parameters from GridIndex
         self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].min() for param in params])
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].max() for param in params])
@@ -512,12 +542,17 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
         self.rowwise_data = {}
         self.static_data = {}
         
-        for k in tqdm(arrays, desc='Loading data'):
+        for k in tqdm(arrays, desc='[spice] Loading data'):
             arr = self.store[k]
             if arr.ndim > 0 and arr.shape[0] == self.length:
                 self.rowwise_data[k] = arr
             else:
                 self.static_data[k] = jax.device_put(np.asarray(arr[:]), device=device)
+        print(f"[spice] Spectral grid loaded in {_time.perf_counter() - _t_total:.1f} s", flush=True)
+
+    @property
+    def stellar_parameter_names(self):
+        return self._stellar_parameter_names
 
     def _accumulate_direct(self, rows, weights):
         L = self.static_data['wavelength'].shape[0]
@@ -546,18 +581,26 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                 flux_out = np.zeros((total_B, L), dtype=np.float32)
                 cont_out = np.zeros((total_B, L), dtype=np.float32)
             else:
-                flux_subset = np.asarray(rowwise_data['flux'][unique_rows])
-                cont_subset = np.asarray(rowwise_data['continuum'][unique_rows])
+                flux_subset = np.asarray(rowwise_data['flux'][unique_rows])  # (U, L)
+                cont_subset = np.asarray(rowwise_data['continuum'][unique_rows])  # (U, L)
 
                 local_indices = np.searchsorted(unique_rows, np.where(valid_mask, rows_flat, 0))
                 safe_idx = np.where(valid_mask, local_indices, 0)
+                w = np.where(valid_mask, weights_flat, weights_flat.dtype.type(0))
 
-                gathered_flux = flux_subset[safe_idx]
-                gathered_cont = cont_subset[safe_idx]
-                w = np.where(valid_mask, weights_flat, 0.0)[..., np.newaxis]
+                # Scatter weights into (total_B, U) then matmul with (U, L).
+                # Avoids materialising the (total_B, K, L) intermediate which is
+                # total_B * 2^d * L in size and causes OOM for large chunk_size/d.
+                U = len(unique_rows)
+                weights_per_row = np.zeros((total_B, U), dtype=np.float32)
+                b_idx = np.repeat(np.arange(total_B), K)
+                u_idx = safe_idx.ravel()
+                w_flat = w.ravel().astype(np.float32)
+                valid_flat = valid_mask.ravel()
+                np.add.at(weights_per_row, (b_idx[valid_flat], u_idx[valid_flat]), w_flat[valid_flat])
 
-                flux_out = np.sum(gathered_flux * w, axis=1).astype(np.float32)
-                cont_out = np.sum(gathered_cont * w, axis=1).astype(np.float32)
+                flux_out = (weights_per_row @ flux_subset).astype(np.float32)   # (total_B, L)
+                cont_out = (weights_per_row @ cont_subset).astype(np.float32)   # (total_B, L)
 
             if vmap_B is not None:
                 return (flux_out.reshape(vmap_B, B_inner, L),
@@ -610,13 +653,13 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
 
 class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, sparse=False):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=False):
         if 'mu' not in params:
             raise ValueError("mu must be included in params")
         super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse)
-        self.stellar_parameter_names = [p for p in params if p != 'mu']
-        self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self.stellar_parameter_names])
-        self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self.stellar_parameter_names])
+        self._stellar_parameter_names = [p for p in params if p != 'mu']
+        self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self._stellar_parameter_names])
+        self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
 
     @override
     def to_parameters(self, parameters=None):
@@ -643,16 +686,11 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
             roots[:, jnp.newaxis, jnp.newaxis]*weights[:, jnp.newaxis, jnp.newaxis],
             axis=0
         )
-        
-        
-import jax
-import jax.numpy as jnp
-from jax import lax
+
 
 
 def _linear(mu, coeffs):
     u = coeffs[0]
-    jax.debug.print("u: {u}, mu: {mu}, 1.0 - u * (1.0 - mu): {val}", u=u, mu=mu, val=1.0 - u * (1.0 - mu))
     return 1.0 - u * (1.0 - mu)
 
 
@@ -696,7 +734,7 @@ def get_limb_darkening_law_id(law: str) -> int:
 
 
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=DEVICE, limb_darkening_law=None, limb_darkening_coeffs=None, sparse=False):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, limb_darkening_law=None, limb_darkening_coeffs=None, sparse=False):
         super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse)
         if limb_darkening_law is None:
             self.limb_darkening_law = get_limb_darkening_law_id('linear')

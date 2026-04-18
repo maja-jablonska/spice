@@ -1,11 +1,23 @@
+from __future__ import annotations
+
+import time as _time
+import sys as _sys
+
+_mpl_already_loaded = "matplotlib" in _sys.modules
+_t0 = _time.perf_counter()
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import art3d
-from typing import List, Optional, Tuple, Union
+if not _mpl_already_loaded:
+    print(f"[spice] matplotlib loaded in {_time.perf_counter() - _t0:.1f} s", flush=True)
+
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 import numpy as np
-from spice.models import MeshModel
-from jax.typing import ArrayLike
 import cmasher as cmr
+
+if TYPE_CHECKING:
+    from spice.models import MeshModel
+    from jax.typing import ArrayLike
 
 PLOT_MODES = ['MESH', 'POINTS']
 COLORMAP_PROPERTIES = ['mus', 'los_velocities', 'cast_areas', 'visible_cast_areas', 'log_gs']

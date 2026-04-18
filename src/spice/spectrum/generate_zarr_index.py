@@ -49,14 +49,53 @@ def _get_polars():
     return pl
 
 
-def _iter_index_columns(params, param_names):
+def build_index_frame(params, param_names, mu_values=None):
+    """Build a polars DataFrame index from a params array.
+
+    Parameters
+    ----------
+    params : array-like, shape (N_rows, N_params)
+        The parameter grid. Columns corresponding to names other than ``"mu"``
+        are included directly.
+    param_names : list[str]
+        Name for each column of *params*.
+    mu_values : array-like or None
+        Optional 1-D array of mu values.  When provided it is included as the
+        ``"mu"`` column regardless of whether ``"mu"`` appears in *param_names*.
+    """
+    params = np.asarray(params)
+    if params.ndim != 2:
+        raise ValueError(f"Expected 'params' to be 2D, got shape {params.shape}.")
+
+    if len(param_names) != params.shape[1]:
+        raise ValueError(
+            f"'param_names' length ({len(param_names)}) does not match params width ({params.shape[1]})."
+        )
+    if len(set(param_names)) != len(param_names):
+        raise ValueError(f"Parameter names must be unique, got {param_names}.")
+
+    columns = {"row_idx": np.arange(params.shape[0], dtype=np.int64)}
     for idx, name in enumerate(param_names):
         if name == "mu":
             continue
-        yield name, params[:, idx]
+        columns[name] = params[:, idx]
+
+    if mu_values is not None:
+        mu_values = np.asarray(mu_values).squeeze()
+        if mu_values.ndim != 1:
+            raise ValueError(
+                f"Expected 'mu_values' to be 1D, got shape {mu_values.shape}."
+            )
+        if mu_values.shape[0] != params.shape[0]:
+            raise ValueError(
+                f"'mu_values' length ({mu_values.shape[0]}) does not match params rows ({params.shape[0]})."
+            )
+        columns["mu"] = mu_values
+
+    return _get_polars().DataFrame(columns)
 
 
-def _load_mu_column(group, params, param_names, store_path):
+def _load_mu_from_zarr(group, params, param_names, store_path):
     if "mu_selected" in group:
         mu_values = np.asarray(group["mu_selected"][:])
         if mu_values.ndim == 2 and mu_values.shape[1] == 1:
@@ -80,7 +119,7 @@ def _load_mu_column(group, params, param_names, store_path):
     )
 
 
-def build_index_frame(store_path, include_mu=True):
+def build_index_frame_from_zarr(store_path, include_mu=True):
     store_path = Path(store_path).expanduser().resolve()
     group = resolve_grid_group(zarr.open_group(str(store_path), mode="r"), str(store_path))
 
@@ -88,24 +127,13 @@ def build_index_frame(store_path, include_mu=True):
         raise KeyError(f"Missing 'param_names' array in zarr store '{store_path}'.")
 
     params = np.asarray(group["params"][:])
-    if params.ndim != 2:
-        raise ValueError(f"Expected 'params' to be 2D, got shape {params.shape}.")
-
     param_names = load_param_names(group)
-    if len(param_names) != params.shape[1]:
-        raise ValueError(
-            f"'param_names' length ({len(param_names)}) does not match params width ({params.shape[1]})."
-        )
-    if len(set(param_names)) != len(param_names):
-        raise ValueError(f"Parameter names must be unique, got {param_names}.")
 
-    columns = {"row_idx": np.arange(params.shape[0], dtype=np.int64)}
-    for name, values in _iter_index_columns(params, param_names):
-        columns[name] = values
+    mu_values = None
     if include_mu:
-        columns["mu"] = _load_mu_column(group, params, param_names, store_path)
+        mu_values = _load_mu_from_zarr(group, params, param_names, store_path)
 
-    return _get_polars().DataFrame(columns)
+    return build_index_frame(params, param_names, mu_values=mu_values)
 
 
 def write_index_parquet(
@@ -120,7 +148,7 @@ def write_index_parquet(
     output_path = Path(output_path).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    frame = build_index_frame(store_path, include_mu=include_mu)
+    frame = build_index_frame_from_zarr(store_path, include_mu=include_mu)
     frame.write_parquet(output_path, compression=compression)
     return output_path
 

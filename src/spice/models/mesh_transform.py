@@ -8,15 +8,21 @@ from jax.typing import ArrayLike
 import numpy as np
 
 from .mesh_generation import face_center
-from .mesh_model import MeshModel, DEFAULT_ROTATION_AXIS, create_harmonics_params
-from spice.models.phoebe_model import PhoebeModel
+from .mesh_model import MeshModel, _default_rotation_axis, create_harmonics_params
+try:
+    from spice.models.phoebe_model import PhoebeModel
+except Exception:
+    class PhoebeModel:
+        """Placeholder when PHOEBE is not installed or broken."""
+        pass
 from .utils import (ModelList, rotation_matrix, rotation_matrix_prim,
                     evaluate_rotation_matrix,
                     calculate_axis_radii,
                     evaluate_many_fouriers_for_value,
                     evaluate_many_fouriers_prim_for_value,
                     spherical_harmonic_with_tilt,
-                    spherical_harmonic_gradient_with_tilt)
+                    spherical_harmonic_gradient_with_tilt,
+                    spherical_harmonic_toroidal_with_tilt)
 
 from jaxtyping import Array, Float
 
@@ -179,7 +185,9 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
 @jax.jit
 def _add_rotation(mesh: MeshModel,
                   rotation_velocity: float,
-                  rotation_axis: Float[Array, "3"] = DEFAULT_ROTATION_AXIS) -> MeshModel:
+                  rotation_axis: Float[Array, "3"] = None) -> MeshModel:
+    if rotation_axis is None:
+        rotation_axis = _default_rotation_axis()
     rot_matrix = rotation_matrix(rotation_axis)
     rot_matrix_grad = rotation_matrix_prim(rotation_axis)
 
@@ -191,7 +199,7 @@ def _add_rotation(mesh: MeshModel,
 
 def add_rotation(mesh: MeshModel,
                  rotation_velocity: float,
-                 rotation_axis: Float[Array, "3"] = DEFAULT_ROTATION_AXIS) -> MeshModel:
+                 rotation_axis: Float[Array, "3"] = None) -> MeshModel:
     """
     Adds rigid rotation to a mesh model based on specified velocity and axis.
 
@@ -213,6 +221,8 @@ def add_rotation(mesh: MeshModel,
     if isinstance(mesh, PhoebeModel):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
+    if rotation_axis is None:
+        rotation_axis = _default_rotation_axis()
     return _add_rotation(mesh, rotation_velocity, rotation_axis)
 
 
@@ -280,14 +290,19 @@ _evaluate_rotation_v = jax.vmap(_evaluate_rotation, in_axes=(None, 0))
 
 
 def evaluate_rotation_at_times(mesh: MeshModel, times: ArrayLike) -> ArrayLike:
+    import time as _time
+    print(f"[spice] Evaluating rotation at {len(times)} time steps...", flush=True)
+    _t0 = _time.perf_counter()
     result_bodies = _evaluate_rotation_v(mesh, times)
     # Convert the  results to lists for each component
     body_list = jax.tree_util.tree_map(lambda x: list(x), result_bodies)
-    return ModelList(jax.tree_util.tree_transpose(
+    result = ModelList(jax.tree_util.tree_transpose(
         outer_treedef=jax.tree_util.tree_structure(mesh),
         inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
         pytree_to_transpose=body_list
     ))
+    print(f"[spice] Rotation evaluated in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    return result
 
 
 def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
@@ -307,48 +322,46 @@ def evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel:
 def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
                    pulsation_periods: ArrayLike, fourier_series_parameters: ArrayLike,
                    total_pad_len: int,
-                   pulsation_axes: ArrayLike, pulsation_angles: ArrayLike,
-                   horizontal_ratio: float = 0.0) -> MeshModel:
+                   pulsation_axes: ArrayLike, pulsation_angles: ArrayLike) -> MeshModel:
     harmonic_ind = spherical_harmonics_parameters[0] + \
         m.max_pulsation_mode * spherical_harmonics_parameters[1]
+    # fourier_series_parameters: (3, n_terms, 2) -> pad to (3, max_fourier_order, 2)
+    padded = jnp.pad(fourier_series_parameters, ((0, 0), (0, total_pad_len), (0, 0)))
     return m._replace(
         pulsation_periods=m.pulsation_periods.at[harmonic_ind].set(
             pulsation_periods),
-        fourier_series_parameters=m.fourier_series_parameters.at[harmonic_ind].set(
-            jnp.pad(fourier_series_parameters, ((0, total_pad_len), (0, 0)))
-        ),
+        fourier_series_parameters=m.fourier_series_parameters.at[harmonic_ind].set(padded),
         pulsation_axes=m.pulsation_axes.at[harmonic_ind].set(pulsation_axes),
         pulsation_angles=m.pulsation_angles.at[harmonic_ind].set(
             pulsation_angles),
-        pulsation_horizontal_ratios=m.pulsation_horizontal_ratios.at[harmonic_ind].set(
-            horizontal_ratio)
     )
 
 
 def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
-                  period: Float, fourier_series_parameters: Float[Array, "n_terms 2"],
-                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None,
-                  horizontal_ratio: float = 0.0) -> MeshModel:
+                  period: Float, fourier_series_parameters: Float[Array, "3 n_terms 2"],
+                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None) -> MeshModel:
     """
-    Adds pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
+    Adds pulsation effects to a mesh model using vector spherical harmonics.
 
-    This function updates the mesh model's pulsation parameters based on the provided spherical harmonics
-    and Fourier series parameters. It is designed to simulate pulsation effects on the mesh model, such as
-    those caused by stellar oscillations or other periodic changes in shape or size.
+    The displacement is decomposed into three orthogonal components:
+        xi = a_r(t) * R_lm + a_s(t) * S_lm + a_t(t) * T_lm
+
+    where R_lm = Y_l^m * r_hat (radial), S_lm = nabla_tangential(Y_l^m) (spheroidal),
+    and T_lm = r_hat x nabla_tangential(Y_l^m) (toroidal). Each component has its own
+    Fourier series amplitude.
 
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
         m_order (Float): The order (m) of the spherical harmonics.
         l_degree (Float): The degree (l) of the spherical harmonics.
         period (Float): Pulsation period in seconds.
-        fourier_series_parameters (Float[Array, "n_terms 2"]): Dynamic parameters for the Fourier series that define the
-            time-varying aspect of the pulsation. Shape should be (N, 2) where N is the number of terms,
-            and each row contains [amplitude, phase] for that term.
+        fourier_series_parameters (Float[Array, "3 n_terms 2"]): Fourier series parameters
+            for each VSH component. Shape (3, N, 2) where the first axis indexes
+            [radial, spheroidal, toroidal] and each (N, 2) block contains
+            [amplitude, phase] pairs. For a purely radial mode, set the spheroidal
+            and toroidal rows to zeros.
         pulsation_axes (Float[Array, "3"]): Axes of the pulsation. Defaults to the rotation axis of the mesh model.
         pulsation_angles (Float): Angles of the pulsation. Defaults to zero.
-        horizontal_ratio (float): Ratio of horizontal to radial displacement (xi_h / xi_r).
-            For p-modes this is typically small (~0.01-0.1); for g-modes it can be >>1.
-            Defaults to 0.0 (purely radial pulsation).
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -361,6 +374,15 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
     if _is_arraylike(period):
         period = period[0]
 
+    fourier_series_parameters = jnp.asarray(fourier_series_parameters)
+    if fourier_series_parameters.ndim == 2:
+        # Legacy (n_terms, 2) -> purely radial: wrap into (3, n_terms, 2)
+        fourier_series_parameters = jnp.stack([
+            fourier_series_parameters,
+            jnp.zeros_like(fourier_series_parameters),
+            jnp.zeros_like(fourier_series_parameters),
+        ])
+
     if pulsation_axes is None:
         pulsation_axes = m.rotation_axis
     if pulsation_angles is None:
@@ -372,10 +394,11 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
                       "been initialized with a maximum pulsation mode of {}".format(m.max_pulsation_mode) +
                       "This pulsation will have no effect.")
 
+    # n_terms is along axis 1 of the (3, n_terms, 2) array
+    total_pad_len = int(m.max_fourier_order - fourier_series_parameters.shape[1])
     return _add_pulsation(m, jnp.array([m_order, l_degree]), period, fourier_series_parameters,
-                          int(m.max_fourier_order -
-                              fourier_series_parameters.shape[0]),
-                          pulsation_axes, pulsation_angles, horizontal_ratio)
+                          total_pad_len,
+                          pulsation_axes, pulsation_angles)
 
 
 @partial(jax.jit, static_argnums=(4,))
@@ -385,68 +408,55 @@ def _add_pulsations(m: MeshModel,
                     harmonic_indices: ArrayLike,
                     total_pad_len: int,
                     pulsation_axes: ArrayLike,
-                    pulsation_angles: ArrayLike,
-                    horizontal_ratios: ArrayLike = None) -> MeshModel:
+                    pulsation_angles: ArrayLike) -> MeshModel:
 
     def update_pulsation(carry, inputs):
-        m, harmonic_ind, period, fourier_params, pulsation_axes, pulsation_angles, horizontal_ratio = carry, *inputs
+        m, harmonic_ind, period, fourier_params, pulsation_axes, pulsation_angles = carry, *inputs
 
-        # Better handling of shape for fourier_params
-        # Check if fourier_params is already 2D with shape (n, 2)
-        if len(fourier_params.shape) == 2 and fourier_params.shape[1] == 2:
-            reshape_params = fourier_params
-        else:
-            # Safely reshape to (-1, 2), ensuring we have pairs of values
-            reshape_params = fourier_params.reshape((-1, 2))
-
-        # Use the total_pad_len parameter that was passed to the function
-        # This avoids dynamic computation inside the jitted function
-        padded_fourier_params = jnp.pad(reshape_params, ((0, total_pad_len), (0, 0)))
+        # fourier_params: (3, n_terms, 2) -> pad to (3, max_fourier_order, 2)
+        padded_fourier_params = jnp.pad(fourier_params, ((0, 0), (0, total_pad_len), (0, 0)))
 
         new_periods = m.pulsation_periods.at[harmonic_ind].set(period)
         new_fourier_params = m.fourier_series_parameters.at[harmonic_ind].set(
             padded_fourier_params)
         new_axes = m.pulsation_axes.at[harmonic_ind].set(pulsation_axes)
         new_angles = m.pulsation_angles.at[harmonic_ind].set(pulsation_angles)
-        new_horizontal_ratios = m.pulsation_horizontal_ratios.at[harmonic_ind].set(horizontal_ratio)
 
         return m._replace(pulsation_periods=new_periods,
                           fourier_series_parameters=new_fourier_params,
                           pulsation_axes=new_axes,
-                          pulsation_angles=new_angles,
-                          pulsation_horizontal_ratios=new_horizontal_ratios), None
+                          pulsation_angles=new_angles), None
 
     updated_m, _ = jax.lax.scan(update_pulsation, m,
                                 (harmonic_indices,
                                  pulsation_periods, fourier_series_parameters,
-                                 pulsation_axes, pulsation_angles,
-                                 horizontal_ratios))
+                                 pulsation_axes, pulsation_angles))
 
     return updated_m
 
 
 def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degrees: Float[Array, "n_pulsations"],
-                   periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"],
-                   pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None,
-                   horizontal_ratios: Float[Array, "n_pulsations"] = None) -> MeshModel:
+                   periods: Float[Array, "n_pulsations"],
+                   fourier_series_parameters: Float[Array, "n_pulsations 3 n_terms 2"],
+                   pulsation_axes: Float[Array, "n_pulsations 3"] = None,
+                   pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel:
     """
-    Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
+    Adds multiple pulsation effects to a mesh model using vector spherical harmonics.
 
-    This function updates the mesh model's pulsation parameters based on the provided arrays of spherical harmonics
-    and Fourier series parameters. It uses JAX's vmap capabilities for efficient computation.
+    The displacement for each mode is decomposed into three orthogonal components:
+        xi = a_r(t) * R_lm + a_s(t) * S_lm + a_t(t) * T_lm
 
     Args:
         m (MeshModel): The mesh model to add pulsation effects to.
         m_orders (Float[Array, "n_pulsations"]): Array of orders (m) of the spherical harmonics.
         l_degrees (Float[Array, "n_pulsations"]): Array of degrees (l) of the spherical harmonics.
         periods (Float[Array, "n_pulsations"]): Array of pulsation periods in seconds.
-        fourier_series_parameters (Float[Array, "n_pulsations n_terms 2"]): Array of dynamic parameters for the Fourier series that define the
-            time-varying aspect of the pulsations. Shape should be (K, N, 2) where K is the number of pulsations,
-            N is the number of terms for each pulsation, and each inner array contains [amplitude, phase] for that term.
-        pulsation_axes (Float[Array, "n_pulsations 3"]): Array of pulsation axes. Defaults to the rotation axis of the mesh model.
+        fourier_series_parameters (Float[Array, "n_pulsations 3 n_terms 2"]): Fourier parameters
+            for each pulsation and VSH component. Shape (K, 3, N, 2) where K is the number of
+            pulsations, 3 indexes [radial, spheroidal, toroidal], N is the number of Fourier
+            terms, and each innermost pair is [amplitude, phase].
+        pulsation_axes (Float[Array, "n_pulsations 3"]): Array of pulsation axes. Defaults to the rotation axis.
         pulsation_angles (Float[Array, "n_pulsations"]): Array of pulsation angles. Defaults to zero.
-        horizontal_ratios (Float[Array, "n_pulsations"]): Array of horizontal-to-radial displacement ratios
-            (xi_h / xi_r) per mode. Defaults to zeros (purely radial).
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -461,24 +471,31 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
     if not (len(m_orders) == len(l_degrees) == len(periods) == len(fourier_series_parameters)):
         raise ValueError("Input arrays must have consistent lengths.")
 
+    fourier_series_parameters = jnp.asarray(fourier_series_parameters)
+    if fourier_series_parameters.ndim == 3:
+        # Legacy (n_pulsations, n_terms, 2) -> purely radial
+        n_puls = fourier_series_parameters.shape[0]
+        n_terms = fourier_series_parameters.shape[1]
+        fourier_series_parameters = jnp.concatenate([
+            fourier_series_parameters[:, jnp.newaxis, :, :],
+            jnp.zeros((n_puls, 2, n_terms, 2)),
+        ], axis=1)
+
     if pulsation_axes is None:
         pulsation_axes = m.rotation_axis.reshape(
             (1, 3)).repeat(len(m_orders), axis=0)
     if pulsation_angles is None:
         pulsation_angles = jnp.zeros_like(m_orders)
-    if horizontal_ratios is None:
-        horizontal_ratios = jnp.zeros_like(m_orders, dtype=float)
 
     harmonic_indices = m_orders + m.max_pulsation_mode * l_degrees
 
-    # Fix inconsistency: fourier_series_parameters shape is (n_pulsations, n_terms, 2)
-    # We need the second dimension (n_terms) for padding calculation
+    # n_terms is along axis 2 of the (n_pulsations, 3, n_terms, 2) array
     total_pad_len = int(m.max_fourier_order -
-                        fourier_series_parameters.shape[1] + 1)
+                        fourier_series_parameters.shape[2])
 
     return _add_pulsations(m, periods,
                            fourier_series_parameters, harmonic_indices, total_pad_len,
-                           pulsation_axes, pulsation_angles, horizontal_ratios)
+                           pulsation_axes, pulsation_angles)
 
 
 @jax.jit
@@ -491,10 +508,9 @@ def _reset_pulsations(m: MeshModel) -> MeshModel:
         pulsation_periods=jnp.nan * jnp.ones_like(m.pulsation_periods),
         fourier_series_parameters=jnp.nan *
         jnp.ones_like(m.fourier_series_parameters),
-        pulsation_axes=DEFAULT_ROTATION_AXIS.reshape(
+        pulsation_axes=_default_rotation_axis().reshape(
             (1, 3)).repeat(m.pulsation_periods.shape[0], axis=0),
         pulsation_angles=jnp.zeros_like(m.pulsation_periods),
-        pulsation_horizontal_ratios=jnp.zeros_like(m.pulsation_horizontal_ratios)
     )
 
 
@@ -523,127 +539,128 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
 
 
 @jax.jit
-def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike, magnitude: float, magnitude_prim: float,
-                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike,
-                         horizontal_ratio: float = 0.0):
-    # Ensure pulsation_angle is treated as scalar if it's a single value in an array
-    # Use jnp.where to handle the scalar extraction in a jax-friendly way
+def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
+                         magnitudes: Float[Array, "3"],
+                         magnitudes_prim: Float[Array, "3"],
+                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
+    """Calculate pulsation displacement using vector spherical harmonics.
+
+    The displacement is decomposed as:
+        xi = a_r * R_lm + a_s * S_lm + a_t * T_lm
+
+    where R_lm = Y_l^m * r_hat, S_lm = nabla_tangential(Y_l^m),
+    T_lm = r_hat x nabla_tangential(Y_l^m).
+
+    Args:
+        m: Mesh model.
+        harmonic_parameters: [m_order, l_degree].
+        magnitudes: (3,) vector of [radial, spheroidal, toroidal] Fourier amplitudes at time t.
+        magnitudes_prim: (3,) vector of time derivatives of the amplitudes.
+        radius: Stellar radius.
+        pulsation_axis: Tilt axis.
+        pulsation_angle: Tilt angle in degrees.
+    """
     scalar_pulsation_angle = jnp.where(
         jnp.size(pulsation_angle) == 1,
-        pulsation_angle.reshape(()),  # Reshape to scalar
-        pulsation_angle  # Keep as is if not a single-element array
+        pulsation_angle.reshape(()),
+        pulsation_angle
     )
 
-    vertex_harmonic_mags = spherical_harmonic_with_tilt(harmonic_parameters[0], harmonic_parameters[1], m.d_vertices,
-                                                        pulsation_axis, scalar_pulsation_angle)[:,
-                                                                                         jnp.newaxis]
-    center_harmonic_mags = spherical_harmonic_with_tilt(harmonic_parameters[0], harmonic_parameters[1], m.d_centers,
-                                                        pulsation_axis, scalar_pulsation_angle)[:,
-                                                                                         jnp.newaxis]
-    # Rescale harmonic magnitudes from -1 to 1 range
-    # Normalize to (-1, 1)
-    # Normalize vertex_harmonic_mags to the range (-1, 1) by scaling to [0, 1] using the min and max,
-    # then mapping to (-1, 1). jnp.ptp (peak-to-peak) is used to get the range (max - min).
-    # This ensures the values are distributed symmetrically around zero.
-    # The original normalization maps the minimum value to -1 and the maximum to +1,
-    # but if the harmonic is negative, this can flip the sign of the physical displacement.
-    # Instead, preserve the sign of the original harmonic magnitudes by dividing by the maximum absolute value.
-    vertex_harmonic_mags = vertex_harmonic_mags / (jnp.max(jnp.abs(vertex_harmonic_mags)) + 1e-8)
-    center_harmonic_mags = center_harmonic_mags / (jnp.max(jnp.abs(center_harmonic_mags)) + 1e-8)
-    direction_vectors = m.d_vertices / \
-        jnp.linalg.norm(m.d_vertices, axis=1).reshape((-1, 1))
-    center_direction_vectors = m.d_centers / \
-        jnp.linalg.norm(m.d_centers, axis=1).reshape((-1, 1))
+    m_ord = harmonic_parameters[0]
+    l_deg = harmonic_parameters[1]
 
-    # Radial displacement: ξ_r * Y_l^m * r̂
-    radial_displacement = vertex_harmonic_mags * direction_vectors
+    # --- Radial basis: R_lm = Y_l^m * r_hat ---
+    vertex_harmonic = spherical_harmonic_with_tilt(
+        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)[:, jnp.newaxis]
+    center_harmonic = spherical_harmonic_with_tilt(
+        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)[:, jnp.newaxis]
 
-    # Horizontal (tangential) displacement: ξ_h * ∇_tangential(Y_l^m)
-    vertex_tangential_grad = spherical_harmonic_gradient_with_tilt(
-        harmonic_parameters[0], harmonic_parameters[1], m.d_vertices,
-        pulsation_axis, scalar_pulsation_angle)
-    center_tangential_grad = spherical_harmonic_gradient_with_tilt(
-        harmonic_parameters[0], harmonic_parameters[1], m.d_centers,
-        pulsation_axis, scalar_pulsation_angle)
+    # Normalize harmonics to (-1, 1) preserving sign
+    vertex_harmonic = vertex_harmonic / (jnp.max(jnp.abs(vertex_harmonic)) + 1e-8)
+    center_harmonic = center_harmonic / (jnp.max(jnp.abs(center_harmonic)) + 1e-8)
 
-    # Normalize tangential gradients consistently with the harmonic magnitude normalization
-    vertex_tang_norm = jnp.max(jnp.linalg.norm(vertex_tangential_grad, axis=1)) + 1e-8
-    center_tang_norm = jnp.max(jnp.linalg.norm(center_tangential_grad, axis=1)) + 1e-8
-    vertex_tangential_grad = vertex_tangential_grad / vertex_tang_norm
-    center_tangential_grad = center_tangential_grad / center_tang_norm
+    vertex_r_hat = m.d_vertices / jnp.linalg.norm(m.d_vertices, axis=1, keepdims=True)
+    center_r_hat = m.d_centers / jnp.linalg.norm(m.d_centers, axis=1, keepdims=True)
 
-    # Total displacement = radial + horizontal_ratio * tangential
-    new_vertices = radius * magnitude * (
-        radial_displacement + horizontal_ratio * vertex_tangential_grad
-    )
-    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(new_vertices + m.d_vertices,
-                                                                               m.faces.astype(jnp.int32))
+    vertex_R = vertex_harmonic * vertex_r_hat
+    center_R = center_harmonic * center_r_hat
 
-    # Pulsation velocity: same decomposition with time derivative of amplitude
-    radial_velocity = center_harmonic_mags * center_direction_vectors
-    total_pulsation_velocity = radius * magnitude_prim * (
-        radial_velocity + horizontal_ratio * center_tangential_grad
-    )
+    # --- Spheroidal basis: S_lm = nabla_tangential(Y_l^m) ---
+    vertex_S = spherical_harmonic_gradient_with_tilt(
+        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)
+    center_S = spherical_harmonic_gradient_with_tilt(
+        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)
 
-    return jnp.nan_to_num(new_vertices), jnp.nan_to_num(new_areas - m.base_areas), jnp.nan_to_num(
-        new_centers - m.d_centers), jnp.nan_to_num(total_pulsation_velocity)
+    vertex_S = vertex_S / (jnp.max(jnp.linalg.norm(vertex_S, axis=1)) + 1e-8)
+    center_S = center_S / (jnp.max(jnp.linalg.norm(center_S, axis=1)) + 1e-8)
+
+    # --- Toroidal basis: T_lm = r_hat x nabla_tangential(Y_l^m) ---
+    vertex_T = spherical_harmonic_toroidal_with_tilt(
+        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)
+    center_T = spherical_harmonic_toroidal_with_tilt(
+        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)
+
+    vertex_T = vertex_T / (jnp.max(jnp.linalg.norm(vertex_T, axis=1)) + 1e-8)
+    center_T = center_T / (jnp.max(jnp.linalg.norm(center_T, axis=1)) + 1e-8)
+
+    # --- Total displacement: sum of three VSH components ---
+    a_r, a_s, a_t = magnitudes[0], magnitudes[1], magnitudes[2]
+    new_vertices = radius * (a_r * vertex_R + a_s * vertex_S + a_t * vertex_T)
+
+    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(
+        new_vertices + m.d_vertices, m.faces.astype(jnp.int32))
+
+    # --- Pulsation velocity: same decomposition with time derivatives ---
+    da_r, da_s, da_t = magnitudes_prim[0], magnitudes_prim[1], magnitudes_prim[2]
+    total_pulsation_velocity = radius * (da_r * center_R + da_s * center_S + da_t * center_T)
+
+    return (jnp.nan_to_num(new_vertices),
+            jnp.nan_to_num(new_areas - m.base_areas),
+            jnp.nan_to_num(new_centers - m.d_centers),
+            jnp.nan_to_num(total_pulsation_velocity))
 
 
 def calculate_numerical_pulsation_velocity(m: MeshModel, t: float, dt: float = 1e-6):
     """
     Calculates pulsation velocity using numerical differentiation.
-    
-    This function approximates the derivative of the pulsation displacement with respect to time
-    using a forward difference method: [r(t+dt) - r(t)]/dt
-    
+
+    Returns magnitudes and velocity magnitudes with shape (n_modes, 3) for the
+    three VSH components [radial, spheroidal, toroidal].
+
     Args:
         m (MeshModel): The mesh model to calculate pulsation velocities for
         t (float): The current time in days
         dt (float, optional): The time step for numerical differentiation in days. Defaults to 1e-6.
-        
+
     Returns:
-        tuple: (pulsation_magnitudes, pulsation_velocity_magnitudes) where pulsation_velocity_magnitudes
-               are calculated numerically
+        tuple: (pulsation_magnitudes, pulsation_velocity_magnitudes) each of shape (n_modes, 3)
     """
-    # Apply nan_to_num to inputs to prevent NaN propagation
     t = jnp.nan_to_num(t)
-    
-    # Safe extraction of Fourier parameters
     fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
-    
-    # Calculate pulsation magnitudes at time t
-    pulsation_magnitudes_t = evaluate_many_fouriers_for_value(
-        jnp.nan_to_num(m.pulsation_periods),
-        fourier_params[:, :, 0],
-        fourier_params[:, :, 1],
-        t
-    )
-    
-    # Calculate pulsation magnitudes at time t+dt
-    pulsation_magnitudes_t_plus_dt = evaluate_many_fouriers_for_value(
-        jnp.nan_to_num(m.pulsation_periods),
-        fourier_params[:, :, 0],
-        fourier_params[:, :, 1],
-        t + dt
-    )
-    
-    # Calculate numerical derivative
-    pulsation_velocity_magnitudes = (pulsation_magnitudes_t_plus_dt - pulsation_magnitudes_t) / dt
-    
-    return pulsation_magnitudes_t, pulsation_velocity_magnitudes
+    periods = jnp.nan_to_num(m.pulsation_periods)
+
+    # fourier_params: (n_modes, 3, n_fourier, 2)
+    # Reshape to evaluate all 3*n_modes Fourier series at once
+    n_modes = fourier_params.shape[0]
+    flat_params = fourier_params.reshape(n_modes * 3, fourier_params.shape[2], 2)
+    flat_periods = jnp.repeat(periods, 3)
+
+    mags_t = evaluate_many_fouriers_for_value(
+        flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
+    mags_t_dt = evaluate_many_fouriers_for_value(
+        flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t + dt)
+
+    vel_mags = (mags_t_dt - mags_t) / dt
+
+    return mags_t.reshape(n_modes, 3), vel_mags.reshape(n_modes, 3)
 
 
 def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool = False, dt: float = 1e-6):
     """
     Evaluates and updates the mesh model with pulsation effects at a specific time.
 
-    This function calculates the pulsation effects on a mesh model at a given time `t` by using
-    Fourier series parameters for both static and dynamic components of the pulsation. It first checks if the
-    mesh model is an instance of PhoebeModel, raising a ValueError if so, to enforce the read-only status of
-    these models within the SPICE framework. The function then computes the pulsation magnitudes and velocities
-    using either analytical or numerical derivatives of Fourier series evaluations. These values are used 
-    along with spherical harmonics parameters to calculate offsets for vertices, areas, and centers of the mesh model, 
-    simulating the pulsation effects. Finally, the mesh model is updated with these calculated offsets and velocities.
+    Uses vector spherical harmonics with three independent amplitude components
+    (radial, spheroidal, toroidal) per mode, each driven by its own Fourier series.
 
     Args:
         m (MeshModel): The mesh model to evaluate pulsations for.
@@ -662,49 +679,47 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
-    # Calculate pulsation magnitudes and velocities
+    import time as _time
+    print(f"[spice] Evaluating pulsations at t={t}...", flush=True)
+    _t0 = _time.perf_counter()
+
     if use_numerical_derivative:
-        # Use numerical differentiation
+        # Numerical derivative: returns (n_modes, 3) directly
         pulsation_magnitudes, pulsation_velocity_magnitudes = calculate_numerical_pulsation_velocity(m, t, dt)
     else:
-        # Use analytical differentiation (original method)
-        # Apply nan_to_num to inputs to prevent NaN propagation
+        # Analytical Fourier evaluation for all 3 VSH components per mode
         t = jnp.nan_to_num(t)
-        
-        # Safe extraction of Fourier parameters
-        fourier_params = jnp.nan_to_num(m.fourier_series_parameters)
-        
-        # Safely compute pulsation magnitudes
-        pulsation_magnitudes = evaluate_many_fouriers_for_value(
-            jnp.nan_to_num(m.pulsation_periods),
-            fourier_params[:, :, 0],
-            fourier_params[:, :, 1],
-            t
-        )
-        
-        # Safely compute pulsation velocity magnitudes
-        pulsation_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
-            jnp.nan_to_num(m.pulsation_periods),
-            fourier_params[:, :, 0],
-            fourier_params[:, :, 1],
-            t
-        )
-    
-    # Create harmonic parameters
+        fourier_params = jnp.nan_to_num(m.fourier_series_parameters)  # (n_modes, 3, n_fourier, 2)
+        periods = jnp.nan_to_num(m.pulsation_periods)  # (n_modes,)
+
+        n_modes = fourier_params.shape[0]
+        # Flatten (n_modes, 3) -> (n_modes*3) to use the vmapped evaluator
+        flat_params = fourier_params.reshape(n_modes * 3, fourier_params.shape[2], 2)
+        flat_periods = jnp.repeat(periods, 3)
+
+        flat_magnitudes = evaluate_many_fouriers_for_value(
+            flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
+        flat_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
+            flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
+
+        # Reshape back to (n_modes, 3)
+        pulsation_magnitudes = flat_magnitudes.reshape(n_modes, 3)
+        pulsation_velocity_magnitudes = flat_velocity_magnitudes.reshape(n_modes, 3)
+
     harmonic_params = create_harmonics_params(m.max_pulsation_mode)
-    
-    # Apply vmap to calculate pulsations for each harmonic
-    vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(calculate_pulsations,
-                                                                              in_axes=(None, 0, 0, 0, None, 0, 0, 0))(m,
-                                                                                                                   harmonic_params,
-                                                                                                                   pulsation_magnitudes,
-                                                                                                                   pulsation_velocity_magnitudes,
-                                                                                                                   m.radius,
-                                                                                                                   m.pulsation_axes,
-                                                                                                                   m.pulsation_angles,
-                                                                                                                   m.pulsation_horizontal_ratios)
-    # Use nan_to_num for safer summation
-    return m._replace(
+
+    # vmap over modes; magnitudes and magnitudes_prim are now (n_modes, 3)
+    vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(
+        calculate_pulsations,
+        in_axes=(None, 0, 0, 0, None, 0, 0)
+    )(m, harmonic_params,
+      pulsation_magnitudes,
+      pulsation_velocity_magnitudes,
+      m.radius,
+      m.pulsation_axes,
+      m.pulsation_angles)
+
+    result = m._replace(
         vertices_pulsation_offsets=jnp.nan_to_num(jnp.sum(vert_offsets, axis=0)),
         center_pulsation_offsets=jnp.nan_to_num(jnp.sum(center_offsets, axis=0)),
         area_pulsation_offsets=jnp.nan_to_num(jnp.sum(area_offsets, axis=0)),
@@ -712,3 +727,5 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
             jnp.sum(pulsation_velocities, axis=0) * 8.052083333333332  # solRad/day to km/s
         )
     )
+    print(f"[spice] Pulsations evaluated in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    return result

@@ -16,27 +16,32 @@ from jaxtyping import Array, Float
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 
-# Use appropriate dtype based on jax_enable_x64 flag
-float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
-
-# Log which float type is being used for debugging purposes
 import logging
 
 logger = logging.getLogger(__name__)
-logger.debug(f"Using float dtype for icosphere construction: {float_dtype}")
 
 
-DEFAULT_LOS_VECTOR: jnp.ndarray = jnp.array([0., 1., 0.], dtype=float_dtype)  # from the Y direction
-DEFAULT_ROTATION_AXIS = jnp.ndarray = jnp.array([0., 0., 1.], dtype=float_dtype)  # from the Y direction
+def _float_dtype():
+    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
-NO_ROTATION_MATRIX = jnp.zeros((3, 3), dtype=float_dtype)
+
+def _default_los_vector():
+    return jnp.array([0., 1., 0.], dtype=_float_dtype())
+
+
+def _default_rotation_axis():
+    return jnp.array([0., 0., 1.], dtype=_float_dtype())
+
+
+def _no_rotation_matrix():
+    return jnp.zeros((3, 3), dtype=_float_dtype())
 
 DEFAULT_MAX_PULSATION_MODE_PARAMETER = 5
 DEFAULT_FOURIER_ORDER = 5
 
 
 def create_harmonics_params(n: int):
-    x, y = jnp.meshgrid(jnp.arange(0, n, dtype=float_dtype), jnp.arange(0, n, dtype=float_dtype))
+    x, y = jnp.meshgrid(jnp.arange(0, n, dtype=_float_dtype()), jnp.arange(0, n, dtype=_float_dtype()))
     return jnp.vstack([x.ravel(), y.ravel()]).T
 
 
@@ -67,8 +72,7 @@ MeshModelNamedTuple = namedtuple("MeshModel",
                                   "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
                                   "pulsation_periods", "fourier_series_parameters",
-                                  "pulsation_axes", "pulsation_angles",
-                                  "pulsation_horizontal_ratios"])
+                                  "pulsation_axes", "pulsation_angles"])
 
 
 class MeshModel(Model, MeshModelNamedTuple):
@@ -130,11 +134,12 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     spherical_harmonics_parameters: Float[Array, "n_puls_orders 2"]
     pulsation_periods: Float[Array, "n_puls_orders"]
-    fourier_series_parameters: Float[Array, "n_puls_orders n_fourier_orders 2"]
-    
+    # Shape: (n_puls_orders, 3, n_fourier_orders, 2)
+    # The 3 components are [radial, spheroidal, toroidal] vector spherical harmonic amplitudes
+    fourier_series_parameters: Float[Array, "n_puls_orders 3 n_fourier_orders 2"]
+
     pulsation_axes: Float[Array, "n_puls_orders 3"]
     pulsation_angles: Float[Array, "n_puls_orders"]
-    pulsation_horizontal_ratios: Float[Array, "n_puls_orders"]
 
     @property
     def areas(self) -> Float[Array, "n_mesh_elements"]:
@@ -247,6 +252,10 @@ class IcosphereModel(MeshModel):
             IcosphereModel: An instance of IcosphereModel initialized with the specified properties.
         """
 
+        import time as _time
+        print(f"[spice] Constructing IcosphereModel ({n_vertices} vertices)...", flush=True)
+        _t0 = _time.perf_counter()
+
         vertices, faces, areas, centers = icosphere(n_vertices)
         vertices = vertices * radius
         centers = centers * radius
@@ -284,7 +293,7 @@ class IcosphereModel(MeshModel):
         if len(parameter_names) != parameters.shape[1]:
             raise ValueError("parameter_names must have the same length as the number of parameters.")
 
-        return MeshModel.__new__(cls,
+        model = MeshModel.__new__(cls,
                                  0.,
                                  radius,
                                  mass,
@@ -294,26 +303,28 @@ class IcosphereModel(MeshModel):
                                  base_areas=areas,
                                  parameters=parameters,
                                  log_g_index=log_g_index,
-                                 rotation_velocities=jnp.zeros_like(centers, dtype=float_dtype),
-                                 vertices_pulsation_offsets=jnp.zeros_like(vertices, dtype=float_dtype),
-                                 center_pulsation_offsets=jnp.zeros_like(centers, dtype=float_dtype),
-                                 area_pulsation_offsets=jnp.zeros_like(areas, dtype=float_dtype),
-                                 pulsation_velocities=jnp.zeros_like(centers, dtype=float_dtype),
-                                 rotation_axis=DEFAULT_ROTATION_AXIS,
-                                 rotation_matrix=NO_ROTATION_MATRIX,
-                                 rotation_matrix_prim=NO_ROTATION_MATRIX,
-                                 axis_radii=calculate_axis_radii(centers, DEFAULT_ROTATION_AXIS),
+                                 rotation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
+                                 vertices_pulsation_offsets=jnp.zeros_like(vertices, dtype=_float_dtype()),
+                                 center_pulsation_offsets=jnp.zeros_like(centers, dtype=_float_dtype()),
+                                 area_pulsation_offsets=jnp.zeros_like(areas, dtype=_float_dtype()),
+                                 pulsation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
+                                 rotation_axis=_default_rotation_axis(),
+                                 rotation_matrix=_no_rotation_matrix(),
+                                 rotation_matrix_prim=_no_rotation_matrix(),
+                                 axis_radii=calculate_axis_radii(centers, _default_rotation_axis()),
                                  rotation_velocity=0.,
                                  orbital_velocity=0.,
-                                 occluded_areas=jnp.zeros_like(areas, dtype=float_dtype),
-                                 los_vector=DEFAULT_LOS_VECTOR,
+                                 occluded_areas=jnp.zeros_like(areas, dtype=_float_dtype()),
+                                 los_vector=_default_los_vector(),
                                  max_pulsation_mode=max_pulsation_mode,
                                  max_fourier_order=max_fourier_order,
                                  spherical_harmonics_parameters=harmonics_params,
-                                 pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0], dtype=float_dtype),
-                                 # D_0 (amplitude), period
+                                 pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0], dtype=_float_dtype()),
+                                 # Shape: (n_puls_orders, 3, max_fourier_order, 2)
+                                 # 3 components: [radial, spheroidal, toroidal] VSH amplitudes
                                  fourier_series_parameters=jnp.nan * jnp.ones(
-                                     (harmonics_params.shape[0], max_fourier_order, 2), dtype=float_dtype), # D_n, phi_n
-                                 pulsation_axes=DEFAULT_ROTATION_AXIS.reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
-                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=float_dtype),
-                                 pulsation_horizontal_ratios=jnp.zeros(harmonics_params.shape[0], dtype=float_dtype))
+                                     (harmonics_params.shape[0], 3, max_fourier_order, 2), dtype=_float_dtype()),
+                                 pulsation_axes=_default_rotation_axis().reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
+                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=_float_dtype()))
+        print(f"[spice] IcosphereModel constructed in {_time.perf_counter() - _t0:.1f} s", flush=True)
+        return model
