@@ -381,14 +381,15 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
         This function is optimized for performance by using JAX's vectorized map (`vmap`) and just-in-time (`jit`)
         compilation features, enabling efficient computation over arrays of times.
     """
-    import time as _time
+    from spice.utils import log
     n = len(times) if hasattr(times, '__len__') else times.shape[0]
-    print(f"[spice] Evaluating binary orbit at {n} time steps...", flush=True)
-    _t0 = _time.perf_counter()
-    if isinstance(binary, PhoebeBinary):
-        result = [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
-                 [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
-    else:
-        result = v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
-    print(f"[spice] Binary orbit evaluated in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    with log.timed(
+        f"Evaluating binary orbit at {n} time steps",
+        "Binary orbit evaluated in {elapsed:.1f} s",
+    ):
+        if isinstance(binary, PhoebeBinary):
+            result = [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
+                     [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
+        else:
+            result = v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
     return result

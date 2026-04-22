@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 import jax
 
-from typing import List, Optional, Union
+from typing import List, Optional, Union, TYPE_CHECKING
 from collections import namedtuple
 import warnings
 
@@ -11,7 +13,8 @@ from .model import Model
 from .utils import calculate_axis_radii, cast_to_los, cast_to_normal_plane, cast_normalized_to_los
 from spice.geometry.utils import get_cast_areas
 
-from jaxtyping import Array, Float
+if TYPE_CHECKING:
+    from jaxtyping import Array, Float
 
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
@@ -46,8 +49,11 @@ def create_harmonics_params(n: int):
 
 
 def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0):
-    return jnp.log(((274.20011165737316 * mass / jnp.power(jnp.linalg.norm(d_centers, axis=1), 2)) -
-                    jnp.power(rot_velocities, 2) / (695700000.0*jnp.linalg.norm(d_centers, axis=1))) / 9.80665)
+    # g in m/s^2 (d_centers in solar radii, mass in solar masses; 274.20011... = GM_sun/R_sun^2)
+    r = jnp.linalg.norm(d_centers, axis=1)
+    g_mks = (274.20011165737316 * mass / jnp.power(r, 2)) - jnp.power(rot_velocities, 2) / (695700000.0 * r)
+    # Return log10(g) in cgs (cm/s^2), the standard astronomical convention.
+    return jnp.log10(g_mks * 100.0)
 
 
 def _mesh_volume(vertices: Float[Array, "n_vertices 3"],
@@ -252,79 +258,79 @@ class IcosphereModel(MeshModel):
             IcosphereModel: An instance of IcosphereModel initialized with the specified properties.
         """
 
-        import time as _time
-        print(f"[spice] Constructing IcosphereModel ({n_vertices} vertices)...", flush=True)
-        _t0 = _time.perf_counter()
+        from spice.utils import log
+        with log.timed(
+            f"Constructing IcosphereModel ({n_vertices} vertices)",
+            "IcosphereModel constructed in {elapsed:.1f} s",
+        ):
+            vertices, faces, areas, centers = icosphere(n_vertices)
+            vertices = vertices * radius
+            centers = centers * radius
 
-        vertices, faces, areas, centers = icosphere(n_vertices)
-        vertices = vertices * radius
-        centers = centers * radius
+            mesh_volume = _mesh_volume(vertices, faces)
+            target_sphere_volume = (4.0 / 3.0) * jnp.pi * jnp.power(radius, 3)
+            volume_scale = jnp.where(
+                mesh_volume > 0,
+                jnp.power(target_sphere_volume / mesh_volume, 1.0 / 3.0),
+                1.0
+            )
+            vertices = vertices * volume_scale
+            centers = centers * volume_scale
+            areas = areas * jnp.power(volume_scale, 2)
+            # Face centroids sit slightly inside the mesh; project them back to the
+            # requested stellar radius so center-based physics uses the model radius.
+            center_norms = jnp.linalg.norm(centers, axis=1, keepdims=True)
+            centers = centers * jnp.where(center_norms > 0.0, radius / center_norms, 1.0)
 
-        mesh_volume = _mesh_volume(vertices, faces)
-        target_sphere_volume = (4.0 / 3.0) * jnp.pi * jnp.power(radius, 3)
-        volume_scale = jnp.where(
-            mesh_volume > 0,
-            jnp.power(target_sphere_volume / mesh_volume, 1.0 / 3.0),
-            1.0
-        )
-        vertices = vertices * volume_scale
-        centers = centers * volume_scale
-        areas = areas * jnp.power(volume_scale, 2)
-        # Face centroids sit slightly inside the mesh; project them back to the
-        # requested stellar radius so center-based physics uses the model radius.
-        center_norms = jnp.linalg.norm(centers, axis=1, keepdims=True)
-        centers = centers * jnp.where(center_norms > 0.0, radius / center_norms, 1.0)
+            parameters = jnp.atleast_1d(parameters)
+            if len(parameters.shape) == 1:
+                parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats=areas.shape[0], axis=0)
+            if override_log_g:
+                if any([pn in parameter_names for pn in LOG_G_NAMES]):
+                    log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES][0]
+                    parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers))
+                elif log_g_index and isinstance(log_g_index, int):
+                    parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers))
+                else:
+                    warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(
+                        LOG_G_NAMES) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
 
-        parameters = jnp.atleast_1d(parameters)
-        if len(parameters.shape) == 1:
-            parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats=areas.shape[0], axis=0)
-        if override_log_g:
-            if any([pn in parameter_names for pn in LOG_G_NAMES]):
-                log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES][0]
-                parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers * radius))
-            elif log_g_index and isinstance(log_g_index, int):
-                parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers * radius))
-            else:
-                warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(
-                    LOG_G_NAMES) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
+            harmonics_params = create_harmonics_params(max_pulsation_mode)
 
-        harmonics_params = create_harmonics_params(max_pulsation_mode)
-        
-        if len(parameter_names) != parameters.shape[1]:
-            raise ValueError("parameter_names must have the same length as the number of parameters.")
+            if len(parameter_names) != parameters.shape[1]:
+                raise ValueError("parameter_names must have the same length as the number of parameters.")
 
-        model = MeshModel.__new__(cls,
-                                 0.,
-                                 radius,
-                                 mass,
-                                 d_vertices=vertices,
-                                 faces=faces,
-                                 d_centers=centers,
-                                 base_areas=areas,
-                                 parameters=parameters,
-                                 log_g_index=log_g_index,
-                                 rotation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
-                                 vertices_pulsation_offsets=jnp.zeros_like(vertices, dtype=_float_dtype()),
-                                 center_pulsation_offsets=jnp.zeros_like(centers, dtype=_float_dtype()),
-                                 area_pulsation_offsets=jnp.zeros_like(areas, dtype=_float_dtype()),
-                                 pulsation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
-                                 rotation_axis=_default_rotation_axis(),
-                                 rotation_matrix=_no_rotation_matrix(),
-                                 rotation_matrix_prim=_no_rotation_matrix(),
-                                 axis_radii=calculate_axis_radii(centers, _default_rotation_axis()),
-                                 rotation_velocity=0.,
-                                 orbital_velocity=0.,
-                                 occluded_areas=jnp.zeros_like(areas, dtype=_float_dtype()),
-                                 los_vector=_default_los_vector(),
-                                 max_pulsation_mode=max_pulsation_mode,
-                                 max_fourier_order=max_fourier_order,
-                                 spherical_harmonics_parameters=harmonics_params,
-                                 pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0], dtype=_float_dtype()),
-                                 # Shape: (n_puls_orders, 3, max_fourier_order, 2)
-                                 # 3 components: [radial, spheroidal, toroidal] VSH amplitudes
-                                 fourier_series_parameters=jnp.nan * jnp.ones(
-                                     (harmonics_params.shape[0], 3, max_fourier_order, 2), dtype=_float_dtype()),
-                                 pulsation_axes=_default_rotation_axis().reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
-                                 pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=_float_dtype()))
-        print(f"[spice] IcosphereModel constructed in {_time.perf_counter() - _t0:.1f} s", flush=True)
+            model = MeshModel.__new__(cls,
+                                     0.,
+                                     radius,
+                                     mass,
+                                     d_vertices=vertices,
+                                     faces=faces,
+                                     d_centers=centers,
+                                     base_areas=areas,
+                                     parameters=parameters,
+                                     log_g_index=log_g_index,
+                                     rotation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
+                                     vertices_pulsation_offsets=jnp.zeros_like(vertices, dtype=_float_dtype()),
+                                     center_pulsation_offsets=jnp.zeros_like(centers, dtype=_float_dtype()),
+                                     area_pulsation_offsets=jnp.zeros_like(areas, dtype=_float_dtype()),
+                                     pulsation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
+                                     rotation_axis=_default_rotation_axis(),
+                                     rotation_matrix=_no_rotation_matrix(),
+                                     rotation_matrix_prim=_no_rotation_matrix(),
+                                     axis_radii=calculate_axis_radii(centers, _default_rotation_axis()),
+                                     rotation_velocity=0.,
+                                     orbital_velocity=0.,
+                                     occluded_areas=jnp.zeros_like(areas, dtype=_float_dtype()),
+                                     los_vector=_default_los_vector(),
+                                     max_pulsation_mode=max_pulsation_mode,
+                                     max_fourier_order=max_fourier_order,
+                                     spherical_harmonics_parameters=harmonics_params,
+                                     pulsation_periods=jnp.nan * jnp.ones(harmonics_params.shape[0], dtype=_float_dtype()),
+                                     # Shape: (n_puls_orders, 3, max_fourier_order, 2)
+                                     # 3 components: [radial, spheroidal, toroidal] VSH amplitudes
+                                     fourier_series_parameters=jnp.nan * jnp.ones(
+                                         (harmonics_params.shape[0], 3, max_fourier_order, 2), dtype=_float_dtype()),
+                                     pulsation_axes=_default_rotation_axis().reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
+                                     pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=_float_dtype()))
         return model

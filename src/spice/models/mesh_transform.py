@@ -290,18 +290,19 @@ _evaluate_rotation_v = jax.vmap(_evaluate_rotation, in_axes=(None, 0))
 
 
 def evaluate_rotation_at_times(mesh: MeshModel, times: ArrayLike) -> ArrayLike:
-    import time as _time
-    print(f"[spice] Evaluating rotation at {len(times)} time steps...", flush=True)
-    _t0 = _time.perf_counter()
-    result_bodies = _evaluate_rotation_v(mesh, times)
-    # Convert the  results to lists for each component
-    body_list = jax.tree_util.tree_map(lambda x: list(x), result_bodies)
-    result = ModelList(jax.tree_util.tree_transpose(
-        outer_treedef=jax.tree_util.tree_structure(mesh),
-        inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
-        pytree_to_transpose=body_list
-    ))
-    print(f"[spice] Rotation evaluated in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    from spice.utils import log
+    with log.timed(
+        f"Evaluating rotation at {len(times)} time steps",
+        "Rotation evaluated in {elapsed:.1f} s",
+    ):
+        result_bodies = _evaluate_rotation_v(mesh, times)
+        # Convert the  results to lists for each component
+        body_list = jax.tree_util.tree_map(lambda x: list(x), result_bodies)
+        result = ModelList(jax.tree_util.tree_transpose(
+            outer_treedef=jax.tree_util.tree_structure(mesh),
+            inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
+            pytree_to_transpose=body_list
+        ))
     return result
 
 
@@ -679,53 +680,53 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
     if isinstance(m, PhoebeModel):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
-    import time as _time
-    print(f"[spice] Evaluating pulsations at t={t}...", flush=True)
-    _t0 = _time.perf_counter()
+    from spice.utils import log
+    with log.timed(
+        f"Evaluating pulsations at t={t}",
+        "Pulsations evaluated in {elapsed:.1f} s",
+    ):
+        if use_numerical_derivative:
+            # Numerical derivative: returns (n_modes, 3) directly
+            pulsation_magnitudes, pulsation_velocity_magnitudes = calculate_numerical_pulsation_velocity(m, t, dt)
+        else:
+            # Analytical Fourier evaluation for all 3 VSH components per mode
+            t = jnp.nan_to_num(t)
+            fourier_params = jnp.nan_to_num(m.fourier_series_parameters)  # (n_modes, 3, n_fourier, 2)
+            periods = jnp.nan_to_num(m.pulsation_periods)  # (n_modes,)
 
-    if use_numerical_derivative:
-        # Numerical derivative: returns (n_modes, 3) directly
-        pulsation_magnitudes, pulsation_velocity_magnitudes = calculate_numerical_pulsation_velocity(m, t, dt)
-    else:
-        # Analytical Fourier evaluation for all 3 VSH components per mode
-        t = jnp.nan_to_num(t)
-        fourier_params = jnp.nan_to_num(m.fourier_series_parameters)  # (n_modes, 3, n_fourier, 2)
-        periods = jnp.nan_to_num(m.pulsation_periods)  # (n_modes,)
+            n_modes = fourier_params.shape[0]
+            # Flatten (n_modes, 3) -> (n_modes*3) to use the vmapped evaluator
+            flat_params = fourier_params.reshape(n_modes * 3, fourier_params.shape[2], 2)
+            flat_periods = jnp.repeat(periods, 3)
 
-        n_modes = fourier_params.shape[0]
-        # Flatten (n_modes, 3) -> (n_modes*3) to use the vmapped evaluator
-        flat_params = fourier_params.reshape(n_modes * 3, fourier_params.shape[2], 2)
-        flat_periods = jnp.repeat(periods, 3)
+            flat_magnitudes = evaluate_many_fouriers_for_value(
+                flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
+            flat_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
+                flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
 
-        flat_magnitudes = evaluate_many_fouriers_for_value(
-            flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
-        flat_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
-            flat_periods, flat_params[:, :, 0], flat_params[:, :, 1], t)
+            # Reshape back to (n_modes, 3)
+            pulsation_magnitudes = flat_magnitudes.reshape(n_modes, 3)
+            pulsation_velocity_magnitudes = flat_velocity_magnitudes.reshape(n_modes, 3)
 
-        # Reshape back to (n_modes, 3)
-        pulsation_magnitudes = flat_magnitudes.reshape(n_modes, 3)
-        pulsation_velocity_magnitudes = flat_velocity_magnitudes.reshape(n_modes, 3)
+        harmonic_params = create_harmonics_params(m.max_pulsation_mode)
 
-    harmonic_params = create_harmonics_params(m.max_pulsation_mode)
+        # vmap over modes; magnitudes and magnitudes_prim are now (n_modes, 3)
+        vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(
+            calculate_pulsations,
+            in_axes=(None, 0, 0, 0, None, 0, 0)
+        )(m, harmonic_params,
+          pulsation_magnitudes,
+          pulsation_velocity_magnitudes,
+          m.radius,
+          m.pulsation_axes,
+          m.pulsation_angles)
 
-    # vmap over modes; magnitudes and magnitudes_prim are now (n_modes, 3)
-    vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(
-        calculate_pulsations,
-        in_axes=(None, 0, 0, 0, None, 0, 0)
-    )(m, harmonic_params,
-      pulsation_magnitudes,
-      pulsation_velocity_magnitudes,
-      m.radius,
-      m.pulsation_axes,
-      m.pulsation_angles)
-
-    result = m._replace(
-        vertices_pulsation_offsets=jnp.nan_to_num(jnp.sum(vert_offsets, axis=0)),
-        center_pulsation_offsets=jnp.nan_to_num(jnp.sum(center_offsets, axis=0)),
-        area_pulsation_offsets=jnp.nan_to_num(jnp.sum(area_offsets, axis=0)),
-        pulsation_velocities=jnp.nan_to_num(
-            jnp.sum(pulsation_velocities, axis=0) * 8.052083333333332  # solRad/day to km/s
+        result = m._replace(
+            vertices_pulsation_offsets=jnp.nan_to_num(jnp.sum(vert_offsets, axis=0)),
+            center_pulsation_offsets=jnp.nan_to_num(jnp.sum(center_offsets, axis=0)),
+            area_pulsation_offsets=jnp.nan_to_num(jnp.sum(area_offsets, axis=0)),
+            pulsation_velocities=jnp.nan_to_num(
+                jnp.sum(pulsation_velocities, axis=0) * 8.052083333333332  # solRad/day to km/s
+            )
         )
-    )
-    print(f"[spice] Pulsations evaluated in {_time.perf_counter() - _t0:.1f} s", flush=True)
     return result

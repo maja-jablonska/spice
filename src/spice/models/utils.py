@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time as _time
 import sys as _sys
 
@@ -6,11 +8,13 @@ _t0 = _time.perf_counter()
 import jax.numpy as jnp
 import jax
 if not _jax_already_loaded:
-    print(f"[spice] JAX loaded in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    from spice.utils import log as _log
+    _log.info(f"JAX loaded in {_time.perf_counter() - _t0:.1f} s")
 from jax.typing import ArrayLike
-from typing import List, Any, Tuple
+from typing import List, Any, Tuple, TYPE_CHECKING
 
-from jaxtyping import Array, Float
+if TYPE_CHECKING:
+    from jaxtyping import Array, Float
 
 
 def _float_dtype():

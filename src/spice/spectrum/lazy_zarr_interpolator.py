@@ -10,7 +10,8 @@ from jax.typing import ArrayLike
 import jax.numpy as jnp
 from jax import lax
 if not _jax_already_loaded:
-    print(f"[spice] JAX loaded in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    from spice.utils import log as _log
+    _log.info(f"JAX loaded in {_time.perf_counter() - _t0:.1f} s")
 
 import numpy as np
 from functools import partial, lru_cache
@@ -503,56 +504,141 @@ def _parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> 
 
 
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=False):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
+                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
+        """
+        in_memory: True forces rowwise arrays (flux, continuum) onto the JAX device;
+            False keeps them lazy on the zarr store (default); "auto" loads them
+            eagerly only if their combined size is <= in_memory_threshold_bytes.
+        """
+        from spice.utils import log
+
         _zarr_loaded = "zarr" in _sys.modules
         _t = _time.perf_counter()
         import zarr
         if not _zarr_loaded:
-            print(f"[spice] zarr loaded in {_time.perf_counter() - _t:.1f} s", flush=True)
+            log.info(f"zarr loaded in {_time.perf_counter() - _t:.1f} s")
 
         _pd_loaded = "pandas" in _sys.modules
         _t = _time.perf_counter()
         import pandas as pd
         if not _pd_loaded:
-            print(f"[spice] pandas loaded in {_time.perf_counter() - _t:.1f} s", flush=True)
+            log.info(f"pandas loaded in {_time.perf_counter() - _t:.1f} s")
 
         from tqdm.auto import tqdm
 
+        if in_memory not in (True, False, "auto"):
+            raise ValueError(f"in_memory must be True, False, or 'auto'; got {in_memory!r}")
+
         device = device or _default_device()
-        print(f"[spice] Loading spectral grid from {zarr_path}...", flush=True)
-        _t_total = _time.perf_counter()
-        arrays = ['wavelength', 'flux', 'continuum']
-        self.store = zarr.open(zarr_path, mode='r')
-        self.length = int(self.store['flux'].shape[0])
-        if params is None:
-            params = self.store['param_names']
+        # A tqdm bar runs inside this block, so don't try to substitute the
+        # start line in place -- print the completion on a new line instead.
+        with log.timed(
+            f"Loading spectral grid from {zarr_path}",
+            "Spectral grid loaded in {elapsed:.1f} s",
+            inplace=False,
+        ):
+            arrays = ['wavelength', 'flux', 'continuum']
+            self.store = zarr.open(zarr_path, mode='r')
+            self.length = int(self.store['flux'].shape[0])
+            if params is None:
+                params = self.store['param_names']
 
-        df = pd.read_parquet(f'{zarr_path}/index.parquet')
-        if sparse:
-            self.grid_index = SparseGridIndex.from_dataframe(df, columns=params, device=device)
-        else:
-            self.grid_index = GridIndex.from_dataframe(df, columns=params, device=device)
-        
-        self.solar_parameters = solar_parameters
-        self._stellar_parameter_names = params
-        # Read min/max parameters from GridIndex
-        self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].min() for param in params])
-        self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].max() for param in params])
-
-        self.rowwise_data = {}
-        self.static_data = {}
-        
-        for k in tqdm(arrays, desc='[spice] Loading data'):
-            arr = self.store[k]
-            if arr.ndim > 0 and arr.shape[0] == self.length:
-                self.rowwise_data[k] = arr
+            df = pd.read_parquet(f'{zarr_path}/index.parquet')
+            if sparse:
+                self.grid_index = SparseGridIndex.from_dataframe(df, columns=params, device=device)
             else:
-                self.static_data[k] = jax.device_put(np.asarray(arr[:]), device=device)
-        print(f"[spice] Spectral grid loaded in {_time.perf_counter() - _t_total:.1f} s", flush=True)
+                axis_lengths = [int(df[c].nunique()) for c in params]
+                dense_bytes = int(np.prod(axis_lengths)) * 4  # int32 per cell
+                dense_threshold = 1 * 1024 ** 3
+                if dense_bytes > dense_threshold:
+                    warnings.warn(
+                        f"Dense grid index requires {dense_bytes / 1e9:.2f} GB "
+                        f"(axis lengths: {axis_lengths}). Consider sparse=True to "
+                        f"avoid allocating a large N-d array."
+                    )
+                self.grid_index = GridIndex.from_dataframe(df, columns=params, device=device)
+
+            self.solar_parameters = solar_parameters
+            self._stellar_parameter_names = params
+            # Read min/max parameters from GridIndex
+            self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].min() for param in params])
+            self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].max() for param in params])
+
+            rowwise_arrays = {}
+            static_arrays = {}
+            for k in arrays:
+                arr = self.store[k]
+                if arr.ndim > 0 and arr.shape[0] == self.length:
+                    rowwise_arrays[k] = arr
+                else:
+                    static_arrays[k] = arr
+
+            rowwise_bytes = sum(
+                int(np.prod(a.shape)) * np.dtype(a.dtype).itemsize
+                for a in rowwise_arrays.values()
+            )
+            if in_memory is True:
+                load_rowwise_eagerly = True
+                if rowwise_bytes > in_memory_threshold_bytes:
+                    warnings.warn(
+                        f"Eager in_memory load requested for {rowwise_bytes / 1e9:.2f} GB "
+                        f"of rowwise data, which exceeds the {in_memory_threshold_bytes / 1e9:.2f} GB "
+                        f"threshold and may cause an out-of-memory crash. Consider "
+                        f"in_memory='auto' or in_memory=False."
+                    )
+            elif in_memory == "auto":
+                load_rowwise_eagerly = rowwise_bytes <= in_memory_threshold_bytes
+                log.info(
+                    f"Rowwise grid size {rowwise_bytes / 1e6:.1f} MB; "
+                    f"threshold {in_memory_threshold_bytes / 1e6:.1f} MB; "
+                    f"{'eager' if load_rowwise_eagerly else 'lazy'} load."
+                )
+            else:
+                load_rowwise_eagerly = False
+
+            self._rowwise_in_memory = load_rowwise_eagerly
+            self.rowwise_data = {}
+            self.static_data = {}
+
+            for k in tqdm(arrays, desc='[spice] Loading data'):
+                if k in static_arrays:
+                    self.static_data[k] = jax.device_put(
+                        np.asarray(static_arrays[k][:]), device=device
+                    )
+                else:
+                    arr = rowwise_arrays[k]
+                    if load_rowwise_eagerly:
+                        self.rowwise_data[k] = jax.device_put(
+                            np.asarray(arr[:]), device=device
+                        )
+                    else:
+                        self.rowwise_data[k] = arr
 
     @property
     def stellar_parameter_names(self):
         return self._stellar_parameter_names
+    
+    @property
+    def parameter_names(self):
+        return self._stellar_parameter_names
+
+    def _accumulate_in_memory(self, rows, weights):
+        flux_data = self.rowwise_data['flux']
+        cont_data = self.rowwise_data['continuum']
+
+        valid = rows >= 0
+        safe_rows = jnp.where(valid, rows, 0)
+        safe_weights = jnp.where(valid, weights, 0.0).astype(flux_data.dtype)
+
+        flux_sel = flux_data[safe_rows]
+        cont_sel = cont_data[safe_rows]
+
+        w = safe_weights[..., None]
+        flux_out = jnp.sum(flux_sel * w, axis=1)
+        cont_out = jnp.sum(cont_sel * w, axis=1)
+
+        return flux_out, cont_out
 
     def _accumulate_direct(self, rows, weights):
         L = self.static_data['wavelength'].shape[0]
@@ -630,7 +716,10 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
         rows, weights = self.grid_index.batched_lookup(queries)
 
-        flux_out, cont_out = self._accumulate_direct(rows, weights)
+        if self._rowwise_in_memory:
+            flux_out, cont_out = self._accumulate_in_memory(rows, weights)
+        else:
+            flux_out, cont_out = self._accumulate_direct(rows, weights)
 
         return {
             **self.static_data,
@@ -653,13 +742,17 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
 
 class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=False):
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
+                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
         if 'mu' not in params:
             raise ValueError("mu must be included in params")
-        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse)
+        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse,
+                         in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes)
         self._stellar_parameter_names = [p for p in params if p != 'mu']
         self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self._stellar_parameter_names])
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
+        
+    
 
     @override
     def to_parameters(self, parameters=None):
@@ -668,6 +761,10 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
         if isinstance(parameters, dict):
             parameters = {k: v for k, v in parameters.items() if k != 'mu'}
         return _parameter_helper(self, parameters)
+    
+    @override
+    def parameter_names(self):
+        return self._stellar_parameter_names + ['mu']
 
     @override
     def intensity(self, log_wavelengths, mu, parameters):
@@ -734,8 +831,10 @@ def get_limb_darkening_law_id(law: str) -> int:
 
 
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, limb_darkening_law=None, limb_darkening_coeffs=None, sparse=False):
-        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse)
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, limb_darkening_law=None, limb_darkening_coeffs=None, sparse=True,
+                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
+        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse,
+                         in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes)
         if limb_darkening_law is None:
             self.limb_darkening_law = get_limb_darkening_law_id('linear')
         else:

@@ -5,15 +5,19 @@ def __getattr__(name):
         "plot_3D_binary": ".plot_mesh",
         "plot_2D": ".plot_mesh",
         "plot_3D_mesh_and_spectrum": ".plot_mesh",
-        # plot_pulsations.py — scalar diagnostics and flat surface maps
-        # of the pulsation velocity field
-        "compute_pulsation_field": ".plot_pulsations",
+        # plot_pulsations.py — per-element scalar projections of
+        # mesh.pulsation_velocities
+        "compute_pulsation_scalar": ".plot_pulsations",
         "plot_pulsation_map": ".plot_pulsations",
         "plot_pulsation_components": ".plot_pulsations",
-        "plot_pulsation_streamlines": ".plot_pulsations",
         "plot_pulsation_cross_section": ".plot_pulsations",
         "plot_pulsation_3D_sparse": ".plot_pulsations",
+        "plot_pulsation_patch_zoom": ".plot_pulsations",
+        "plot_pulsation_disk_with_patch_zoom": ".plot_pulsations",
+        "plot_pulsation_phase_grid": ".plot_pulsations",
+        "plot_pulsation_comet": ".plot_pulsations",
         "animate_pulsation_phase": ".plot_pulsations",
+        "animate_observed_disk": ".plot_pulsations",
         "PULSATION_FIELDS": ".plot_pulsations",
     }
 

@@ -9,7 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import art3d
 if not _mpl_already_loaded:
-    print(f"[spice] matplotlib loaded in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    from spice.utils import log as _log
+    _log.info(f"matplotlib loaded in {_time.perf_counter() - _t0:.1f} s")
 
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 import numpy as np

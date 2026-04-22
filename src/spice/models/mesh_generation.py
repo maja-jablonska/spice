@@ -225,7 +225,6 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
     Returns:
         Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
     """
-    import time as _time
     subdivs = jnp.ceil(.5*jnp.log2(points/5)-1).astype(int)
 
     if use_cache:
@@ -234,8 +233,10 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
         except FileNotFoundError:
             warnings.warn('No .pickle file for requested subdivisions found.')
 
-    print(f"[spice] Generating icosphere ({points} vertices, {int(subdivs)} subdivisions)...", flush=True)
-    _t0 = _time.perf_counter()
-    verts, faces, areas, centers = _icosphere(subdivs)
-    print(f"[spice] Icosphere generated in {_time.perf_counter() - _t0:.1f} s", flush=True)
+    from spice.utils import log
+    with log.timed(
+        f"Generating icosphere ({points} vertices, {int(subdivs)} subdivisions)",
+        "Icosphere generated in {elapsed:.1f} s",
+    ):
+        verts, faces, areas, centers = _icosphere(subdivs)
     return verts, faces, areas, centers
