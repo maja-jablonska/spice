@@ -48,8 +48,10 @@ def __spectrum_flash_sum(intensity_fn,
     n_areas = areas.shape[0]
     n_parameters = parameters.shape[-1]
 
+    # (0, 0, 0)
     v_intensity = jax.vmap(intensity_fn, in_axes=(0, 0, 0))
     
+    #v_intensity = intensity_fn
     n = math.ceil(n_areas / chunk_size)
 
     @partial(jax.checkpoint, prevent_cse=False)
@@ -124,14 +126,14 @@ def __spectrum_flash_sum_with_padding(intensity_fn,
                          chunk_size: int,
                          wavelengths_chunk_size: int,
                          disable_doppler_shift: bool = False):
-    n_padding = wavelengths_chunk_size - (log_wavelengths.shape[0] % wavelengths_chunk_size)
+    n_padding = (-log_wavelengths.shape[0]) % wavelengths_chunk_size
     log_wavelengths_padded = jnp.pad(log_wavelengths, (0, n_padding), mode='constant', constant_values=0)
     # Reshape padded wavelengths into chunks
-    wavelength_chunks = log_wavelengths_padded.reshape(-1, wavelengths_chunk_size).T
+    wavelength_chunks = log_wavelengths_padded.reshape(-1, wavelengths_chunk_size)
     
     def scan_fn(carry, chunk):
         result = __spectrum_flash_sum(intensity_fn,
-                                    chunk,
+                                    chunk, 
                                     areas,
                                     mus,
                                     vrads,
@@ -143,7 +145,7 @@ def __spectrum_flash_sum_with_padding(intensity_fn,
     _, results = lax.scan(scan_fn,
                          None,
                          wavelength_chunks)
-    return results.reshape(-1, 2, order='F')
+    return results.reshape(-1, 2)
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -161,21 +163,22 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     """
 
     pad_len = (-x.shape[0]) % chunk_size
+    # print(f"PADDING: pad_len: {pad_len}")
 
-    def _pad_array(_: None):
-        pad_shape = (pad_len, *x.shape[1:])
-        zero_pad = jnp.zeros(pad_shape, dtype=x.dtype)
-        repeated_pad = jnp.broadcast_to(x[-1][jnp.newaxis, ...], pad_shape)
-        pad_values = lax.cond(x.ndim == 1,
-                              lambda __: zero_pad,
-                              lambda __: repeated_pad,
-                              operand=None)
-        return jnp.concatenate([x, pad_values], axis=0)
+    # def _pad_array(_: None):
+    pad_shape = (pad_len, *x.shape[1:])
+    zero_pad = jnp.zeros(pad_shape, dtype=x.dtype)
+    repeated_pad = jnp.broadcast_to(x[-1][jnp.newaxis, ...], pad_shape)
+    pad_values = lax.cond(x.ndim == 1,
+                            lambda __: zero_pad,
+                            lambda __: repeated_pad,
+                            operand=None)
+    return jnp.concatenate([x, pad_values], axis=0)
 
-    return lax.cond(pad_len == 0,
-                    lambda _: x,
-                    _pad_array,
-                    operand=None)
+    # return lax.cond(pad_len == 0,
+    #                 lambda _: x,
+    #                 _pad_array, 
+    #                 operand=None)
 
 
 # TODO: think: change to simulate_obseved_monochromatic_flux?
@@ -302,10 +305,10 @@ def __flux_flash_sum_with_padding(intensity_fn,
                          chunk_size: int,
                          wavelengths_chunk_size: int,
                          disable_doppler_shift: bool = False):
-    n_padding = wavelengths_chunk_size - (log_wavelengths.shape[0] % wavelengths_chunk_size)
+    n_padding = (-log_wavelengths.shape[0]) % wavelengths_chunk_size
     log_wavelengths_padded = jnp.pad(log_wavelengths, (0, n_padding), mode='constant', constant_values=0)
     # Reshape padded wavelengths into chunks
-    wavelength_chunks = log_wavelengths_padded.reshape(-1, wavelengths_chunk_size).T
+    wavelength_chunks = log_wavelengths_padded.reshape(-1, wavelengths_chunk_size)
     
     def scan_fn(carry, chunk):
         result = __flux_flash_sum(intensity_fn,
@@ -320,7 +323,7 @@ def __flux_flash_sum_with_padding(intensity_fn,
     _, results = lax.scan(scan_fn,
                          None,
                          wavelength_chunks)
-    return results.reshape(-1, 2, order='F')
+    return results.reshape(-1, 2)
 
 
 @partial(jax.jit, static_argnums=(0, 3, 4))

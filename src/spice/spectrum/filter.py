@@ -4,8 +4,9 @@ import re
 import matplotlib.pyplot as plt
 from spice.spectrum.utils import wavelengths_to_frequencies
 import numpy as np
-from importlib import resources as impresources
-from . import filter_data
+from pathlib import Path
+
+_FILTER_DATA_DIR = Path(__file__).parent / 'filter_data'
 
 try:
     import jax.numpy as jnp
@@ -277,24 +278,24 @@ class TychoVT(Filter):
 
 class GaiaG(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
-        zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'gaia_edr3_passband.dat')).T
+        zp = np.loadtxt((_FILTER_DATA_DIR / 'gaia_edr3_zeropt.dat'))
         transmission_curve[transmission_curve == 99.99] = 0.
         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia G', AB_zeropoint=zp[1, 0], Vega_zeropoint=zp[0, 0])
 
 
 class GaiaBP(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
-        zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'gaia_edr3_passband.dat')).T
+        zp = np.loadtxt((_FILTER_DATA_DIR / 'gaia_edr3_zeropt.dat'))
         transmission_curve[transmission_curve == 99.99] = 0.
         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[3]]), name='Gaia BP', AB_zeropoint=zp[1, 2], Vega_zeropoint=zp[0, 2])
 
 
 class GaiaRP(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_passband.dat')).T
-        zp = np.loadtxt((impresources.files(filter_data) / 'gaia_edr3_zeropt.dat'))
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'gaia_edr3_passband.dat')).T
+        zp = np.loadtxt((_FILTER_DATA_DIR / 'gaia_edr3_zeropt.dat'))
         transmission_curve[transmission_curve == 99.99] = 0.
         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[5]]), name='Gaia RP', AB_zeropoint=zp[1, 4], Vega_zeropoint=zp[0, 4])
         
@@ -302,12 +303,12 @@ class GaiaRP(Filter):
 # Sartoretti et al. (2022)
 class GaiaRVS(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) /'grvsfilter.csv'), skiprows=1, delimiter=',')
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR /'grvsfilter.csv'), skiprows=1, delimiter=',')
         super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia RVS', AB_zeropoint=21.317)
 
 # Doi et al. (2010)
 
-sdss = np.loadtxt((impresources.files(filter_data) / 'SDSS.dat'))
+sdss = np.loadtxt((_FILTER_DATA_DIR / 'SDSS.dat'))
 
 sdss_u = sdss[:, [0, 1]]
 sdss_u[:, 1] *= sdss[:, -1]
@@ -351,21 +352,21 @@ class SDSSz(Filter):
 
 class TWOMASSJ(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSJ.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / '2MASSJ.dat')).T
         transmission_curve[0] *= 1e4
         super().__init__(transmission_curve, name='2MASS J', non_photonic=True, Vega_zeropoint=-23.76248609213452 - 0.017)
 
 
 class TWOMASSH(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSH.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / '2MASSH.dat')).T
         transmission_curve[0] *= 1e4
         super().__init__(transmission_curve, name='2MASS H', non_photonic=True, Vega_zeropoint=-24.84542522534151 + 0.016)
 
 
 class TWOMASSK(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / '2MASSK.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / '2MASSK.dat')).T
         transmission_curve[0] *= 1e4
         super().__init__(transmission_curve, name='2MASS Ks', non_photonic=True, Vega_zeropoint=-25.937629814008577 + 0.003)
 
@@ -376,13 +377,13 @@ class TWOMASSK(Filter):
 
 class GALEXFUV(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GALEXFUV.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'GALEXFUV.dat')).T
         super().__init__(transmission_curve, name='GALEX FUV')
 
 
 class GALEXNUV(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'GALEXNUV.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'GALEXNUV.dat')).T
         super().__init__(transmission_curve, name='GALEX NUV')
 
 
@@ -391,53 +392,55 @@ class GALEXNUV(Filter):
 
 class LSSTu(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTu.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'LSSTu.dat')).T
         super().__init__(transmission_curve, name='LSST u')
 
 
 class LSSTg(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTg.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'LSSTg.dat')).T
         super().__init__(transmission_curve, name='LSST g')
 
 
 class LSSTr(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTr.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'LSSTr.dat')).T
         super().__init__(transmission_curve, name='LSST r')
 
 
 class LSSTi(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTi.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'LSSTi.dat')).T
         super().__init__(transmission_curve, name='LSST i')
 
 
 class LSSTz(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTz.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'LSSTz.dat')).T
         super().__init__(transmission_curve, name='LSST z')
 
 
 class LSSTy(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((impresources.files(filter_data) / 'LSSTy.dat')).T
+        transmission_curve = np.loadtxt((_FILTER_DATA_DIR / 'LSSTy.dat')).T
         super().__init__(transmission_curve, name='LSST y')
 
 
 # http://ipp.ifa.hawaii.edu/ps1.filters/
 # Tonry et al. (2012)
 
-panstarrs = np.loadtxt((impresources.files(filter_data) / 'panstarrs.dat'))
-panstarrs[:, 0] *= 10.
-
-panstarrs_open = panstarrs[:, [0, 1]]
-panstarrs_g = panstarrs[:, [0, 2]]
-panstarrs_r = panstarrs[:, [0, 3]]
-panstarrs_i = panstarrs[:, [0, 4]]
-panstarrs_z = panstarrs[:, [0, 5]]
-panstarrs_y = panstarrs[:, [0, 6]]
-panstarrs_w = panstarrs[:, [0, 7]]
+panstarrs = np.loadtxt((_FILTER_DATA_DIR / 'panstarrs.dat'), ndmin=2)
+if panstarrs.shape[1] >= 8:
+    panstarrs[:, 0] *= 10.
+    panstarrs_open = panstarrs[:, [0, 1]]
+    panstarrs_g = panstarrs[:, [0, 2]]
+    panstarrs_r = panstarrs[:, [0, 3]]
+    panstarrs_i = panstarrs[:, [0, 4]]
+    panstarrs_z = panstarrs[:, [0, 5]]
+    panstarrs_y = panstarrs[:, [0, 6]]
+    panstarrs_w = panstarrs[:, [0, 7]]
+else:
+    panstarrs_open = panstarrs_g = panstarrs_r = panstarrs_i = panstarrs_z = panstarrs_y = panstarrs_w = None
 
 class PANSTARRS_PS1_g(Filter):
     def __init__(self):

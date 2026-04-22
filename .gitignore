@@ -1,12 +1,16 @@
 *checkpoint.ipynb
+**/.ipynb_checkpoints/
 */__pycache__
 __pycache__
+*.egg-info/
+*.code-workspace
 .DS_Store
 .vscode/
 .pytest_cache/
 .cache
 
 build/*
+data/*
 
 tutorial/paper_results/phoebe_checks/
 tutorial/paper_results/phoebe_lc_checks/

@@ -1,16 +1,24 @@
+from __future__ import annotations
+
+import time as _time
+import sys as _sys
+
+_jax_already_loaded = "jax" in _sys.modules
+_t0 = _time.perf_counter()
 import jax.numpy as jnp
 import jax
+if not _jax_already_loaded:
+    from spice.utils import log as _log
+    _log.info(f"JAX loaded in {_time.perf_counter() - _t0:.1f} s")
 from jax.typing import ArrayLike
-from typing import Tuple
+from typing import List, Any, Tuple, TYPE_CHECKING
 
-from jaxtyping import Array, Float
-
-
-import jax
-from typing import List, Any
+if TYPE_CHECKING:
+    from jaxtyping import Array, Float
 
 
-float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+def _float_dtype():
+    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 class ModelList:
@@ -100,6 +108,31 @@ def phi_to_lon(phi: float) -> float:
     return jnp.rad2deg(phi)  # Convert azimuth to longitude
 
 
+def horizontal_to_radial_ratio(mass: float, radius: float, pulsation_period: float) -> float:
+    """
+    Compute the horizontal-to-radial displacement ratio K from stellar parameters.
+
+    From the outer mechanical boundary condition (Smeyers & Tassoul 1987):
+        K = GM / (omega^2 * R^3)
+
+    For p-modes K << 1 (radial dominates); for g-modes K >> 1 (horizontal dominates).
+
+    Args:
+        mass (float): Stellar mass in solar masses.
+        radius (float): Stellar radius in solar radii.
+        pulsation_period (float): Pulsation period in days.
+
+    Returns:
+        float: The ratio K = xi_h / xi_r, suitable for use as `horizontal_ratio`
+            in `add_pulsation()`.
+    """
+    G = 6.674e-11       # m^3 kg^-1 s^-2
+    M = mass * 1.989e30  # kg
+    R = radius * 6.957e8 # m
+    omega = 2 * jnp.pi / (pulsation_period * 86400.0)  # rad/s
+    return G * M / (omega**2 * R**3)
+
+
 def velocity_to_period(velocity: float, radius: float) -> float:
     """
     Convert rotational velocity to rotation period.
@@ -166,17 +199,147 @@ def spherical_harmonic(m, n, coordinates):
 
 
 @jax.jit
-def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=jnp.array([0., 0., 1.]), tilt_angle=0.):
+def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=None, tilt_angle=0.):
+    if tilt_axis is None:
+        tilt_axis = jnp.array([0., 0., 1.])
     # Normalize tilt axis
     norm = jnp.linalg.norm(tilt_axis)
     # Add epsilon to prevent division by zero
     norm = jnp.where(norm > 1e-10, norm, 1e-10)
     tilt_axis = tilt_axis / norm
-    
+
     r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
     rotated_coords = jnp.matmul(coordinates, r_matrix)
 
     return spherical_harmonic(m, n, rotated_coords)
+
+
+@jax.jit
+def spherical_harmonic_tangential_gradient(m, n, coordinates):
+    """Compute the tangential gradient of Y_l^m on the sphere as 3D Cartesian vectors.
+
+    Uses finite differences in the Cartesian frame to compute the full gradient
+    of Y_l^m, then projects out the radial component to obtain the tangential part.
+    This avoids coordinate singularities at the poles.
+
+    Args:
+        m: Azimuthal order of the spherical harmonic.
+        n: Degree of the spherical harmonic.
+        coordinates: (n_vertices, 3) Cartesian coordinates.
+
+    Returns:
+        (n_vertices, 3) tangential gradient vectors in Cartesian coordinates.
+    """
+    eps = 1e-4
+
+    # Compute Cartesian gradient via central finite differences along x, y, z
+    Y0 = spherical_harmonic(m, n, coordinates)  # (n,)
+
+    dx = jnp.array([eps, 0.0, 0.0])
+    dy = jnp.array([0.0, eps, 0.0])
+    dz = jnp.array([0.0, 0.0, eps])
+
+    dYdx = (spherical_harmonic(m, n, coordinates + dx) -
+            spherical_harmonic(m, n, coordinates - dx)) / (2.0 * eps)
+    dYdy = (spherical_harmonic(m, n, coordinates + dy) -
+            spherical_harmonic(m, n, coordinates - dy)) / (2.0 * eps)
+    dYdz = (spherical_harmonic(m, n, coordinates + dz) -
+            spherical_harmonic(m, n, coordinates - dz)) / (2.0 * eps)
+
+    grad_cart = jnp.stack([dYdx, dYdy, dYdz], axis=-1)  # (n, 3)
+
+    # Project out the radial component: tangential = grad - (grad . r_hat) r_hat
+    r_hat = coordinates / (jnp.linalg.norm(coordinates, axis=1, keepdims=True) + 1e-10)
+    radial_component = jnp.sum(grad_cart * r_hat, axis=1, keepdims=True) * r_hat
+
+    return grad_cart - radial_component
+
+
+@jax.jit
+def spherical_harmonic_gradient_with_tilt(m, n, coordinates,
+                                          tilt_axis=None,
+                                          tilt_angle=0.):
+    if tilt_axis is None:
+        tilt_axis = jnp.array([0., 0., 1.])
+    """Compute the tangential gradient of Y_l^m with a tilted pulsation axis.
+
+    Rotates coordinates into the tilted frame, computes the tangential gradient
+    there, and rotates the resulting vectors back.
+
+    Args:
+        m: Azimuthal order.
+        n: Degree.
+        coordinates: (n_vertices, 3) Cartesian coordinates.
+        tilt_axis: Rotation axis for the tilt.
+        tilt_angle: Tilt angle in degrees.
+
+    Returns:
+        (n_vertices, 3) tangential gradient vectors in the original frame.
+    """
+    norm = jnp.linalg.norm(tilt_axis)
+    norm = jnp.where(norm > 1e-10, norm, 1e-10)
+    tilt_axis = tilt_axis / norm
+
+    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    rotated_coords = jnp.matmul(coordinates, r_matrix)
+
+    rotated_grad = spherical_harmonic_tangential_gradient(m, n, rotated_coords)
+
+    # Rotate gradient vectors back to the original frame
+    return jnp.matmul(rotated_grad, r_matrix.T)
+
+
+@jax.jit
+def spherical_harmonic_toroidal(m, n, coordinates):
+    """Compute the toroidal vector spherical harmonic T_l^m = r_hat x nabla_tangential(Y_l^m).
+
+    This is the third basis vector of the vector spherical harmonic decomposition,
+    orthogonal to both the radial (R_lm) and spheroidal (S_lm) components.
+
+    Args:
+        m: Azimuthal order of the spherical harmonic.
+        n: Degree of the spherical harmonic.
+        coordinates: (n_vertices, 3) Cartesian coordinates.
+
+    Returns:
+        (n_vertices, 3) toroidal vectors in Cartesian coordinates.
+    """
+    r_hat = coordinates / (jnp.linalg.norm(coordinates, axis=1, keepdims=True) + 1e-10)
+    tangential_grad = spherical_harmonic_tangential_gradient(m, n, coordinates)
+    return jnp.cross(r_hat, tangential_grad)
+
+
+@jax.jit
+def spherical_harmonic_toroidal_with_tilt(m, n, coordinates,
+                                          tilt_axis=None,
+                                          tilt_angle=0.):
+    """Compute the toroidal VSH T_l^m with a tilted pulsation axis.
+
+    Rotates coordinates into the tilted frame, computes the toroidal component
+    there, and rotates the resulting vectors back.
+
+    Args:
+        m: Azimuthal order.
+        n: Degree.
+        coordinates: (n_vertices, 3) Cartesian coordinates.
+        tilt_axis: Rotation axis for the tilt.
+        tilt_angle: Tilt angle in degrees.
+
+    Returns:
+        (n_vertices, 3) toroidal vectors in the original frame.
+    """
+    if tilt_axis is None:
+        tilt_axis = jnp.array([0., 0., 1.])
+    norm = jnp.linalg.norm(tilt_axis)
+    norm = jnp.where(norm > 1e-10, norm, 1e-10)
+    tilt_axis = tilt_axis / norm
+
+    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    rotated_coords = jnp.matmul(coordinates, r_matrix)
+
+    rotated_toroidal = spherical_harmonic_toroidal(m, n, rotated_coords)
+
+    return jnp.matmul(rotated_toroidal, r_matrix.T)
 
 
 @jax.jit
@@ -317,8 +480,8 @@ def cast_to_normal_plane(vectors: jnp.ndarray, los_vector: jnp.ndarray) -> jnp.n
     n = los_vector / (jnp.linalg.norm(los_vector) + eps)  # (3,)
 
     # Choose a reference axis not parallel to n
-    ez = jnp.array([0.0, 0.0, 1.0], dtype=float_dtype)
-    ex = jnp.array([1.0, 0.0, 0.0], dtype=float_dtype)
+    ez = jnp.array([0.0, 0.0, 1.0], dtype=_float_dtype())
+    ex = jnp.array([1.0, 0.0, 0.0], dtype=_float_dtype())
 
     # If |n·ez| < 0.99 use ez, else fall back to ex
     use_ez = jnp.abs(jnp.dot(n, ez)) < 0.99

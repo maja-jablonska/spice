@@ -1,3 +1,12 @@
+import os as _os
+import sys as _sys
+
+# On macOS, default JAX to CPU to avoid slow/broken Metal backend initialization.
+# Users who want Metal can set JAX_PLATFORMS=metal before importing spice.
+if _sys.platform == "darwin" and "JAX_PLATFORMS" not in _os.environ:
+    _os.environ["JAX_PLATFORMS"] = "cpu"
+
+
 def _patch_phoebe_anim_to_html():
     """
     Ensure PHOEBE uses a Python-3-safe anim_to_html and that the

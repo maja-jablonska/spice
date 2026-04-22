@@ -140,6 +140,11 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
     Returns list of eclipses; each is a dict with keys:
     {'seg': i, 'T1':..., 'T2':..., 'mid':..., 'T3':..., 'T4':..., 'kind': 'partial'|'total'|'grazing'}
     """
+    import time as _time
+    from spice.utils import log as _spice_log
+    if _spice_log.is_verbose():
+        _spice_log.info("Finding eclipses...")
+    _t0 = _time.perf_counter()
     motion = RelativeSkyMotion(t, pos1, vel1, pos2, vel2)
     Rsum = float(R1 + R2)
     Rdiff = float(abs(R1 - R2))
@@ -249,4 +254,9 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
                              T1=T1, T2=T2, mid=mid, T3=T3, T4=T4,
                              kind=kind))
 
+    _done = f"Found {len(eclipses)} eclipse(s) in {_time.perf_counter() - _t0:.1f} s"
+    if _spice_log.is_verbose():
+        _spice_log.substitute(_done)
+    else:
+        _spice_log.info(_done)
     return eclipses

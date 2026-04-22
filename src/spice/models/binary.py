@@ -21,7 +21,7 @@ try:
     from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
     from spice.models.phoebe_utils import Component, PhoebeConfig
     PHOEBE_AVAILABLE = True
-except ImportError:
+except Exception:
     PHOEBE_AVAILABLE = False
 
 YEAR_TO_SECONDS = 3.154e7
@@ -357,8 +357,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
 
 
 def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Model], List[Model]]:
-    """
-    Evaluates the orbit of binary components at multiple specific times.
+    """Evaluates the orbit of binary components at multiple specific times.
 
     This function leverages vectorized computation to evaluate the positions and velocities of the binary components
     at an array of given times. It uses KD-tree based spatial search for occlusion detection and resolution, then iteratively evaluates
@@ -382,8 +381,15 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
         This function is optimized for performance by using JAX's vectorized map (`vmap`) and just-in-time (`jit`)
         compilation features, enabling efficient computation over arrays of times.
     """
-    if isinstance(binary, PhoebeBinary):
-        return [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
-               [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
-    else:
-        return v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
+    from spice.utils import log
+    n = len(times) if hasattr(times, '__len__') else times.shape[0]
+    with log.timed(
+        f"Evaluating binary orbit at {n} time steps",
+        "Binary orbit evaluated in {elapsed:.1f} s",
+    ):
+        if isinstance(binary, PhoebeBinary):
+            result = [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
+                     [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
+        else:
+            result = v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
+    return result

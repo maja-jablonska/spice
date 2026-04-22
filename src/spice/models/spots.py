@@ -4,7 +4,12 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
-from spice.models.phoebe_model import PhoebeModel
+try:
+    from spice.models.phoebe_model import PhoebeModel
+except Exception:
+    class PhoebeModel:
+        """Placeholder when PHOEBE is not installed or broken."""
+        pass
 from .mesh_model import MeshModel
 from .utils import spherical_harmonic, spherical_harmonic_with_tilt
 

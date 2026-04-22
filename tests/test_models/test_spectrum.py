@@ -33,6 +33,33 @@ class TestSpectrumFunctions:
         assert jnp.all(jnp.isfinite(flux))  # Check for non-finite values
         assert jnp.all(flux >= 0)  # Flux should be non-negative
 
+    def test_simulate_observed_flux_matches_wavelength_chunking(self):
+        """Test that wavelength chunking preserves spectral ordering and values."""
+        mesh = default_icosphere()
+        log_wavelengths = jnp.linspace(3.0, 4.0, 37)
+        chunk_size = int(mesh.parameters.shape[0])
+
+        def mock_intensity(wavelengths, mu, params):
+            return jnp.stack([wavelengths, wavelengths + 1.0], axis=-1)
+
+        flux_unchunked = simulate_observed_flux(
+            mock_intensity,
+            mesh,
+            log_wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=int(log_wavelengths.shape[0])
+        )
+        flux_chunked = simulate_observed_flux(
+            mock_intensity,
+            mesh,
+            log_wavelengths,
+            chunk_size=chunk_size,
+            wavelengths_chunk_size=8
+        )
+
+        chex.assert_shape(flux_chunked, (37, 2))
+        assert jnp.allclose(flux_chunked, flux_unchunked)
+
     def test_simulate_monochromatic_luminosity(self):
         """Test simulation of monochromatic luminosity"""
         mesh = default_icosphere()

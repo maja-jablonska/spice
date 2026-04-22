@@ -100,6 +100,39 @@ class TestMeshTransformations:
         # Rotation sign must invert LOS velocity sign everywhere.
         assert jnp.allclose(negative_rotation.los_velocities, -positive_rotation.los_velocities)
 
+    def test_evaluate_rotation_averages_vertex_and_center_velocities(self, mesh_model):
+        rotation_velocity = 37.5
+        rotation_axis = jnp.array([1.0, 2.0, 3.0])
+        evaluated_mesh = evaluate_rotation(
+            add_rotation(mesh_model, rotation_velocity=rotation_velocity, rotation_axis=rotation_axis),
+            t=1800.0
+        )
+
+        axis_hat = rotation_axis / jnp.linalg.norm(rotation_axis)
+
+        vertex_norms = jnp.linalg.norm(evaluated_mesh.d_vertices, axis=1, keepdims=True)
+        center_norms = jnp.linalg.norm(evaluated_mesh.d_centers, axis=1, keepdims=True)
+
+        surface_vertices = evaluated_mesh.d_vertices * jnp.where(
+            vertex_norms > 0.0,
+            evaluated_mesh.radius / vertex_norms,
+            1.0
+        )
+        surface_centers = evaluated_mesh.d_centers * jnp.where(
+            center_norms > 0.0,
+            evaluated_mesh.radius / center_norms,
+            1.0
+        )
+
+        vertex_velocities = (rotation_velocity / evaluated_mesh.radius) * jnp.cross(surface_vertices, axis_hat)
+        center_velocities = (rotation_velocity / evaluated_mesh.radius) * jnp.cross(surface_centers, axis_hat)
+
+        expected_velocities = (
+            jnp.sum(vertex_velocities[evaluated_mesh.faces.astype(jnp.int32)], axis=1) + center_velocities
+        ) / 4.0
+
+        assert jnp.allclose(evaluated_mesh.rotation_velocities, expected_velocities)
+
     def test_evaluate_rotation_phoebe_model_raises_error(self, phoebe_model):
         t = 1.0
         with pytest.raises(ValueError):

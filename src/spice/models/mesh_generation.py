@@ -233,5 +233,10 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
         except FileNotFoundError:
             warnings.warn('No .pickle file for requested subdivisions found.')
 
-    verts, faces, areas, centers = _icosphere(subdivs)
+    from spice.utils import log
+    with log.timed(
+        f"Generating icosphere ({points} vertices, {int(subdivs)} subdivisions)",
+        "Icosphere generated in {elapsed:.1f} s",
+    ):
+        verts, faces, areas, centers = _icosphere(subdivs)
     return verts, faces, areas, centers

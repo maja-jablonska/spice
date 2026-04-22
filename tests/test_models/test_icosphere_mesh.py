@@ -62,6 +62,20 @@ class TestIcosphere:
         sphere_volume = (4.0 / 3.0) * jnp.pi * radius**3
         assert jnp.isclose(mesh_volume, sphere_volume, rtol=1e-5, atol=1e-8)
 
+    def test_icosphere_centers_projected_to_requested_radius(self):
+        radius = 5.0
+        model = IcosphereModel.construct(
+                n_vertices=1000,
+                radius=radius,
+                mass=1.,
+                parameters=[5777.],
+                parameter_names=['teff'],
+                override_log_g=False
+                )
+
+        center_radii = jnp.linalg.norm(model.d_centers, axis=1)
+        assert jnp.all(jnp.isclose(center_radii, radius, rtol=1e-6, atol=1e-8))
+
     def test_icosphere_parameters_from_list(self):
         model = IcosphereModel.construct(
                 n_vertices=1000,

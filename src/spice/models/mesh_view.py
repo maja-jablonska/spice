@@ -8,7 +8,8 @@ from functools import partial
 import jaxkd as jk
 from jaxtyping import Array, Float
 
-float_dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+def _float_dtype():
+    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 @jax.jit
 def point_in_triangle(pt, tri_verts):  # tri_verts: (3,2)
@@ -222,7 +223,7 @@ def resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors:
     m_occluded_center_z = cast_to_los(m_occluded.center, m_occluded.los_vector)
     o = jax.lax.cond(jnp.all(m_occluder_center_z>m_occluded_center_z),
                      lambda: _resolve_occlusion(m_occluded, m_occluder, n_neighbors),
-                     lambda: jnp.zeros_like(m_occluded.occluded_areas, dtype=float_dtype))
+                     lambda: jnp.zeros_like(m_occluded.occluded_areas, dtype=_float_dtype()))
     return m_occluded._replace(
         occluded_areas=o
     )

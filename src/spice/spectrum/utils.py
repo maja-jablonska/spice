@@ -15,12 +15,20 @@ C_CENTIMETERS = 29979245800.
 JY_TO_ERG = 1e-23
 H_CONST_ERG_S = 6.62607015*10**(-27)
 
-dtype = jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+def _dtype():
+    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
-SQRT_2PI = jnp.sqrt(2.0 * jnp.pi)
-LOG2 = jnp.log(2.0)
-LN10 = jnp.log(10.0)
+def _sqrt_2pi():
+    return jnp.sqrt(2.0 * jnp.pi)
+
+
+def _log2():
+    return jnp.log(2.0)
+
+
+def _ln10():
+    return jnp.log(10.0)
 
 @jax.jit
 def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
@@ -47,7 +55,7 @@ def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
     delta_log = (log_wavelength[-1] - log_wavelength[0]) / (N - 1)
 
     # Gaussian sigma in log10(λ) space
-    sigma_log = 1.0 / (2.0 * jnp.sqrt(2.0 * LOG2) * R * LN10)
+    sigma_log = 1.0 / (2.0 * jnp.sqrt(2.0 * _log2()) * R * _ln10())
 
     # Define kernel width (static cap for JIT safety)
     max_half_width = 2046
