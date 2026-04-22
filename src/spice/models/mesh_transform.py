@@ -1,4 +1,5 @@
 from functools import partial
+from importlib import import_module
 from typing import List, Union
 import warnings
 
@@ -26,9 +27,36 @@ from .utils import (ModelList, rotation_matrix, rotation_matrix_prim,
 
 from jaxtyping import Array, Float
 
+_PHOEBE_MODEL_CLASS = None
+_PHOEBE_MODEL_RESOLVED = False
+
 
 def _is_arraylike(x):
     return hasattr(x, '__array__') or hasattr(x, '__array_interface__')
+
+
+def _get_phoebe_model_class():
+    """Lazily resolve PhoebeModel class from optional PHOEBE integration."""
+    global _PHOEBE_MODEL_CLASS, _PHOEBE_MODEL_RESOLVED
+
+    if not _PHOEBE_MODEL_RESOLVED:
+        try:
+            module = import_module(".phoebe_model", "spice.models")
+            _PHOEBE_MODEL_CLASS = module.PhoebeModel
+        except ImportError:
+            _PHOEBE_MODEL_CLASS = None
+        _PHOEBE_MODEL_RESOLVED = True
+
+    return _PHOEBE_MODEL_CLASS
+
+
+def _is_phoebe_model(mesh: MeshModel) -> bool:
+    # Fast path: avoid importing optional PHOEBE integration for non-PHOEBE meshes.
+    if type(mesh).__name__ != "PhoebeModel":
+        return False
+
+    phoebe_model_class = _get_phoebe_model_class()
+    return phoebe_model_class is not None and isinstance(mesh, phoebe_model_class)
 
 
 @jax.jit
@@ -54,7 +82,7 @@ def transform(mesh: MeshModel, vector: Float[Array, "3"]) -> MeshModel:
         Raises:
             ValueError: If the mesh model is an instance of PhoebeModel, indicating that it is read-only.
         """
-    if isinstance(mesh, PhoebeModel):
+    if _is_phoebe_model(mesh):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the position is already evaluated in the PHOEBE model.")
     return _transform(mesh, vector)
@@ -92,11 +120,11 @@ def update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], par
         If the mesh is an instance of PhoebeModel, this function will raise a ValueError as PHOEBE models
         are considered read-only in SPICE.
     """
-    if isinstance(mesh, PhoebeModel):
+    if _is_phoebe_model(mesh):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
 
-    if isinstance(mesh, PhoebeModel):
+    if _is_phoebe_model(mesh):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
     if isinstance(parameter, str):
@@ -154,7 +182,7 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
         This function is more efficient than calling update_parameter multiple times when
         updating several parameters at once.
     """
-    if isinstance(mesh, PhoebeModel):
+    if _is_phoebe_model(mesh):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
 
@@ -218,7 +246,7 @@ def add_rotation(mesh: MeshModel,
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only.
     """
-    if isinstance(mesh, PhoebeModel):
+    if _is_phoebe_model(mesh):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
     if rotation_axis is None:
@@ -280,7 +308,7 @@ def evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel:
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only.
     """
-    if isinstance(mesh, PhoebeModel):
+    if _is_phoebe_model(mesh):
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
     return _evaluate_rotation(mesh, t)
@@ -370,7 +398,7 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only within SPICE.
     """
-    if isinstance(m, PhoebeModel):
+    if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
     if _is_arraylike(period):
         period = period[0]
@@ -466,7 +494,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only within SPICE.
         ValueError: If the input arrays have inconsistent lengths.
     """
-    if isinstance(m, PhoebeModel):
+    if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
     if not (len(m_orders) == len(l_degrees) == len(periods) == len(fourier_series_parameters)):
@@ -533,7 +561,7 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating that it is read-only.
     """
-    if isinstance(m, PhoebeModel):
+    if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
     return _reset_pulsations(m)
@@ -677,7 +705,7 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only.
     """
-    if isinstance(m, PhoebeModel):
+    if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
     from spice.utils import log
