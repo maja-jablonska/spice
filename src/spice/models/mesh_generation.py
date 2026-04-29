@@ -1,3 +1,4 @@
+import os
 import warnings
 from typing import Tuple, Any
 import pkgutil
@@ -215,6 +216,12 @@ def _icosphere(subdiv: int) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]
     return verts, faces, areas, centers
 
 
+def _user_icosphere_cache_dir() -> str:
+    """Per-user writable cache dir for icospheres built at runtime."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(base, "stellar-spice", "icosphere_cache")
+
+
 def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
     """Create an icosphere_cache with at least that n points.
 
@@ -225,13 +232,32 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
     Returns:
         Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
     """
-    subdivs = jnp.ceil(.5*jnp.log2(points/5)-1).astype(int)
+    subdivs = int(jnp.ceil(.5*jnp.log2(points/5)-1))
 
+    user_cache_path = None
     if use_cache:
-        try:
-            return pickle.loads(pkgutil.get_data('spice', f"icosphere_cache/icosphere_{subdivs}.pickle"))
-        except FileNotFoundError:
-            warnings.warn('No .pickle file for requested subdivisions found.')
+        # Packaged caches ship with a `_compat` suffix (re-pickled for newer JAX).
+        # Older trees used the bare name — try both for compatibility.
+        for name in (f"icosphere_cache/icosphere_{subdivs}_compat.pickle",
+                     f"icosphere_cache/icosphere_{subdivs}.pickle"):
+            try:
+                data = pkgutil.get_data('spice', name)
+            except (FileNotFoundError, OSError):
+                data = None
+            if data is not None:
+                return pickle.loads(data)
+        # Writable per-user cache for subdivisions not shipped with the package.
+        user_cache_path = os.path.join(
+            _user_icosphere_cache_dir(), f"icosphere_{subdivs}.pickle"
+        )
+        if os.path.exists(user_cache_path):
+            with open(user_cache_path, "rb") as fh:
+                return pickle.load(fh)
+        warnings.warn(
+            f"No cached icosphere for subdivs={subdivs}; generating it now "
+            "(this can take ~1 min — result will be cached under "
+            f"{_user_icosphere_cache_dir()} for next time)."
+        )
 
     from spice.utils import log
     with log.timed(
@@ -239,4 +265,13 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
         "Icosphere generated in {elapsed:.1f} s",
     ):
         verts, faces, areas, centers = _icosphere(subdivs)
+
+    if use_cache and user_cache_path is not None:
+        try:
+            os.makedirs(os.path.dirname(user_cache_path), exist_ok=True)
+            with open(user_cache_path, "wb") as fh:
+                pickle.dump((verts, faces, areas, centers), fh)
+        except OSError as exc:
+            warnings.warn(f"Could not write icosphere cache to {user_cache_path}: {exc}")
+
     return verts, faces, areas, centers

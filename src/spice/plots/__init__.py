@@ -18,6 +18,8 @@ def __getattr__(name):
         "plot_pulsation_comet": ".plot_pulsations",
         "animate_pulsation_phase": ".plot_pulsations",
         "animate_observed_disk": ".plot_pulsations",
+        "animate_pulsation_with_patch_zoom": ".plot_pulsations",
+        "plot_pulsation_phase_grid_with_point_traces": ".plot_pulsations",
         "PULSATION_FIELDS": ".plot_pulsations",
     }
 

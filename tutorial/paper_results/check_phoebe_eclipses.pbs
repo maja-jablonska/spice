@@ -1,0 +1,124 @@
+#!/bin/bash
+# Gadi PBS script: run check_phoebe_eclipses.py in grid mode on one node,
+# parallelizing across all CPUs via the script's --grid-config / --n-workers
+# multiprocessing pool.
+#
+# === Edit these before submission ============================================
+# 1. Replace <PROJECT> below with your NCI project code (e.g. ab12).
+# 2. Adjust the queue / walltime / mem if your grid is larger or smaller than
+#    the default ~few-hundred tasks.
+# 3. Set SPICE_VENV (or the `module load`/conda activate block) to whatever
+#    Python environment has spice + phoebe + transformer-payne installed.
+# 4. Edit the `# --- grid definition ---` block (or supply your own CSV) to
+#    cover the parameter combinations you want.
+#
+# Submit with:    qsub tutorial/paper_results/check_phoebe_eclipses.pbs
+# Resume after a timeout: just resubmit — already-finished tasks are skipped.
+# =============================================================================
+
+#PBS -P <PROJECT>
+#PBS -q normal
+#PBS -l ncpus=48
+#PBS -l mem=190GB
+#PBS -l walltime=08:00:00
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/<PROJECT>+gdata/<PROJECT>
+#PBS -l wd
+#PBS -N spice_eclipses
+#PBS -j oe
+#PBS -m abe
+# (optional) email on abort/begin/end — comment out if undesired
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.0          # adjust to whatever Python the venv uses
+
+SPICE_REPO="${PBS_O_WORKDIR}/../.."  # this PBS lives in tutorial/paper_results
+SPICE_REPO="$(cd "${SPICE_REPO}" && pwd)"
+SPICE_VENV="${SPICE_VENV:-${SPICE_REPO}/.venv}"   # override via `qsub -v SPICE_VENV=...`
+
+if [[ -d "${SPICE_VENV}" ]]; then
+    # shellcheck disable=SC1091
+    source "${SPICE_VENV}/bin/activate"
+else
+    echo "warning: SPICE_VENV=${SPICE_VENV} not found — relying on system python" >&2
+fi
+
+# Keep every numerical library single-threaded; we get parallelism from the
+# multiprocessing pool, not from threaded BLAS / JAX inside each worker.
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export JAX_PLATFORMS=cpu
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+
+cd "${PBS_O_WORKDIR}"
+
+# ---------------------------------------------------------------------------
+# Output paths — write to /scratch so we don't fill the home volume
+# ---------------------------------------------------------------------------
+PROJECT="$(echo "${PBS_O_WORKDIR}" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="scratch"){print $(i+1); exit}}')"
+PROJECT="${PROJECT:-<PROJECT>}"
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${PROJECT}/${USER}/spice_eclipses/${PBS_JOBID%.*}}"
+GRID_CSV="${GRID_CSV:-${OUTPUT_DIR}/grid.csv}"
+mkdir -p "${OUTPUT_DIR}"
+
+# ---------------------------------------------------------------------------
+# Grid definition
+# ---------------------------------------------------------------------------
+# If the user already has a grid CSV, point GRID_CSV at it and skip generation.
+# Otherwise build a default sweep here. Columns: inclination,period,q,ecc,
+# primary_mass,n_times.
+if [[ ! -s "${GRID_CSV}" ]]; then
+    python3 - "${GRID_CSV}" <<'PY'
+import csv, sys
+import numpy as np
+
+inclinations  = np.linspace(60.0, 90.0, 4)        # degrees
+periods       = np.linspace(2.0, 20.0, 6)         # days
+qs            = [0.5, 1.0]
+eccs          = [0.0, 0.2]
+primary_mass  = 1.0
+n_times       = 20
+
+with open(sys.argv[1], "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["inclination", "period", "q", "ecc", "primary_mass", "n_times"])
+    for incl in inclinations:
+        for P in periods:
+            for q in qs:
+                for e in eccs:
+                    w.writerow([f"{incl:.4f}", f"{P:.4f}", q, e, primary_mass, n_times])
+PY
+    echo "Generated grid: ${GRID_CSV}"
+fi
+
+NTASKS="$(( $(wc -l < "${GRID_CSV}") - 1 ))"
+echo "==============================================================="
+echo "Job:        ${PBS_JOBID}"
+echo "Node:       $(hostname)"
+echo "CPUs:       ${PBS_NCPUS}"
+echo "Repo:       ${SPICE_REPO}"
+echo "Venv:       ${SPICE_VENV}"
+echo "Grid CSV:   ${GRID_CSV}  (${NTASKS} tasks)"
+echo "Output:     ${OUTPUT_DIR}"
+echo "==============================================================="
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+# --n-workers = PBS_NCPUS gives one PHOEBE bundle per CPU. Drop to ~PBS_NCPUS/2
+# if a worker runs out of memory (each worker holds a PHOEBE bundle plus JAX
+# caches; 4 GB/worker is a safe headroom estimate on the normal queue).
+python3 "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
+    --grid-config "${GRID_CSV}" \
+    --n-workers   "${PBS_NCPUS}" \
+    --output_path "${OUTPUT_DIR}"
+
+echo "Done. Outputs in ${OUTPUT_DIR}"
