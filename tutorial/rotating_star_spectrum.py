@@ -54,12 +54,12 @@ vws = jnp.concatenate([jnp.linspace(3000., 3999.9, 1000),
 %time specs = [simulate_observed_flux(tp.intensity, mt0, jnp.log10(vws), chunk_size=chunk_size) for mt0 in mts]
 
 # Now compute photometric time series
-from spice.spectrum.filter import BesselU, BesselB, BesselV
+from spice.spectrum.filter import JohnsonCousinsU, JohnsonCousinsB, JohnsonCousinsV
 from spice.spectrum.spectrum import AB_passband_luminosity
 
-bessel_B = BesselB()
-bessel_U = BesselU()
-bessel_V = BesselV()
+bessel_B = JohnsonCousinsB()
+bessel_U = JohnsonCousinsU()
+bessel_V = JohnsonCousinsV()
 
 d = u.AU.to(u.cm)
 # TODO: remove this "/1e30" that fixes the problem of overflow in float32 by setting the precision to double.

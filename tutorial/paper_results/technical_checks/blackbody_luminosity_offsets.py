@@ -27,10 +27,10 @@ def run_blackbody(n_vertices: int):
     i = SpectralElement.from_filter('johnson_v')
     obs = Observation(bb_synphot, i, binset=vws)
 
-    bessel_b = BesselB()
-    bessel_i = BesselI()
+    bessel_b = JohnsonCousinsB()
+    bessel_i = JohnsonCousinsI()
     gaia_g = GaiaG()
-    johnson_v = JohnsonV()
+    johnson_v = JohnsonCousinsV()
 
     solar_luminosity = luminosity(bb.flux, model, vws)
 
