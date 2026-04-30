@@ -225,7 +225,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
 
 class IcosphereModel(MeshModel):
-    # TODO: show this instead of MeshModel initializer
+    """Icosphere-meshed stellar model — build with :meth:`IcosphereModel.construct`."""
     @classmethod
     def construct(cls, n_vertices: int,
                   radius: float,
