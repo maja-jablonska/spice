@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+import inspect as _inspect
 import time as _time
 import sys as _sys
 import warnings
@@ -12,6 +13,18 @@ from jax import lax
 if not _jax_already_loaded:
     from spice.utils import log as _log
     _log.info(f"JAX loaded in {_time.perf_counter() - _t0:.1f} s")
+
+# `vmap_method` was added to jax.pure_callback in JAX 0.4.32 (replacing the
+# older `vectorized` kwarg). Pin the right hint at import time so we don't
+# blow up on environments stuck on an older JAX (the kwarg would otherwise
+# get treated as a callback argument and JAX rejects the str at trace time).
+_PURE_CALLBACK_PARAMS = _inspect.signature(jax.pure_callback).parameters
+if "vmap_method" in _PURE_CALLBACK_PARAMS:
+    _BROADCAST_ALL_KW: Dict[str, Any] = {"vmap_method": "broadcast_all"}
+elif "vectorized" in _PURE_CALLBACK_PARAMS:
+    _BROADCAST_ALL_KW = {"vectorized": True}
+else:
+    _BROADCAST_ALL_KW = {}
 
 import numpy as np
 from functools import partial, lru_cache
@@ -704,7 +717,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             jax.ShapeDtypeStruct((B, L), jnp.float32),
             jax.ShapeDtypeStruct((B, L), jnp.float32),
         )
-        return jax.pure_callback(_host_fn, result_shape, rows, weights, vmap_method='broadcast_all')
+        return jax.pure_callback(_host_fn, result_shape, rows, weights, **_BROADCAST_ALL_KW)
 
     def is_in_bounds(self, parameters: ArrayLike) -> bool:
         return jnp.all(parameters >= self.min_stellar_parameters) and jnp.all(parameters <= self.max_stellar_parameters)

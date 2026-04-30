@@ -75,9 +75,11 @@ FLUX_PARAMS      = ["teff", "logg", "[Fe/H]", "vmicro", "[a/Fe]",
 SOLAR_INTENSITY = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 SOLAR_FLUX      = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-# linspace(0, 1, 10) reproduces the notebook's "10 LD samples" — formatted
-# with .1f the values render as 0.0, 0.1, …, 0.4, 0.6, …, 1.0 (no 0.5).
+# 100-point LD sweep across [0, 1]. Spacing is 1/99 ≈ 0.0101, so we need at
+# least 4 decimals in the formatted key to keep every coefficient distinct —
+# fewer decimals would silently overwrite buckets in the bundles/spectra dicts.
 LD_COEFFS = np.linspace(0.0, 1.0, 100)
+LD_FMT = ".4f"
 DEFAULT_PULSATION_FITS = HERE / "delta_cep.fits"
 
 WL_MIN, WL_MAX = 5000.0, 5020.0
@@ -315,7 +317,7 @@ def build_one(
     }
     for c in LD_COEFFS:
         emul = flux_linear_emulators[c]
-        bundle_configs[f"flux_linear_{c:.1f}"] = (
+        bundle_configs[f"flux_linear_{c:{LD_FMT}}"] = (
             emul, emul.to_parameters(sp), "stellar_parameter_names",
         )
 
@@ -354,7 +356,7 @@ def build_one(
     spectrum_variants = [("with_ld", intensity_emulator.intensity, bundles["intensity"])]
     for c in LD_COEFFS:
         emul = flux_linear_emulators[c]
-        nm = f"flux_linear_{c:.1f}"
+        nm = f"flux_linear_{c:{LD_FMT}}"
         spectrum_variants.append((nm, emul.intensity, bundles[nm]))
 
     spectra: dict[str, dict[float, LineSpectra]] = {}
