@@ -598,6 +598,13 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
     m_ord = harmonic_parameters[0]
     l_deg = harmonic_parameters[1]
 
+    # IcosphereModel pads d_vertices with interior filler vertices at the origin
+    # that no face references. The spherical-harmonic basis (especially its
+    # gradient) is singular at r=0, so those padded values dominate a plain
+    # `jnp.max(...)` and squash the surface amplitudes. Mask them out before
+    # normalizing so `a_r`, `a_s`, `a_t` map to the peak surface displacement.
+    surface_vertex = jnp.linalg.norm(m.d_vertices, axis=1) > 0.5 * radius
+
     # --- Radial basis: R_lm = Y_l^m * r_hat ---
     vertex_harmonic = spherical_harmonic_with_tilt(
         m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)[:, jnp.newaxis]
@@ -605,7 +612,9 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
         m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)[:, jnp.newaxis]
 
     # Normalize harmonics to (-1, 1) preserving sign
-    vertex_harmonic = vertex_harmonic / (jnp.max(jnp.abs(vertex_harmonic)) + 1e-8)
+    vertex_harmonic = vertex_harmonic / (
+        jnp.max(jnp.where(surface_vertex[:, None], jnp.abs(vertex_harmonic), 0.0)) + 1e-8
+    )
     center_harmonic = center_harmonic / (jnp.max(jnp.abs(center_harmonic)) + 1e-8)
 
     vertex_r_hat = m.d_vertices / jnp.linalg.norm(m.d_vertices, axis=1, keepdims=True)
@@ -620,7 +629,10 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
     center_S = spherical_harmonic_gradient_with_tilt(
         m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)
 
-    vertex_S = vertex_S / (jnp.max(jnp.linalg.norm(vertex_S, axis=1)) + 1e-8)
+    vertex_S_norms = jnp.linalg.norm(vertex_S, axis=1)
+    vertex_S = vertex_S / (
+        jnp.max(jnp.where(surface_vertex, vertex_S_norms, 0.0)) + 1e-8
+    )
     center_S = center_S / (jnp.max(jnp.linalg.norm(center_S, axis=1)) + 1e-8)
 
     # --- Toroidal basis: T_lm = r_hat x nabla_tangential(Y_l^m) ---
@@ -629,7 +641,10 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
     center_T = spherical_harmonic_toroidal_with_tilt(
         m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)
 
-    vertex_T = vertex_T / (jnp.max(jnp.linalg.norm(vertex_T, axis=1)) + 1e-8)
+    vertex_T_norms = jnp.linalg.norm(vertex_T, axis=1)
+    vertex_T = vertex_T / (
+        jnp.max(jnp.where(surface_vertex, vertex_T_norms, 0.0)) + 1e-8
+    )
     center_T = center_T / (jnp.max(jnp.linalg.norm(center_T, axis=1)) + 1e-8)
 
     # --- Total displacement: sum of three VSH components ---

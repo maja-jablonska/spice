@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+import inspect as _inspect
 import time as _time
 import sys as _sys
 import warnings
@@ -12,6 +13,18 @@ from jax import lax
 if not _jax_already_loaded:
     from spice.utils import log as _log
     _log.info(f"JAX loaded in {_time.perf_counter() - _t0:.1f} s")
+
+# `vmap_method` was added to jax.pure_callback in JAX 0.4.32 (replacing the
+# older `vectorized` kwarg). Pin the right hint at import time so we don't
+# blow up on environments stuck on an older JAX (the kwarg would otherwise
+# get treated as a callback argument and JAX rejects the str at trace time).
+_PURE_CALLBACK_PARAMS = _inspect.signature(jax.pure_callback).parameters
+if "vmap_method" in _PURE_CALLBACK_PARAMS:
+    _BROADCAST_ALL_KW: Dict[str, Any] = {"vmap_method": "broadcast_all"}
+elif "vectorized" in _PURE_CALLBACK_PARAMS:
+    _BROADCAST_ALL_KW = {"vectorized": True}
+else:
+    _BROADCAST_ALL_KW = {}
 
 import numpy as np
 from functools import partial, lru_cache
@@ -559,7 +572,13 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                     )
                 self.grid_index = GridIndex.from_dataframe(df, columns=params, device=device)
 
-            self.solar_parameters = solar_parameters
+            solar_arr = np.asarray(solar_parameters)
+            if solar_arr.shape[-1] != len(params):
+                raise ValueError(
+                    f"solar_parameters must have length {len(params)} to match params "
+                    f"{list(params)}; got {solar_arr.shape[-1]}"
+                )
+            self.solar_parameters = solar_arr
             self._stellar_parameter_names = params
             # Read min/max parameters from GridIndex
             self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].min() for param in params])
@@ -698,7 +717,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             jax.ShapeDtypeStruct((B, L), jnp.float32),
             jax.ShapeDtypeStruct((B, L), jnp.float32),
         )
-        return jax.pure_callback(_host_fn, result_shape, rows, weights, vmap_method='broadcast_all')
+        return jax.pure_callback(_host_fn, result_shape, rows, weights, **_BROADCAST_ALL_KW)
 
     def is_in_bounds(self, parameters: ArrayLike) -> bool:
         return jnp.all(parameters >= self.min_stellar_parameters) and jnp.all(parameters <= self.max_stellar_parameters)
@@ -751,6 +770,9 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
         self._stellar_parameter_names = [p for p in params if p != 'mu']
         self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self._stellar_parameter_names])
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
+
+        mu_idx = params.index('mu')
+        self.solar_parameters = np.delete(np.asarray(self.solar_parameters), mu_idx)
         
     
 
@@ -809,8 +831,34 @@ def _nonlinear_4(mu, coeffs):
     )
 
 
+# Flux-conservation normalisation: the factor 2π·∫₀¹ f(μ)·μ dμ that maps a
+# disc-integrated flux F to the specific intensity at disc centre via
+# I(μ) = F · f(μ) / norm. Derived analytically per law from the polynomial
+# (or √μ for nonlinear_4) integrals.
+def _linear_norm(coeffs):
+    # f(μ)=1−u(1−μ); ∫₀¹ μ·f dμ = (3−u)/6 → norm = π(3−u)/3
+    u = coeffs[0]
+    return jnp.pi * (3.0 - u) / 3.0
+
+
+def _quadratic_norm(coeffs):
+    # f(μ)=1−u1(1−μ)−u2(1−μ)²; ∫₀¹ μ·f dμ = (6−2u1−u2)/12
+    u1, u2 = coeffs[0], coeffs[1]
+    return jnp.pi * (6.0 - 2.0 * u1 - u2) / 6.0
+
+
+def _nonlinear_4_norm(coeffs):
+    # f(μ)=1−c1(1−√μ)−c2(1−μ)−c3(1−μ^1.5)−c4(1−μ²);
+    # ∫₀¹ μ·f dμ = 1/2 − c1/10 − c2/6 − 3c3/14 − c4/4
+    c1, c2, c3, c4 = coeffs
+    return 2.0 * jnp.pi * (
+        0.5 - c1 / 10.0 - c2 / 6.0 - 3.0 * c3 / 14.0 - c4 / 4.0
+    )
+
+
 # pack functions into tuple (static structure)
 _LD_FUNCS = (_linear, _quadratic, _nonlinear_4)
+_LD_NORMS = (_linear_norm, _quadratic_norm, _nonlinear_4_norm)
 LAW_IDS = {
     'linear': 0,
     'quadratic': 1,
@@ -825,7 +873,13 @@ def limb_darkening(mu, law_id, coeffs):
     coeffs: array-like (max size, unused entries ignored)
     """
     return lax.switch(law_id, _LD_FUNCS, mu, coeffs)
-        
+
+
+def limb_darkening_norm(law_id, coeffs):
+    """Flux-conservation factor 2π·∫₀¹ f(μ)·μ dμ for the selected law."""
+    return lax.switch(law_id, _LD_NORMS, coeffs)
+
+
 def get_limb_darkening_law_id(law: str) -> int:
     return LAW_IDS[law]
 
@@ -849,7 +903,11 @@ class FluxLazyZarrInterpolator(LazyZarrInterpolator):
             self.limb_darkening_coeffs = coeffs
         
     def apply_limb_darkening(self, flux, mu):
-        return flux * limb_darkening(mu, self.limb_darkening_law, self.limb_darkening_coeffs)
+        # I(μ) = F · f(μ) / (2π · ∫₀¹ f(μ′)·μ′ dμ′) — preserves the
+        # disc-integrated flux when summed over a hemisphere.
+        f = limb_darkening(mu, self.limb_darkening_law, self.limb_darkening_coeffs)
+        norm = limb_darkening_norm(self.limb_darkening_law, self.limb_darkening_coeffs)
+        return flux * f / norm
     
     @override
     def intensity(self, log_wavelengths, mu, parameters):

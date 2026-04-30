@@ -31,21 +31,7 @@ def _patch_numpy_asarray_copy_kwarg() -> None:
     np.asarray = _asarray_compat
 
 
-def _patch_jax_shapedarray_named_shape() -> None:
-    """Allow loading pickle payloads created with newer JAX metadata keys."""
-    try:
-        from jax._src import core as jax_core
-    except Exception:
-        return
-
-    original_update = jax_core.ShapedArray.update
-
-    def _compat_update(self, shape=None, dtype=None, weak_type=None, **kwargs):
-        kwargs.pop("named_shape", None)
-        return original_update(self, shape=shape, dtype=dtype, weak_type=weak_type, **kwargs)
-
-    jax_core.ShapedArray.update = _compat_update
-
-
 _patch_numpy_asarray_copy_kwarg()
-_patch_jax_shapedarray_named_shape()
+
+from spice._jax_compat import apply as _apply_jax_compat
+_apply_jax_compat()

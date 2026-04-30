@@ -6,6 +6,9 @@ import sys as _sys
 if _sys.platform == "darwin" and "JAX_PLATFORMS" not in _os.environ:
     _os.environ["JAX_PLATFORMS"] = "cpu"
 
+from . import _jax_compat as _jax_compat
+_jax_compat.apply()
+
 
 def _patch_phoebe_anim_to_html():
     """

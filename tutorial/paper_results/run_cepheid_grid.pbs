@@ -1,0 +1,107 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS array job — build a grid of Cepheid datasets in parallel.
+#
+#  Each array task runs `build_cepheid_grid.py --names <one-cepheid-name>`,
+#  so N tasks cover N Cepheids concurrently. Per-Cepheid output pickles do
+#  not collide (the Python script writes <name>_bundles.pkl and
+#  <name>_spectra.pkl), and each task is restartable on its own.
+#
+#  USAGE
+#    1. Edit the four "EDIT" lines below: project code, storage, names, env.
+#    2. Submit:   qsub run_cepheid_grid.pbs
+#    3. Monitor:  qstat -fx <jobid>     ; tail -f cepheid_grid.o<jobid>.*
+#    4. Restart:  re-submit; the Python script skips already-built Cepheids
+#                 (add `--force` in the python invocation to rebuild).
+#
+#  WALLTIME SIZING
+#    With LD_COEFFS = linspace(0,1,100) and WL_STEPS = 5000, spectrum
+#    synthesis dominates: ~3 min per LD variant × ~100 variants ≈ 5 h per
+#    Cepheid (plus ~5 min for emulators / bundle build). 12 h walltime is
+#    generous; drop to 06:00:00 if you reduce LD_COEFFS or WL_STEPS.
+#============================================================================
+
+#PBS -P xx00                                   # EDIT: NCI project code
+#PBS -q normal                                 # queue: normal|express|hugemem
+#PBS -l walltime=12:00:00
+#PBS -l ncpus=8                                # JAX/XLA threads per task
+#PBS -l mem=32GB
+#PBS -l jobfs=50GB
+#PBS -l storage=scratch/xx00+gdata/xx00        # EDIT: storage mounts needed
+#PBS -l wd                                     # start in PBS_O_WORKDIR
+#PBS -J 0-4                                    # EDIT: 0..len(GRID_NAMES)-1
+#PBS -N cepheid_grid
+#PBS -j oe                                     # merge stdout+stderr per task
+#PBS -m a                                      # email on abort only
+##PBS -M you@example.com                       # EDIT (uncomment) for email
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# 1) Cepheid grid (must match `build_cepheid_grid.default_grid()` ordering;
+#    or supply a custom list of names that exists in your --config CSV).
+# ---------------------------------------------------------------------------
+GRID_NAMES=(
+    cep_P03p00
+    cep_DeltaCep
+    cep_P10p00
+    cep_P20p00
+    cep_P30p00
+)
+
+# ---------------------------------------------------------------------------
+# 2) Environment
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.7    # nearest available; check `module avail python3`
+module load hdf5/1.14.3p      # for astropy.io.fits
+
+# Activate the spice environment (EDIT path or method).
+PYENV="${PYENV:-$HOME/spice-env}"
+if   [ -f "$PYENV/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$PYENV/bin/activate"
+elif command -v conda &>/dev/null; then
+    # shellcheck disable=SC1091
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+    conda activate "${CONDA_ENV:-spice}"
+else
+    echo "ERROR: no python environment found at $PYENV (and conda not on PATH)"
+    exit 2
+fi
+
+# JAX & BLAS thread parallelism — match what PBS gave us.
+export JAX_PLATFORMS=cpu
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
+export OMP_NUM_THREADS=${PBS_NCPUS:-8}
+export MKL_NUM_THREADS=${PBS_NCPUS:-8}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
+export TF_CPP_MIN_LOG_LEVEL=2
+
+# ---------------------------------------------------------------------------
+# 3) Pick this task's Cepheid
+# ---------------------------------------------------------------------------
+idx=${PBS_ARRAY_INDEX:-0}
+if [ "$idx" -ge "${#GRID_NAMES[@]}" ]; then
+    echo "ERROR: PBS_ARRAY_INDEX=$idx out of range (have ${#GRID_NAMES[@]} names)"
+    exit 3
+fi
+NAME="${GRID_NAMES[$idx]}"
+
+echo "[$(date '+%F %T')] host=$(hostname)  task=$idx  name=$NAME  cpus=${PBS_NCPUS:-?}"
+nvidia-smi 2>/dev/null || true   # harmless if no GPU
+
+# ---------------------------------------------------------------------------
+# 4) Run the per-Cepheid build
+# ---------------------------------------------------------------------------
+cd "$PBS_O_WORKDIR"
+
+OUT_DIR="${OUT_DIR:-$PBS_O_WORKDIR/cepheid_grid}"
+mkdir -p "$OUT_DIR"
+
+python -u build_cepheid_grid.py \
+    --names "$NAME" \
+    --out-dir "$OUT_DIR" \
+    --continue-on-error
+
+echo "[$(date '+%F %T')] finished $NAME"

@@ -54,6 +54,25 @@ DEFAULT_FIELD_LABELS = {
 
 _DIVERGING_FIELDS = frozenset({"v_r", "v_theta", "v_phi", "v_los"})
 
+# Friendly aliases so callers can ask for ``"radial"`` / ``"horizontal"`` /
+# ``"line_of_sight"`` instead of spice's internal ``v_*`` shorthand.
+_FIELD_ALIASES = {
+    "radial": "v_r",
+    "meridional": "v_theta",
+    "polar": "v_theta",
+    "azimuthal": "v_phi",
+    "longitudinal": "v_phi",
+    "horizontal": "v_h",
+    "speed": "speed",
+    "line_of_sight": "v_los",
+    "los": "v_los",
+}
+
+
+def _resolve_field(field: str) -> str:
+    """Translate a descriptive field name into spice's canonical ``v_*`` form."""
+    return _FIELD_ALIASES.get(field, field)
+
 _DEFAULT_DIVERGING_CMAP = "cmr.redshift"
 _DEFAULT_MAGNITUDE_CMAP = DEFAULT_CMAP
 
@@ -931,6 +950,55 @@ def plot_pulsation_disk_with_patch_zoom(
 # Public: phase-grid small multiples
 # ---------------------------------------------------------------------------
 
+def _resolve_vmin_vmax(values_list: Sequence[np.ndarray],
+                       field: str,
+                       vmin: Optional[float],
+                       vmax: Optional[float],
+                       symmetric: Optional[bool]
+                       ) -> Tuple[float, float, bool]:
+    """Auto-fill missing colour bounds from frame data with field-aware defaults.
+
+    Diverging fields default to symmetric ``[-amp, +amp]``; magnitude fields
+    anchor at zero with ``vmax = peak``. Either bound the caller supplies is
+    honoured; only the missing one is computed.
+    """
+    if symmetric is None:
+        symmetric = field in _DIVERGING_FIELDS
+
+    if vmin is not None and vmax is not None:
+        return float(vmin), float(vmax), bool(symmetric)
+
+    stacked = (np.concatenate([np.ravel(v) for v in values_list])
+               if values_list else np.zeros(0))
+
+    if vmin is None and vmax is None:
+        if stacked.size == 0:
+            return ((-1.0, 1.0, True) if symmetric else (0.0, 1.0, False))
+        if symmetric:
+            amp = float(np.nanmax(np.abs(stacked)))
+            if amp == 0.0 or not np.isfinite(amp):
+                amp = 1.0
+            return -amp, amp, True
+        peak = float(np.nanmax(stacked))
+        if peak <= 0.0 or not np.isfinite(peak):
+            peak = 1.0
+        return 0.0, peak, False
+
+    # Exactly one bound supplied → fill in the other from the data.
+    if stacked.size and np.isfinite(stacked).any():
+        data_min = float(np.nanmin(stacked))
+        data_max = float(np.nanmax(stacked))
+    else:
+        data_min, data_max = 0.0, 1.0
+    if vmin is None:
+        vmin = data_min
+    if vmax is None:
+        vmax = data_max
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+    return float(vmin), float(vmax), bool(symmetric)
+
+
 def _shared_norm(values_list: Sequence[np.ndarray],
                  field: str,
                  vmin: Optional[float],
@@ -1432,3 +1500,642 @@ def animate_observed_disk(meshes: Sequence["MeshModel"],
         smart_save(anim, save_path, fps=fps)
 
     return anim
+
+
+# ---------------------------------------------------------------------------
+# Public: 3D sphere + tangent-plane zoom, tracking a single surface vertex
+# ---------------------------------------------------------------------------
+
+def animate_pulsation_with_patch_zoom(
+    meshes: Sequence["MeshModel"],
+    *,
+    center_lonlat_deg: Tuple[float, float] = (0.0, 0.0),
+    vertex_index: Optional[int] = None,
+    field: str = "v_h",
+    up_axis: Optional[np.ndarray] = None,
+    cmap: Optional[str] = None,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    symmetric: Optional[bool] = None,
+    angular_radius_deg: float = 15.0,
+    cone_angular_radius_deg: Optional[float] = None,
+    trail_len: int = 16,
+    show_arrows: bool = False,
+    arrow_component: str = "horizontal",
+    arrow_density: float = 0.6,
+    arrow_length_frac: float = 0.07,
+    arrow_color: str = "black",
+    timestamps: Optional[Sequence[float]] = None,
+    timestamp_label: str = r"$\phi$",
+    view_angles: Tuple[float, float] = (12.0, -55.0),
+    figsize: Tuple[float, float] = (14.0, 7.0),
+    fps: int = 20,
+    save_path: Optional[str] = None,
+    rest_marker_size: float = 140.0,
+    current_marker_size: float = 160.0,
+    marker_color: str = "red",
+    trail_color: str = "white",
+    square_color: str = "cyan",
+    square_linewidth: float = 1.8,
+    title: Optional[str] = None,
+) -> FuncAnimation:
+    """Animate the star with a tangent-plane zoom around a tracked surface vertex.
+
+    Two synchronised panels share a single colour scale:
+
+    * **Left**: the deformed 3D mesh coloured by ``field``, with a cyan square
+      on the sphere marking the region shown on the right.
+    * **Right**: an orthographic zoom onto the tangent plane at the tracked
+      vertex's rest position (delegated to :func:`plot_pulsation_patch_zoom`).
+      The axes are cropped to the same square window shown on the left, and
+      the zoom cone uses ``cone_angular_radius_deg`` (slightly wider than
+      ``angular_radius_deg`` by default) so mesh faces fill the corners.
+
+    The function picks a surface vertex to track automatically: it filters
+    ``meshes[0].d_vertices`` to surface vertices (discarding the interior
+    filler vertices that ``IcosphereModel`` pads with) and chooses the one
+    closest to ``center_lonlat_deg`` in the ``up_axis`` frame. Pass
+    ``vertex_index`` to override. The tracked vertex is overlaid on both
+    panels: an open ring at the rest position, a filled dot at the current
+    position, a line between them (the instantaneous displacement), and a
+    trail of past positions.
+
+    Parameters
+    ----------
+    meshes : sequence of MeshModel
+        One mesh per animation frame, each with ``pulsation_velocities``
+        already evaluated by ``evaluate_pulsations``.
+    center_lonlat_deg : (lon, lat), optional
+        Target (longitude, latitude) in degrees, in the ``up_axis`` frame.
+        The nearest surface vertex is picked as the tracked point; the zoom
+        panel is centred on that vertex (not the literal target).
+    vertex_index : int, optional
+        Index into ``meshes[0].d_vertices`` of the vertex to track. If given,
+        takes precedence over ``center_lonlat_deg``. Must be a surface vertex
+        (``|r| > radius/2``).
+    field : str
+        Scalar to use for the face colours. Accepts either spice's
+        canonical names (``v_r``, ``v_theta``, ``v_phi``, ``v_h``, ``speed``,
+        ``v_los``) or the descriptive aliases ``radial``, ``meridional`` /
+        ``polar``, ``azimuthal`` / ``longitudinal``, ``horizontal``,
+        ``speed``, ``line_of_sight`` / ``los``.
+    vmin, vmax : float, optional
+        Explicit colour bounds. If neither is given they are auto-computed
+        from all frames: diverging fields (``v_r``/``v_theta``/``v_phi``/
+        ``v_los``) get a symmetric ``[-amp, +amp]`` range, and magnitude
+        fields (``v_h``, ``speed``) anchor at zero with ``vmax = peak``.
+    symmetric : bool, optional
+        Force a symmetric zero-centred scale. Defaults to ``True`` for
+        diverging fields.
+    angular_radius_deg : float
+        Half-angle of the visible square zoom window. Also sets the cyan
+        square drawn on the 3D sphere. Same convention as the
+        ``angular_radius_deg`` parameter on :func:`plot_pulsation_patch_zoom`.
+    cone_angular_radius_deg : float, optional
+        Half-angle of the cone passed to :func:`plot_pulsation_patch_zoom`
+        when selecting cells for the zoom. Must be larger than
+        ``angular_radius_deg * sqrt(2)`` so mesh faces fill the square's
+        corners. Defaults to ``angular_radius_deg * 1.7``.
+    trail_len : int
+        Number of past frames to connect as the trajectory trail.
+    show_arrows : bool
+        If ``True``, overlay horizontal-flow arrows on the zoom panel (forwarded
+        to :func:`plot_pulsation_patch_zoom`). Default off because the tracked
+        marker already carries the direction information.
+    timestamps : sequence of float, optional
+        Per-frame label values (e.g. pulsation phase). Written into the panel
+        title as ``f"{timestamp_label} = {timestamps[i]:.2f}"``.
+    view_angles : (elev, azim)
+        ``Axes3D.view_init`` angles for the 3D panel. Locked across frames.
+    save_path : str, optional
+        If given, persist the animation via :func:`smart_save`
+        (``.mp4``/``.gif``/``.html``).
+
+    Returns
+    -------
+    FuncAnimation
+        The matplotlib animation object. Call ``.to_jshtml()`` for inline
+        notebook display, or pass ``save_path=`` to persist.
+    """
+    n_frames = len(meshes)
+    if n_frames == 0:
+        raise ValueError("`meshes` must contain at least one mesh")
+
+    field = _resolve_field(field)
+
+    ref_mesh = meshes[0]
+    radius = float(ref_mesh.radius)
+    star_center = _mesh_center(ref_mesh)
+
+    # --- Pick a surface vertex to track ---------------------------------------
+    up_resolved = _resolve_up_axis(ref_mesh, up_axis)
+    up_basis = _orthonormal_basis_from_axis(up_resolved)
+
+    d_vertices = _as_np(ref_mesh.d_vertices)
+    vert_norms = np.linalg.norm(d_vertices, axis=1)
+    surface_mask = vert_norms > 0.5 * radius
+    surface_idx_arr = np.nonzero(surface_mask)[0]
+    if surface_idx_arr.size == 0:
+        raise ValueError(
+            f"No surface vertices in meshes[0].d_vertices "
+            f"(radius={radius}); can't pick a vertex to track."
+        )
+
+    if vertex_index is None:
+        local = d_vertices[surface_idx_arr] @ up_basis  # into up-axis frame
+        local_unit = local / (vert_norms[surface_idx_arr, None] + 1e-12)
+        lats = np.arcsin(np.clip(local_unit[:, 2], -1.0, 1.0))
+        lons = np.arctan2(local_unit[:, 1], local_unit[:, 0])
+        lon_t = float(np.deg2rad(center_lonlat_deg[0]))
+        lat_t = float(np.deg2rad(center_lonlat_deg[1]))
+        gc = np.arccos(np.clip(
+            np.sin(lats) * np.sin(lat_t)
+            + np.cos(lats) * np.cos(lat_t) * np.cos(lons - lon_t),
+            -1.0, 1.0,
+        ))
+        chosen_idx = int(surface_idx_arr[np.argmin(gc)])
+    else:
+        chosen_idx = int(vertex_index)
+        if not (0 <= chosen_idx < d_vertices.shape[0]):
+            raise ValueError(
+                f"vertex_index={chosen_idx} out of range "
+                f"[0, {d_vertices.shape[0]})."
+            )
+        if vert_norms[chosen_idx] < 0.5 * radius:
+            raise ValueError(
+                f"vertex_index={chosen_idx} is an interior filler vertex "
+                f"(|r|={vert_norms[chosen_idx]:.3g} < {0.5 * radius:.3g}). "
+                "Pick a surface vertex or use center_lonlat_deg."
+            )
+
+    rest_position = d_vertices[chosen_idx] + star_center
+    tracked_positions = np.stack(
+        [np.asarray(m.vertices[chosen_idx]) for m in meshes]
+    )
+
+    # Tangent basis at the rest position — same convention as
+    # plot_pulsation_patch_zoom (north = up projected into the tangent plane,
+    # east completes a right-handed frame with the outward normal).
+    rel_rest = rest_position - star_center
+    n_rest = rel_rest / (np.linalg.norm(rel_rest) + 1e-12)
+    proj_up = up_resolved - (up_resolved @ n_rest) * n_rest
+    if np.linalg.norm(proj_up) < 1e-6:
+        alt = up_basis[:, 0]
+        proj_up = alt - (alt @ n_rest) * n_rest
+    north = proj_up / (np.linalg.norm(proj_up) + 1e-12)
+    east = np.cross(north, n_rest)
+
+    def _project_to_patch(P: np.ndarray) -> np.ndarray:
+        rel = _as_np(P) - star_center
+        return np.array([rel @ east, rel @ north])
+
+    rest_2d = _project_to_patch(rest_position)
+    tracked_2d = np.stack([_project_to_patch(p) for p in tracked_positions])
+
+    # Patch centre expressed as (lon, lat) in the ``up_axis`` frame so we can
+    # forward it to plot_pulsation_patch_zoom. The function does the inverse
+    # of this mapping, so feeding it back yields the same tangent frame.
+    n_local_rest = up_basis.T @ n_rest
+    vtx_lat = float(np.rad2deg(np.arcsin(np.clip(n_local_rest[2], -1.0, 1.0))))
+    vtx_lon = float(np.rad2deg(np.arctan2(n_local_rest[1], n_local_rest[0])))
+
+    # Cone half-angle for the zoom panel: must extend past the visible
+    # square's diagonal. Default to a 1.7x margin (slightly above sqrt(2)).
+    if cone_angular_radius_deg is None:
+        cone_angular_radius_deg = min(89.0, float(angular_radius_deg) * 1.7)
+
+    # Cyan square on the sphere: four tangent-plane corners projected onto the
+    # surface, connected by dense interpolation + re-projection so the edges
+    # curve with the sphere rather than chord-cutting through it.
+    window_half = radius * float(np.sin(np.deg2rad(angular_radius_deg)))
+
+    def _tangent_to_sphere(ecoord: float, ncoord: float) -> np.ndarray:
+        p = n_rest * radius + east * ecoord + north * ncoord
+        return p * (radius / np.linalg.norm(p)) + star_center
+
+    corners_3d = [
+        _tangent_to_sphere(-window_half, -window_half),
+        _tangent_to_sphere(+window_half, -window_half),
+        _tangent_to_sphere(+window_half, +window_half),
+        _tangent_to_sphere(-window_half, +window_half),
+    ]
+    _edge_ts = np.linspace(0.0, 1.0, 40)[:, None]
+    _square_edges: List[np.ndarray] = []
+    for k in range(4):
+        a, b = corners_3d[k], corners_3d[(k + 1) % 4]
+        edge = (1.0 - _edge_ts) * a + _edge_ts * b
+        rel_edge = edge - star_center
+        edge = (rel_edge * (radius / np.linalg.norm(rel_edge, axis=1, keepdims=True))
+                + star_center)
+        _square_edges.append(edge)
+    square_3d = np.concatenate(_square_edges, axis=0)
+
+    # Per-frame field values for the 3D panel.
+    values_list: List[np.ndarray] = []
+    label = DEFAULT_FIELD_LABELS.get(field, field)
+    for m in meshes:
+        _, _, v, label = compute_pulsation_scalar(m, field=field, up_axis=up_axis)
+        values_list.append(v)
+
+    # Auto-compute a shared colour scale across all frames. Diverging fields
+    # (v_r, v_theta, v_phi, v_los) default to a symmetric [-amp, +amp] range;
+    # magnitude fields (v_h, speed) anchor at zero. Either bound the caller
+    # supplies is honoured; the missing one is filled in from the data.
+    vmin, vmax, symmetric = _resolve_vmin_vmax(
+        values_list, field, vmin, vmax, symmetric
+    )
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap_name = _cmap_for_field(field, cmap)
+    cmap_obj = mpl.colormaps[cmap_name]
+
+    # Figure layout: two panels with a shared horizontal colourbar below.
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(1, 2, width_ratios=(1.0, 1.0), wspace=0.18)
+    ax3d = fig.add_subplot(gs[0, 0], projection="3d")
+    ax_zoom = fig.add_subplot(gs[0, 1])
+    axes_lim_3d = 1.3 * radius
+
+    def _setup_3d() -> None:
+        _set_axes_centered(ax3d, star_center, axes_lim_3d)
+        ax3d.set_box_aspect((1, 1, 1))
+        ax3d.set_xlabel(r"$X\,[R_\odot]$")
+        ax3d.set_ylabel(r"$Y\,[R_\odot]$")
+        ax3d.set_zlabel(r"$Z\,[R_\odot]$")
+        ax3d.view_init(elev=view_angles[0], azim=view_angles[1])
+
+    def _frame_title(i: int) -> str:
+        if title is not None:
+            return title
+        if timestamps is not None:
+            return f"{timestamp_label} = {float(timestamps[i]):.2f}"
+        return f"frame {i + 1}/{n_frames}"
+
+    def _render_frame(i: int):
+        # --- left: 3D panel ---------------------------------------------------
+        ax3d.clear()
+        _setup_3d()
+        triangles = _as_np(meshes[i].mesh_elements)
+        face_colors = cmap_obj(norm(values_list[i]))
+        poly = Poly3DCollection(triangles, facecolors=face_colors,
+                                edgecolors="none", linewidths=0, shade=False)
+        ax3d.add_collection3d(poly)
+
+        ax3d.plot(square_3d[:, 0], square_3d[:, 1], square_3d[:, 2],
+                  color=square_color, linewidth=square_linewidth, zorder=12)
+
+        ax3d.scatter(*rest_position, s=rest_marker_size,
+                     facecolor="none", edgecolor=trail_color, linewidth=2.0,
+                     zorder=10, depthshade=False)
+        cur = tracked_positions[i]
+        ax3d.scatter(*cur, s=current_marker_size, color=marker_color,
+                     edgecolor="black", linewidth=0.8,
+                     zorder=11, depthshade=False)
+        ax3d.plot([rest_position[0], cur[0]],
+                  [rest_position[1], cur[1]],
+                  [rest_position[2], cur[2]],
+                  color=marker_color, linewidth=2.0, zorder=9)
+        start = max(0, i - trail_len)
+        trail_3d = tracked_positions[start:i + 1]
+        if trail_3d.shape[0] > 1:
+            ax3d.plot(trail_3d[:, 0], trail_3d[:, 1], trail_3d[:, 2],
+                      color=trail_color, linewidth=1.2, alpha=0.7, zorder=8)
+        ax3d.set_title(_frame_title(i))
+
+        # --- right: 2D tangent-plane zoom ------------------------------------
+        ax_zoom.clear()
+        plot_pulsation_patch_zoom(
+            meshes[i], field=field,
+            center_lonlat_deg=(vtx_lon, vtx_lat),
+            angular_radius_deg=cone_angular_radius_deg,
+            up_axis=up_axis,
+            cmap=cmap_name,
+            vmin=float(norm.vmin), vmax=float(norm.vmax),
+            symmetric=symmetric,
+            show_arrows=show_arrows,
+            arrow_component=arrow_component,
+            arrow_density=arrow_density,
+            arrow_length_frac=arrow_length_frac,
+            arrow_color=arrow_color,
+            show_edges=False,
+            axes=(fig, ax_zoom),
+            title=None,
+            colorbar=False,
+        )
+        # Crop to the square window so the zoom matches the cyan square on the
+        # 3D panel exactly, with no blank corners.
+        ax_zoom.set_xlim(-window_half, window_half)
+        ax_zoom.set_ylim(-window_half, window_half)
+        for spine in ax_zoom.spines.values():
+            spine.set_edgecolor(square_color)
+            spine.set_linewidth(square_linewidth)
+
+        ax_zoom.scatter(rest_2d[0], rest_2d[1], s=rest_marker_size,
+                        facecolor="none", edgecolor=trail_color, linewidth=2.0,
+                        zorder=10)
+        ax_zoom.scatter(tracked_2d[i, 0], tracked_2d[i, 1],
+                        s=current_marker_size,
+                        color=marker_color, edgecolor="black", linewidth=0.8,
+                        zorder=11)
+        ax_zoom.plot([rest_2d[0], tracked_2d[i, 0]],
+                     [rest_2d[1], tracked_2d[i, 1]],
+                     color=marker_color, linewidth=2.0, zorder=9)
+        trail_2d = tracked_2d[start:i + 1]
+        if trail_2d.shape[0] > 1:
+            ax_zoom.plot(trail_2d[:, 0], trail_2d[:, 1],
+                         color=trail_color, linewidth=1.2, alpha=0.7, zorder=8)
+
+    # Initial render so the colourbar can bind to populated axes.
+    _render_frame(0)
+    mappable = mpl.cm.ScalarMappable(cmap=cmap_name, norm=norm)
+    mappable.set_array([])
+    cbar = fig.colorbar(mappable, ax=[ax3d, ax_zoom],
+                        orientation="horizontal", shrink=0.6, pad=0.08)
+    cbar.set_label(label)
+
+    anim = FuncAnimation(fig, _render_frame, frames=n_frames,
+                         interval=1000 // max(fps, 1), blit=False)
+
+    if save_path is not None:
+        smart_save(anim, save_path, fps=fps)
+
+    return anim
+
+
+# ---------------------------------------------------------------------------
+# Public: phase thumbnails + tracked-point trajectory projections
+# ---------------------------------------------------------------------------
+
+def plot_pulsation_phase_grid_with_point_traces(
+    meshes: Sequence["MeshModel"],
+    *,
+    center_lonlat_deg: Tuple[float, float] = (0.0, 0.0),
+    vertex_index: Optional[int] = None,
+    field: str = "v_h",
+    n_thumbnails: int = 6,
+    up_axis: Optional[np.ndarray] = None,
+    cmap: Optional[str] = None,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    symmetric: Optional[bool] = None,
+    timestamps: Optional[Sequence[float]] = None,
+    timestamp_label: str = r"$\phi$",
+    view_angles: Tuple[float, float] = (12.0, -55.0),
+    figsize: Optional[Tuple[float, float]] = None,
+    point_color: str = "red",
+    point_size: float = 60.0,
+    trace_color: str = "C0",
+    trace_linewidth: float = 1.6,
+    suptitle: Optional[str] = None,
+) -> Tuple[plt.Figure, List[plt.Axes]]:
+    """Phase thumbnails of the mesh + tracked-point displacement projections.
+
+    Layout::
+
+        [mesh] [mesh] [mesh] [mesh] [mesh] [mesh]    <- top row, no axes
+        [ radial ] [ meridional ] [ azimuthal ]      <- bottom row
+
+    The top row tiles ``n_thumbnails`` evenly-spaced phases of ``meshes``,
+    each coloured by ``field``, with the tracked vertex marked by a filled
+    dot. Thumbnails have no axis decorations so the mode shape reads cleanly.
+
+    The bottom row has three boxed panels showing the tracked vertex's
+    displacement at each frame projected onto a **local geometric spherical
+    basis** at the rest position (all three panels share a y-axis so
+    magnitudes are directly comparable):
+
+    * **radial** — :math:`\\xi \\cdot \\hat{r}`
+    * **meridional** — :math:`\\xi \\cdot \\hat{\\theta}`
+      (up-axis frame, pointing pole-to-equator)
+    * **azimuthal** — :math:`\\xi \\cdot \\hat{\\lambda}`
+      (eastward in the up-axis frame; we use :math:`\\hat{\\lambda}` rather
+      than :math:`\\hat{\\varphi}` to avoid clashing with the pulsation
+      phase, also conventionally written :math:`\\varphi`)
+
+    .. note::
+       These are **geometric** spherical-basis projections, not the VSH
+       spheroidal/toroidal decomposition. For a pure spheroidal mode both
+       :math:`\\hat{\\theta}` and :math:`\\hat{\\varphi}` components are
+       generally non-zero, and the same is true for a pure toroidal mode
+       (just rotated 90°). Separating spheroidal from toroidal requires
+       knowing the mode's :math:`(\\ell, m)` and projecting onto
+       :math:`\\nabla Y_{\\ell m}` and :math:`\\hat{r} \\times \\nabla Y_{\\ell m}`.
+
+    Parameters
+    ----------
+    meshes : sequence of MeshModel
+        One mesh per frame, pulsations already evaluated.
+    center_lonlat_deg, vertex_index :
+        Tracked-vertex selector — see
+        :func:`animate_pulsation_with_patch_zoom` for the semantics.
+    field : str
+        Scalar to colour the thumbnails. Accepts either spice's canonical
+        names (``v_r``, ``v_theta``, ``v_phi``, ``v_h``, ``speed``, ``v_los``)
+        or the descriptive aliases ``radial``, ``meridional`` / ``polar``,
+        ``azimuthal`` / ``longitudinal``, ``horizontal``, ``speed``,
+        ``line_of_sight`` / ``los``.
+    n_thumbnails : int
+        Number of mesh snapshots to tile along the top row (evenly sampled
+        from ``meshes``).
+    vmin, vmax, symmetric : optional
+        Colour-scale overrides. If left unset, the scale is auto-computed:
+        diverging fields get a symmetric range, magnitude fields anchor at 0.
+    timestamps : sequence of float, optional
+        Per-frame phase values. Used to label thumbnails and as the x-axis
+        of the bottom traces. Defaults to
+        ``np.linspace(0, 1, n, endpoint=False)``.
+    view_angles : (elev, azim)
+        Applied to every thumbnail.
+
+    Returns
+    -------
+    (fig, axes)
+        ``axes`` is ``[thumb_axes..., radial_ax, meridional_ax, azimuthal_ax]``.
+    """
+    n_frames = len(meshes)
+    if n_frames == 0:
+        raise ValueError("`meshes` must contain at least one mesh")
+    n_thumbnails = int(max(n_thumbnails, 1))
+
+    field = _resolve_field(field)
+
+    ref_mesh = meshes[0]
+    radius = float(ref_mesh.radius)
+    star_center = _mesh_center(ref_mesh)
+
+    # --- pick tracked vertex (matches animate_pulsation_with_patch_zoom) -----
+    up_resolved = _resolve_up_axis(ref_mesh, up_axis)
+    up_basis = _orthonormal_basis_from_axis(up_resolved)
+
+    d_vertices = _as_np(ref_mesh.d_vertices)
+    vert_norms = np.linalg.norm(d_vertices, axis=1)
+    surface_mask = vert_norms > 0.5 * radius
+    surface_idx_arr = np.nonzero(surface_mask)[0]
+    if surface_idx_arr.size == 0:
+        raise ValueError(
+            f"No surface vertices in meshes[0].d_vertices (radius={radius})."
+        )
+
+    if vertex_index is None:
+        local = d_vertices[surface_idx_arr] @ up_basis
+        local_unit = local / (vert_norms[surface_idx_arr, None] + 1e-12)
+        lats = np.arcsin(np.clip(local_unit[:, 2], -1.0, 1.0))
+        lons = np.arctan2(local_unit[:, 1], local_unit[:, 0])
+        lon_t = float(np.deg2rad(center_lonlat_deg[0]))
+        lat_t = float(np.deg2rad(center_lonlat_deg[1]))
+        gc = np.arccos(np.clip(
+            np.sin(lats) * np.sin(lat_t)
+            + np.cos(lats) * np.cos(lat_t) * np.cos(lons - lon_t),
+            -1.0, 1.0,
+        ))
+        chosen_idx = int(surface_idx_arr[np.argmin(gc)])
+    else:
+        chosen_idx = int(vertex_index)
+        if not (0 <= chosen_idx < d_vertices.shape[0]):
+            raise ValueError(
+                f"vertex_index={chosen_idx} out of range "
+                f"[0, {d_vertices.shape[0]})."
+            )
+        if vert_norms[chosen_idx] < 0.5 * radius:
+            raise ValueError(
+                f"vertex_index={chosen_idx} is an interior filler vertex."
+            )
+
+    rest_position = d_vertices[chosen_idx] + star_center
+    tracked_positions = np.stack(
+        [np.asarray(m.vertices[chosen_idx]) for m in meshes]
+    )
+
+    # --- local spherical basis (r, theta, lambda) at the rest position -------
+    # We use lambda for the azimuthal direction so axis labels never clash
+    # with the pulsation phase (typically written phi).
+    rel_rest = rest_position - star_center
+    r_len = float(np.linalg.norm(rel_rest))
+    local = up_basis.T @ rel_rest
+    theta = float(np.arccos(np.clip(local[2] / (r_len + 1e-12), -1.0, 1.0)))
+    lam = float(np.arctan2(local[1], local[0]))
+    sin_t, cos_t = np.sin(theta), np.cos(theta)
+    sin_l, cos_l = np.sin(lam), np.cos(lam)
+    r_hat_local = np.array([sin_t * cos_l, sin_t * sin_l, cos_t])
+    theta_hat_local = np.array([cos_t * cos_l, cos_t * sin_l, -sin_t])
+    lambda_hat_local = np.array([-sin_l, cos_l, 0.0])
+    r_hat_world = up_basis @ r_hat_local
+    theta_hat_world = up_basis @ theta_hat_local
+    lambda_hat_world = up_basis @ lambda_hat_local
+
+    disp = tracked_positions - rest_position
+    xi_r = disp @ r_hat_world
+    xi_theta = disp @ theta_hat_world
+    xi_lambda = disp @ lambda_hat_world
+
+    if timestamps is None:
+        timestamps_arr = np.linspace(0.0, 1.0, n_frames, endpoint=False)
+    else:
+        timestamps_arr = np.asarray(timestamps, dtype=float)
+
+    # --- per-frame colour values and shared scale ----------------------------
+    values_list: List[np.ndarray] = []
+    label = DEFAULT_FIELD_LABELS.get(field, field)
+    for m in meshes:
+        _, _, v, label = compute_pulsation_scalar(m, field=field, up_axis=up_axis)
+        values_list.append(v)
+
+    vmin, vmax, symmetric = _resolve_vmin_vmax(
+        values_list, field, vmin, vmax, symmetric
+    )
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    cmap_name = _cmap_for_field(field, cmap)
+    cmap_obj = mpl.colormaps[cmap_name]
+
+    # Evenly sample frames for the thumbnail row.
+    if n_thumbnails >= n_frames:
+        thumb_idx = np.arange(n_frames)
+    else:
+        thumb_idx = np.round(
+            np.linspace(0, n_frames - 1, n_thumbnails)
+        ).astype(int)
+    n_thumbs = int(thumb_idx.size)
+
+    # --- figure layout -------------------------------------------------------
+    if figsize is None:
+        figsize = (max(2.0 * n_thumbs, 10.0), 6.5)
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(
+        2, max(n_thumbs, 3),
+        height_ratios=(1.1, 1.0),
+        wspace=0.15, hspace=0.3,
+    )
+
+    thumb_axes: List[plt.Axes] = []
+    axes_lim = 1.15 * radius
+
+    for k, i in enumerate(thumb_idx):
+        ax = fig.add_subplot(gs[0, k], projection="3d")
+        triangles = _as_np(meshes[int(i)].mesh_elements)
+        face_colors = cmap_obj(norm(values_list[int(i)]))
+        poly = Poly3DCollection(triangles, facecolors=face_colors,
+                                edgecolors="none", linewidths=0, shade=False)
+        ax.add_collection3d(poly)
+
+        cur = tracked_positions[int(i)]
+        ax.scatter(*cur, s=point_size, color=point_color,
+                   edgecolor="black", linewidth=0.6,
+                   zorder=20, depthshade=False)
+
+        _set_axes_centered(ax, star_center, axes_lim)
+        ax.set_box_aspect((1, 1, 1))
+        ax.view_init(elev=view_angles[0], azim=view_angles[1])
+        ax.set_axis_off()
+        ax.set_title(
+            f"{timestamp_label} = {float(timestamps_arr[int(i)]):.2f}",
+            fontsize=10,
+        )
+        thumb_axes.append(ax)
+
+    # Bottom row: three boxed trace panels — split the bottom into 3 columns
+    # regardless of the thumbnail count. Shared y-axis so the three geometric
+    # components are directly comparable (dominant vs. negligible reads at a
+    # glance).
+    bottom_spec = gs[1, :].subgridspec(1, 3, wspace=0.35)
+    ax_radial = fig.add_subplot(bottom_spec[0, 0])
+    ax_theta = fig.add_subplot(bottom_spec[0, 1], sharey=ax_radial)
+    ax_lambda = fig.add_subplot(bottom_spec[0, 2], sharey=ax_radial)
+
+    for ax, values, title, ylabel in (
+        (ax_radial, xi_r, "radial",
+         r"$\xi\cdot\hat{r}\,[R_\star]$"),
+        (ax_theta, xi_theta, "meridional",
+         r"$\xi\cdot\hat{\theta}\,[R_\star]$"),
+        (ax_lambda, xi_lambda, "azimuthal",
+         r"$\xi\cdot\hat{\lambda}\,[R_\star]$"),
+    ):
+        ax.plot(timestamps_arr, values, color=trace_color,
+                linewidth=trace_linewidth)
+        ax.axhline(0.0, color="grey", linewidth=0.6, linestyle=":")
+        ax.set_xlabel(f"{timestamp_label}")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=10)
+        ax.grid(True, linestyle=":", linewidth=0.4, color="grey", alpha=0.6)
+
+    # Fix the shared y-range from the largest-magnitude component, with a
+    # small symmetric pad so the curves don't hit the frame edges.
+    all_values = np.concatenate([xi_r, xi_theta, xi_lambda])
+    if all_values.size and np.isfinite(all_values).any():
+        y_lo = float(np.nanmin(all_values))
+        y_hi = float(np.nanmax(all_values))
+        span = y_hi - y_lo
+        if span <= 0:
+            span = max(abs(y_hi), 1.0)
+        pad = 0.05 * span
+        ax_radial.set_ylim(y_lo - pad, y_hi + pad)
+
+    # Shared colourbar under the thumbnails.
+    mappable = mpl.cm.ScalarMappable(cmap=cmap_name, norm=norm)
+    mappable.set_array([])
+    cbar = fig.colorbar(mappable, ax=thumb_axes, orientation="horizontal",
+                        fraction=0.04, pad=0.06)
+    cbar.set_label(label)
+
+    if suptitle is not None:
+        fig.suptitle(suptitle)
+
+    return fig, thumb_axes + [ax_radial, ax_theta, ax_lambda]
