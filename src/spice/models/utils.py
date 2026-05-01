@@ -191,11 +191,11 @@ def spherical_harmonic(m, n, coordinates):
     polar_coordinates = mesh_polar_vertices(coordinates)
     m_array = (m * jnp.ones_like(polar_coordinates[:, 0])).astype(int)
     n_array = (n * jnp.ones_like(polar_coordinates[:, 1])).astype(int)
-    return jax.scipy.special.sph_harm(m_array,
-                                      n_array,
-                                      polar_coordinates[:, 0],  # azimuthal angle (phi)
-                                      polar_coordinates[:, 1],  # polar angle (theta)
-                                      n_max=10).real
+    return jax.scipy.special.sph_harm_y(n_array,
+                                        m_array,
+                                        polar_coordinates[:, 1],  # polar angle (theta)
+                                        polar_coordinates[:, 0],  # azimuthal angle (phi)
+                                        n_max=10).real
 
 
 @jax.jit

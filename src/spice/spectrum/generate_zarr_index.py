@@ -121,7 +121,12 @@ def _load_mu_from_zarr(group, params, param_names, store_path):
 
 def build_index_frame_from_zarr(store_path, include_mu=True):
     store_path = Path(store_path).expanduser().resolve()
-    group = resolve_grid_group(zarr.open_group(str(store_path), mode="r"), str(store_path))
+    root = zarr.open(str(store_path), mode="r")
+    if not hasattr(root, "array_keys"):
+        raise KeyError(
+            f"Expected a zarr group at '{store_path}', got a {type(root).__name__}."
+        )
+    group = resolve_grid_group(root, str(store_path))
 
     if "param_names" not in group:
         raise KeyError(f"Missing 'param_names' array in zarr store '{store_path}'.")
