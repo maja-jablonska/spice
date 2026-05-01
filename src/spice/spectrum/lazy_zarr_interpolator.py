@@ -5,6 +5,7 @@ import sys as _sys
 import warnings
 
 from spice.spectrum.parameters import parameter_helper
+from spice.spectrum.solar_parameters import SOLAR_PARAMETERS
 
 _jax_already_loaded = "jax" in _sys.modules
 _t0 = _time.perf_counter()
@@ -493,8 +494,9 @@ def combine_rows_jax(row_indices, weights, data):
 
 
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
-                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
+    def __init__(self, zarr_path, params=None, device=None, sparse=True,
+                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
+                 solar_parameters=None):
         """
         in_memory: True forces rowwise arrays (flux, continuum) onto the JAX device;
             False keeps them lazy on the zarr store (default); "auto" loads them
@@ -548,13 +550,14 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                     )
                 self.grid_index = GridIndex.from_dataframe(df, columns=params, device=device)
 
-            solar_arr = np.asarray(solar_parameters)
-            if solar_arr.shape[-1] != len(params):
-                raise ValueError(
-                    f"solar_parameters must have length {len(params)} to match params "
-                    f"{list(params)}; got {solar_arr.shape[-1]}"
+            if solar_parameters is not None:
+                warnings.warn(
+                    "solar_parameters is now derived from "
+                    "spice.spectrum.solar_parameters.SOLAR_PARAMETERS; the "
+                    "constructor argument is ignored.",
+                    DeprecationWarning,
+                    stacklevel=2,
                 )
-            self._solar_parameters = solar_arr
             self._stellar_parameter_names = params
             # Read min/max parameters from GridIndex
             self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].min() for param in params])
@@ -620,7 +623,10 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
     @property
     def solar_parameters(self):
-        return self._solar_parameters
+        return jnp.array(
+            [SOLAR_PARAMETERS.get(n, 0.0) for n in self._stellar_parameter_names],
+            dtype=_float_dtype(),
+        )
 
     def _accumulate_in_memory(self, rows, weights):
         # Peak memory is (K, L) per step instead of (B, K, L) — the gather +
@@ -748,20 +754,19 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
 
 class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
-                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
+    def __init__(self, zarr_path, params=None, device=None, sparse=True,
+                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
+                 solar_parameters=None):
         if 'mu' not in params:
             raise ValueError("mu must be included in params")
-        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse,
-                         in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes)
+        super().__init__(zarr_path, params, device, sparse=sparse,
+                         in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes,
+                         solar_parameters=solar_parameters)
         self._stellar_parameter_names = [p for p in params if p != 'mu']
         self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self._stellar_parameter_names])
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
 
-        mu_idx = params.index('mu')
-        self._solar_parameters = np.delete(np.asarray(self._solar_parameters), mu_idx)
-        
-    
+
 
     @override
     def to_parameters(self, parameters=None):
@@ -799,10 +804,12 @@ from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
 
 
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
-                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
-        super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse,
-                         in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes)
+    def __init__(self, zarr_path, params=None, device=None, sparse=True,
+                 in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
+                 solar_parameters=None):
+        super().__init__(zarr_path, params, device, sparse=sparse,
+                         in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes,
+                         solar_parameters=solar_parameters)
 
     @override
     def intensity(self, log_wavelengths, mu, parameters, ld_law="linear", ld_coeffs=None):
