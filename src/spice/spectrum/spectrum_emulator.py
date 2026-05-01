@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
+from spice.spectrum.solar_parameters import SOLAR_PARAMETERS
 
 
 T = TypeVar("T")
@@ -15,6 +16,10 @@ class SpectrumEmulator(Generic[T]):
             T:
         """
         raise NotImplementedError
+    
+    @property
+    def solar_parameters(self) -> T:
+        return self.to_parameters(SOLAR_PARAMETERS)
     
     @abstractmethod
     def to_parameters(self, parameters: T) -> T:

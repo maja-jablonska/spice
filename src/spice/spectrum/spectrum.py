@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax import lax
 from jax.typing import ArrayLike
 from jax.scipy.integrate import trapezoid
-from typing import Callable
+from typing import Callable, Optional
 from spice.models import MeshModel
 import math
 from functools import partial
@@ -17,10 +17,14 @@ C: float = 299792.458  # km/s
 SOL_RAD_CM = 69570000000.0
 
 # Apply Doppler shift to wavelengths (in Angstroms)
-# vrad is in km/s, C is speed of light in km/s
-apply_vrad = lambda x, vrad: x * (vrad / C + 1)
+# vrad is in km/s, C is speed of light in km/s.
+# Cast the velocity-derived term back to the wavelength dtype so that callers
+# who mix float32 wavelengths with float64 mesh state (e.g. when
+# ``jax_enable_x64`` is on) don't end up with branches of ``lax.cond`` that
+# disagree on dtype.
+apply_vrad = lambda x, vrad: x * (1.0 + (vrad / C).astype(x.dtype))
 # Apply Doppler shift to log10 of wavelengths (log10 of Angstroms)
-apply_vrad_log = lambda x, vrad: x + jnp.log10(vrad / C + 1)
+apply_vrad_log = lambda x, vrad: x + jnp.log10(vrad / C + 1).astype(x.dtype)
 # Vectorized version that applies Doppler shift to all wavelengths for each velocity
 v_apply_vrad = jax.jit(jax.vmap(apply_vrad, in_axes=(None, 0)))
 
@@ -183,13 +187,35 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
 
 # TODO: think: change to simulate_obseved_monochromatic_flux?
 @partial(jax.jit, static_argnums=(0, 4, 5))
+def _simulate_observed_flux_impl(intensity_fn,
+                                 m: MeshModel,
+                                 log_wavelengths,
+                                 distance: float,
+                                 chunk_size: int,
+                                 wavelengths_chunk_size: int,
+                                 disable_doppler_shift: bool):
+    return jnp.nan_to_num(__spectrum_flash_sum_with_padding(intensity_fn,
+                                               log_wavelengths,
+                                               _adjust_dim(m.visible_cast_areas, chunk_size),
+                                               _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
+                                               _adjust_dim(m.los_velocities, chunk_size),
+                                               _adjust_dim(m.parameters, chunk_size),
+                                               chunk_size,
+                                               wavelengths_chunk_size,
+                                               disable_doppler_shift) * jnp.power(m.radius,
+                                                                                  2) * 5.08326693599739e-16 / (
+                                      distance ** 2))[:len(log_wavelengths), :]
+
+
 def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"], float, Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                            m: MeshModel,
                            log_wavelengths: Float[Array, "n_wavelengths"],
                            distance: float = 10.0,
                            chunk_size: int = DEFAULT_CHUNK_SIZE,
                            wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
-                           disable_doppler_shift: bool = False) -> Float[Array, "n_wavelengths 2"]:
+                           disable_doppler_shift: bool = False,
+                           ld_law: Optional[str] = None,
+                           ld_coeffs: Optional[ArrayLike] = None) -> Float[Array, "n_wavelengths 2"]:
     """Simulate the observed flux from a mesh model.
 
     This function calculates the observed flux from a mesh model by combining the intensity function,
@@ -204,24 +230,32 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
         chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
         wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
         disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
+        ld_law (str, optional): Limb-darkening law name passed as a kwarg to ``intensity_fn``
+            (e.g. ``"linear"``, ``"quadratic"``, ``"nonlinear_4"``). Only effective when
+            ``intensity_fn`` accepts an ``ld_law`` keyword (e.g. the flux-emulator-based
+            implementations in ``spice.spectrum``). Defaults to None (use the function's own default).
+        ld_coeffs (ArrayLike, optional): Coefficients for the chosen limb-darkening law,
+            passed as the ``ld_coeffs`` kwarg to ``intensity_fn``. Defaults to None.
 
     Returns:
         Float[Array, "n_wavelengths 2"]: Array containing the computed flux at each wavelength point.
         The second dimension contains [flux, flux_error].
         Units are erg/s/cm^2/Å.
     """
-    
-    return jnp.nan_to_num(__spectrum_flash_sum_with_padding(intensity_fn,
-                                               log_wavelengths,
-                                               _adjust_dim(m.visible_cast_areas, chunk_size),
-                                               _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
-                                               _adjust_dim(m.los_velocities, chunk_size),
-                                               _adjust_dim(m.parameters, chunk_size),
-                                               chunk_size,
-                                               wavelengths_chunk_size,
-                                               disable_doppler_shift) * jnp.power(m.radius,
-                                                                                  2) * 5.08326693599739e-16 / (
-                                      distance ** 2))[:len(log_wavelengths), :]
+    if ld_law is not None or ld_coeffs is not None:
+        # ``LdBoundIntensity`` hashes by (intensity_fn, ld_law, coeffs values)
+        # so repeat calls with the same LD config hit the existing jit cache
+        # entry instead of recompiling every time.
+        from spice.spectrum.flux_limb_darkening import LdBoundIntensity
+        intensity_fn = LdBoundIntensity(intensity_fn, ld_law, ld_coeffs)
+
+    return _simulate_observed_flux_impl(intensity_fn,
+                                        m,
+                                        log_wavelengths,
+                                        distance,
+                                        chunk_size,
+                                        wavelengths_chunk_size,
+                                        disable_doppler_shift)
 
 
 @partial(jax.jit, static_argnums=(0, 5))

@@ -4,6 +4,8 @@ import time as _time
 import sys as _sys
 import warnings
 
+from spice.spectrum.parameters import parameter_helper
+
 _jax_already_loaded = "jax" in _sys.modules
 _t0 = _time.perf_counter()
 import jax
@@ -482,40 +484,6 @@ def combine_rows_jax(row_indices, weights, data):
     return combined
 
 
-def _parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> ArrayLike:
-    """Convert passed values to the accepted parameters format
-
-    Args:
-        parameter_values (Dict[str, Any], optional): parameter values in the format of {'parameter_name': value}. Unset parameters will be set to solar values.
-        relative (bool, optional): if True, the values are treated as relative to the solar values for the abundaces 
-
-    Returns:
-        ArrayLike:
-    """
-    
-    if not parameter_values:
-        return interpolator.solar_parameters
-
-    # Initialize parameters with solar values
-    if isinstance(parameter_values, dict):
-        parameters = jnp.array(interpolator.solar_parameters)
-        # Convert parameter names to indices for direct access
-        parameter_indices = {label: i for i, label in enumerate(interpolator.stellar_parameter_names)}
-
-        for label, value in parameter_values.items():
-            idx = parameter_indices[label]
-            parameters = parameters.at[idx].set(value)
-    else:
-        parameters = jnp.array(parameter_values)
-    
-    if not (jnp.all(parameters >= interpolator.min_stellar_parameters) and jnp.all(parameters <= interpolator.max_stellar_parameters)):
-        warnings.warn("Possible exceeding parameter bonds - extrapolating.")
-        
-    return parameters
-
-
-
-
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
     def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
@@ -726,7 +694,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
     def to_parameters(self, parameters=None):
         if parameters is None:
             return self.solar_parameters
-        return _parameter_helper(self, parameters)
+        return parameter_helper(self, parameters)
         
     def get_weighted_batch(self, queries):
         """
@@ -782,7 +750,7 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
             return self.solar_parameters
         if isinstance(parameters, dict):
             parameters = {k: v for k, v in parameters.items() if k != 'mu'}
-        return _parameter_helper(self, parameters)
+        return parameter_helper(self, parameters)
     
     @override
     def parameter_names(self):
@@ -808,115 +776,36 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
 
 
 
-def _linear(mu, coeffs):
-    u = coeffs[0]
-    return 1.0 - u * (1.0 - mu)
-
-
-def _quadratic(mu, coeffs):
-    u1, u2 = coeffs[0], coeffs[1]
-    return 1.0 - (
-        u1 * (1.0 - mu) +
-        u2 * (1.0 - mu) ** 2
-    )
-
-
-def _nonlinear_4(mu, coeffs):
-    c1, c2, c3, c4 = coeffs
-    return 1.0 - (
-        c1 * (1 - jnp.sqrt(mu)) +
-        c2 * (1 - mu) +
-        c3 * (1 - mu ** 1.5) +
-        c4 * (1 - mu ** 2)
-    )
-
-
-# Flux-conservation normalisation: the factor 2π·∫₀¹ f(μ)·μ dμ that maps a
-# disc-integrated flux F to the specific intensity at disc centre via
-# I(μ) = F · f(μ) / norm. Derived analytically per law from the polynomial
-# (or √μ for nonlinear_4) integrals.
-def _linear_norm(coeffs):
-    # f(μ)=1−u(1−μ); ∫₀¹ μ·f dμ = (3−u)/6 → norm = π(3−u)/3
-    u = coeffs[0]
-    return jnp.pi * (3.0 - u) / 3.0
-
-
-def _quadratic_norm(coeffs):
-    # f(μ)=1−u1(1−μ)−u2(1−μ)²; ∫₀¹ μ·f dμ = (6−2u1−u2)/12
-    u1, u2 = coeffs[0], coeffs[1]
-    return jnp.pi * (6.0 - 2.0 * u1 - u2) / 6.0
-
-
-def _nonlinear_4_norm(coeffs):
-    # f(μ)=1−c1(1−√μ)−c2(1−μ)−c3(1−μ^1.5)−c4(1−μ²);
-    # ∫₀¹ μ·f dμ = 1/2 − c1/10 − c2/6 − 3c3/14 − c4/4
-    c1, c2, c3, c4 = coeffs
-    return 2.0 * jnp.pi * (
-        0.5 - c1 / 10.0 - c2 / 6.0 - 3.0 * c3 / 14.0 - c4 / 4.0
-    )
-
-
-# pack functions into tuple (static structure)
-_LD_FUNCS = (_linear, _quadratic, _nonlinear_4)
-_LD_NORMS = (_linear_norm, _quadratic_norm, _nonlinear_4_norm)
-LAW_IDS = {
-    'linear': 0,
-    'quadratic': 1,
-    'nonlinear_4': 2,
-}
-
-
-def limb_darkening(mu, law_id, coeffs):
-    """
-    mu: [..., n_cells]
-    law_id: int (0=linear, 1=quadratic, 2=nonlinear_4)
-    coeffs: array-like (max size, unused entries ignored)
-    """
-    return lax.switch(law_id, _LD_FUNCS, mu, coeffs)
-
-
-def limb_darkening_norm(law_id, coeffs):
-    """Flux-conservation factor 2π·∫₀¹ f(μ)·μ dμ for the selected law."""
-    return lax.switch(law_id, _LD_NORMS, coeffs)
-
-
-def get_limb_darkening_law_id(law: str) -> int:
-    return LAW_IDS[law]
+from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
 
 
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
-    def __init__(self, zarr_path, solar_parameters, params=None, device=None, limb_darkening_law=None, limb_darkening_coeffs=None, sparse=True,
+    def __init__(self, zarr_path, solar_parameters, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3):
         super().__init__(zarr_path, solar_parameters, params, device, sparse=sparse,
                          in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes)
-        if limb_darkening_law is None:
-            self.limb_darkening_law = get_limb_darkening_law_id('linear')
-        else:
-            self.limb_darkening_law = get_limb_darkening_law_id(limb_darkening_law)
-        if limb_darkening_coeffs is None:
-            self.limb_darkening_coeffs = jnp.array([0.6, 0.6, 0., 0.])
-        else:
-            coeffs = jnp.atleast_1d(limb_darkening_coeffs)
-            # Pad to length 4 with zeros
-            if coeffs.shape[0] < 4:
-                coeffs = jnp.pad(coeffs, (0, 4 - coeffs.shape[0]), constant_values=0.0)
-            self.limb_darkening_coeffs = coeffs
-        
-    def apply_limb_darkening(self, flux, mu):
-        # I(μ) = F · f(μ) / (2π · ∫₀¹ f(μ′)·μ′ dμ′) — preserves the
-        # disc-integrated flux when summed over a hemisphere.
-        f = limb_darkening(mu, self.limb_darkening_law, self.limb_darkening_coeffs)
-        norm = limb_darkening_norm(self.limb_darkening_law, self.limb_darkening_coeffs)
-        return flux * f / norm
-    
+
     @override
-    def intensity(self, log_wavelengths, mu, parameters):
+    def intensity(self, log_wavelengths, mu, parameters, ld_law="linear", ld_coeffs=None):
+        """Specific intensity at angle ``mu`` derived from the disc-integrated
+        flux via flux-conservation limb darkening.
+
+        Args:
+            log_wavelengths: log10(Angstrom) sample points.
+            mu: cosine of the angle from disc centre.
+            parameters: stellar parameters in training order.
+            ld_law: name of the limb-darkening law (``linear``, ``quadratic``,
+                ``nonlinear_4``).
+            ld_coeffs: coefficients for the chosen law. Defaults to
+                ``[0.6, 0.6, 0, 0]`` (typical solar-type linear LD).
+        """
         weighted_batch = self.get_weighted_batch(jnp.atleast_2d(parameters))
         flux, continuum = self._resample_weighted_batch(log_wavelengths, weighted_batch)
         mu_value = jnp.squeeze(mu)
-        return jnp.stack([self.apply_limb_darkening(flux[0], mu_value),
-                          self.apply_limb_darkening(continuum[0], mu_value)], axis=-1)
-    
+        return jnp.stack([apply_flux_limb_darkening(flux[0], mu_value, ld_law, ld_coeffs),
+                          apply_flux_limb_darkening(continuum[0], mu_value, ld_law, ld_coeffs)],
+                         axis=-1)
+
     @override
     def flux(self, log_wavelengths, parameters, mus_number=20):
         weighted_batch = self.get_weighted_batch(jnp.atleast_2d(parameters))

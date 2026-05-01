@@ -19,7 +19,9 @@ dependencies = [
     "flax>=0.10.4",
     "joblib~=1.3.2",
     "transformer-payne~=0.9",
-    "h5py~=3.13.0"
+    "h5py~=3.13.0",
+    "astropy>=5.0",
+    "tqdm>=4.65"
 ]
 
 [project.optional-dependencies]
