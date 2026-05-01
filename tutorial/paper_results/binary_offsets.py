@@ -1,8 +1,16 @@
-import phoebe
+try:
+    import phoebe
+    from phoebe.parameters.dataset import _mesh_columns
+except ImportError as exc:
+    raise ValueError(
+        "PHOEBE is required for this script but is not installed. "
+        "Install via the optional extra declared in pyproject.toml: "
+        '`pip install "stellar-spice[phoebe]"`.'
+    ) from exc
+
 import numpy as np
 from spice.spectrum import simulate_observed_flux
 from transformer_payne import Blackbody
-from phoebe.parameters.dataset import _mesh_columns
 from spice.models.binary import PhoebeBinary
 from spice.models.phoebe_utils import PhoebeConfig
 from spice.spectrum import AB_passband_luminosity

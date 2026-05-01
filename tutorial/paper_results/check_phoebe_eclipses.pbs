@@ -14,6 +14,15 @@
 #
 # Submit with:    qsub tutorial/paper_results/check_phoebe_eclipses.pbs
 # Resume after a timeout: just resubmit — already-finished tasks are skipped.
+#
+# Error policy (matches the Python script):
+#   * PHOEBE "model not converged" failures are skipped per-task; the grid
+#     keeps running and the job exits 0 if every other task succeeded.
+#   * Any other exception aborts the run — the worker pool is terminated,
+#     python exits non-zero, and `set -euo pipefail` below propagates that
+#     to PBS so the job is marked failed (and `#PBS -m abe` emails you).
+#     Already-finished pickles in OUTPUT_DIR are preserved, so resubmitting
+#     after a fix resumes from where it stopped.
 # =============================================================================
 
 #PBS -P <PROJECT>
@@ -116,9 +125,17 @@ echo "==============================================================="
 # --n-workers = PBS_NCPUS gives one PHOEBE bundle per CPU. Drop to ~PBS_NCPUS/2
 # if a worker runs out of memory (each worker holds a PHOEBE bundle plus JAX
 # caches; 4 GB/worker is a safe headroom estimate on the normal queue).
-python3 "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
+#
+# `set -e` above means a non-zero exit from python (i.e. a non-PHOEBE-convergence
+# error inside any worker) will skip the trailing "Done." line and fail the job.
+if python3 "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
     --grid-config "${GRID_CSV}" \
     --n-workers   "${PBS_NCPUS}" \
-    --output_path "${OUTPUT_DIR}"
-
-echo "Done. Outputs in ${OUTPUT_DIR}"
+    --output_path "${OUTPUT_DIR}"; then
+    echo "Done. Outputs in ${OUTPUT_DIR}"
+else
+    rc=$?
+    echo "ABORTED (rc=${rc}). Partial outputs preserved in ${OUTPUT_DIR}." >&2
+    echo "Resubmit after the fix — already-completed pickles will be skipped." >&2
+    exit "${rc}"
+fi
