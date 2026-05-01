@@ -497,11 +497,15 @@ def combine_rows_jax(row_indices, weights, data):
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
-                 solar_parameters=None):
+                 solar_parameters=None, accumulate_chunk_size=64):
         """
         in_memory: True forces rowwise arrays (flux, continuum) onto the JAX device;
             False keeps them lazy on the zarr store (default); "auto" loads them
             eagerly only if their combined size is <= in_memory_threshold_bytes.
+        accumulate_chunk_size: number of queries processed in parallel per chunk
+            in the in-memory accumulation path. Higher values better utilize GPU
+            but increase peak memory by ~chunk_size * 2^d * L * dtype bytes.
+            Set to None for the legacy fully-sequential ``lax.map``.
         """
         from spice.utils import log
 
@@ -521,6 +525,14 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
         if in_memory not in (True, False, "auto"):
             raise ValueError(f"in_memory must be True, False, or 'auto'; got {in_memory!r}")
+
+        if accumulate_chunk_size is not None and (
+            not isinstance(accumulate_chunk_size, int) or accumulate_chunk_size <= 0
+        ):
+            raise ValueError(
+                f"accumulate_chunk_size must be a positive int or None; got {accumulate_chunk_size!r}"
+            )
+        self._accumulate_chunk_size = accumulate_chunk_size
 
         device = device or _default_device()
         # A tqdm bar runs inside this block, so don't try to substitute the
@@ -637,9 +649,8 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
         )
 
     def _accumulate_in_memory(self, rows, weights):
-        # Peak memory is (K, L) per step instead of (B, K, L) — the gather +
-        # reduce is mapped over the batch axis with lax.map. For B=1000, K=16,
-        # L=100k that's ~6 GB → ~6 MB.
+        # batch_size on lax.map vmaps chunk_size queries in parallel and scans
+        # over chunks. Peak intermediate is chunk_size * K * L * dtype bytes.
         flux_data = self.rowwise_data['flux']
         cont_data = self.rowwise_data['continuum']
         out_dtype = _float_dtype()
@@ -656,7 +667,11 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             cont_acc = jnp.sum(cont_sel * w_col, axis=0).astype(out_dtype)
             return flux_acc, cont_acc
 
-        return jax.lax.map(per_query, (rows, weights))
+        chunk_size = self._accumulate_chunk_size
+        if chunk_size is None:
+            return jax.lax.map(per_query, (rows, weights))
+        effective_chunk = min(chunk_size, rows.shape[0]) if rows.shape[0] > 0 else 1
+        return jax.lax.map(per_query, (rows, weights), batch_size=effective_chunk)
 
     def _accumulate_direct(self, rows, weights):
         L = self.static_data['wavelength'].shape[0]
@@ -764,12 +779,13 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
-                 solar_parameters=None):
+                 solar_parameters=None, accumulate_chunk_size=64):
         if 'mu' not in params:
             raise ValueError("mu must be included in params")
         super().__init__(zarr_path, params, device, sparse=sparse,
                          in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes,
-                         solar_parameters=solar_parameters)
+                         solar_parameters=solar_parameters,
+                         accumulate_chunk_size=accumulate_chunk_size)
         self._stellar_parameter_names = [p for p in params if p != 'mu']
         self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self._stellar_parameter_names])
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
@@ -814,10 +830,11 @@ from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
-                 solar_parameters=None):
+                 solar_parameters=None, accumulate_chunk_size=64):
         super().__init__(zarr_path, params, device, sparse=sparse,
                          in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes,
-                         solar_parameters=solar_parameters)
+                         solar_parameters=solar_parameters,
+                         accumulate_chunk_size=accumulate_chunk_size)
 
     @override
     def intensity(self, log_wavelengths, mu, parameters, ld_law="linear", ld_coeffs=None):

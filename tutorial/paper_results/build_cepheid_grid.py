@@ -1,15 +1,18 @@
 #!/usr/bin/env python
-"""Build a grid of Cepheid bundles + spectra following ``cepheid_build.ipynb``.
+"""Build a grid of Cepheid bundles + spectra following ``cepheid_build_vmicro.ipynb``.
 
 For each entry in the configured Cepheid grid this script:
 
-  1. Builds an :class:`IntensityLazyZarrInterpolator` plus a fan of
-     :class:`FluxLazyZarrInterpolator` instances across linear-LD coefficients
-     (the same set the analysis notebook expects).
-  2. Constructs a mesh bundle per emulator, using the Cepheid's stellar
-     parameters and a Fourier-decomposed radius pulsation template.
-  3. Pushes phase-dependent Teff and logg into every snapshot.
-  4. Synthesises 5000-5020 Å spectra for each variant.
+  1. Builds one :class:`IntensityLazyZarrInterpolator` and one
+     :class:`FluxLazyZarrInterpolator`. LD coefficients are bound per call at
+     synthesis time, so we don't rebuild emulators or bundles per coefficient.
+  2. Constructs two mesh bundles per Cepheid -- ``intensity`` (per-face mu) and
+     ``flux_no_ld`` -- using the Cepheid's stellar parameters and a Fourier-
+     decomposed radius pulsation template.
+  3. Pushes phase-dependent Teff, logg and vmicro into every snapshot
+     (vmicro from the Luck 2018 delta Cep fit; Teff/logg from SPIPS3).
+  4. Synthesises 5000-5020 Å spectra for ``with_ld`` plus a 20-point linear
+     LD coefficient sweep, all reusing the ``flux_no_ld`` bundle.
   5. Pickles ``<name>_bundles.pkl`` and ``<name>_spectra.pkl`` to ``--out-dir``.
 
 The default grid spans the classical-Cepheid period range (3-30 d) using the
@@ -17,9 +20,9 @@ Bono et al. 2001 PR relation for radius and mass, and the Delta-Cep SPIPS3
 template for the pulsation shape and phase-resolved Teff/logg trends. Override
 or extend the grid via ``--config CSV`` (see :func:`load_grid_csv`).
 
-Synthesis is the slow step (~2 min per variant on CPU); a full grid is several
-hours of compute. The script is restartable: existing per-Cepheid pickles in
-``--out-dir`` are skipped unless ``--force`` is given.
+Synthesis is the slow step (~1-2 min per variant on CPU; 21 variants, so
+~30-45 min per Cepheid). The script is restartable: existing per-Cepheid
+pickles in ``--out-dir`` are skipped unless ``--force`` is given.
 """
 from __future__ import annotations
 
@@ -64,8 +67,9 @@ from cepheid_bundles import (  # noqa: E402  (sys.path patched above)
 
 
 # --- defaults that match the build notebook --------------------------------
-LINE_INTERP_PATH = "/Users/mjablons/code/spice/data/fe_nlte_intensity.zarr"
-FLUX_INTERP_PATH = "/Users/mjablons/code/spice/data/fe_nlte_flux.zarr"
+# Gadi paths used by the cepheid_build_vmicro.ipynb notebook.
+LINE_INTERP_PATH = "/g/data/y89/mj8805/fe_regular_nlte_big.zarr"
+FLUX_INTERP_PATH = "/g/data/y89/mj8805/fe_nlte_flux_big.zarr/regular_synthesized_spectra.zarr"
 
 INTENSITY_PARAMS = ["teff", "logg", "[Fe/H]", "vmicro", "[a/Fe]",
                     "[C/Fe]", "[N/Fe]", "[O/Fe]", "[r/Fe]", "[s/Fe]", "mu"]
@@ -75,15 +79,14 @@ FLUX_PARAMS      = ["teff", "logg", "[Fe/H]", "vmicro", "[a/Fe]",
 SOLAR_INTENSITY = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 SOLAR_FLUX      = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-# 100-point LD sweep across [0, 1]. Spacing is 1/99 ≈ 0.0101, so we need at
-# least 4 decimals in the formatted key to keep every coefficient distinct —
-# fewer decimals would silently overwrite buckets in the bundles/spectra dicts.
-LD_COEFFS = np.linspace(0.0, 1.0, 100)
-LD_FMT = ".4f"
+# 20-point LD sweep across [0, 1]; spacing is 1/19 ≈ 0.0526, so 3 decimals in
+# the formatted key keep every coefficient distinct.
+LD_COEFFS = np.linspace(0.0, 1.0, 20)
+LD_FMT = ".3f"
 DEFAULT_PULSATION_FITS = HERE / "delta_cep.fits"
 
 WL_MIN, WL_MAX = 5000.0, 5020.0
-WL_STEPS = 5000
+WL_STEPS = 2000
 N_PHASES = 100
 N_FOURIER_TERMS = 8
 
@@ -103,12 +106,16 @@ class CepheidConfig:
     logg: Optional[float] = None                   # phase-0 logg;     None → take from fits
     fe_h: float = 0.06
     vmicro: float = 3.5
-    a_fe: float = 0.05
-    c_fe: float = -0.25
-    n_fe: float = 0.40
+    # Abundances default to solar (0). The vmicro notebook only sets teff,
+    # logg, [Fe/H], vmicro on stellar_params_dict; everything else falls back
+    # to the emulator's solar_parameters via parameter_helper. Override here
+    # (or in the CSV) for non-solar abundance studies.
+    a_fe: float = 0.0
+    c_fe: float = 0.0
+    n_fe: float = 0.0
     o_fe: float = 0.0
     r_fe: float = 0.0
-    s_fe: float = 0.15
+    s_fe: float = 0.0
     pulsation_fits: Path = field(default_factory=lambda: DEFAULT_PULSATION_FITS)
 
     def stellar_params_dict(self, teff_default: float, logg_default: float) -> dict:
@@ -257,22 +264,22 @@ def make_phase_modifiers(pulsation_data: Table):
 # Emulator setup (built once, shared across all Cepheids)
 # ---------------------------------------------------------------------------
 def build_emulators(intensity_path: str, flux_path: str):
+    """Build one intensity and one flux emulator, matching the notebook.
+
+    LD coefficients are passed per call to ``simulate_observed_flux`` at
+    synthesis time, so we don't need a separate flux emulator per coefficient.
+    """
     print(f"Loading intensity grid: {intensity_path}")
     intensity = IntensityLazyZarrInterpolator(
         intensity_path, params=INTENSITY_PARAMS, solar_parameters=SOLAR_INTENSITY,
         sparse=True, in_memory=False,
     )
-    print(f"Loading flux grid:      {flux_path} (×{len(LD_COEFFS)} LD variants)")
-    flux_linear = {
-        c: FluxLazyZarrInterpolator(
-            flux_path, params=FLUX_PARAMS, solar_parameters=SOLAR_FLUX,
-            sparse=True, in_memory=False,
-            limb_darkening_law="linear",
-            limb_darkening_coeffs=jnp.array([float(c), 0.0, 0.0, 0.0]),
-        )
-        for c in LD_COEFFS
-    }
-    return intensity, flux_linear
+    print(f"Loading flux grid:      {flux_path}")
+    flux = FluxLazyZarrInterpolator(
+        flux_path, params=FLUX_PARAMS, solar_parameters=SOLAR_FLUX,
+        sparse=True, in_memory=False,
+    )
+    return intensity, flux
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +288,7 @@ def build_emulators(intensity_path: str, flux_path: str):
 def build_one(
     config: CepheidConfig,
     intensity_emulator,
-    flux_linear_emulators: dict,
+    flux_emulator,
     out_dir: Path,
     *,
     skip_spectra: bool = False,
@@ -309,17 +316,18 @@ def build_one(
 
     timeseries = jnp.linspace(0, config.period, N_PHASES)
 
-    # 1) Bundle build per emulator variant
+    # 1) Build only two bundles — `intensity` (with mu) and `flux_no_ld`. The
+    # 20-point linear-LD sweep happens at synthesis time below by passing
+    # ld_coeffs to simulate_observed_flux, which avoids rebuilding the bundle
+    # per coefficient.
     bundle_configs = {
-        "intensity": (intensity_emulator,
-                      intensity_emulator.to_parameters(sp),
-                      "stellar_parameter_names"),
+        "intensity":  (intensity_emulator,
+                       intensity_emulator.to_parameters(sp),
+                       "stellar_parameter_names"),
+        "flux_no_ld": (flux_emulator,
+                       flux_emulator.to_parameters(sp),
+                       "stellar_parameter_names"),
     }
-    for c in LD_COEFFS:
-        emul = flux_linear_emulators[c]
-        bundle_configs[f"flux_linear_{c:{LD_FMT}}"] = (
-            emul, emul.to_parameters(sp), "stellar_parameter_names",
-        )
 
     bundles: dict[str, CepheidBundle] = {}
     for name, (emul, params, attr) in bundle_configs.items():
@@ -349,22 +357,33 @@ def build_one(
         print("  (skip-spectra: leaving spectra unbuilt)")
         return
 
-    # 3) Spectrum synthesis (slow)
+    # 3) Spectrum synthesis. One `with_ld` variant on the intensity bundle
+    # plus N linear-LD variants that all reuse `flux_no_ld` and bind a
+    # different ld_coeffs at call time.
     line_center = 0.5 * (WL_MIN + WL_MAX)
     line_width = 0.5 * (WL_MAX - WL_MIN)
 
-    spectrum_variants = [("with_ld", intensity_emulator.intensity, bundles["intensity"])]
+    spectrum_variants = [(
+        "with_ld",
+        intensity_emulator.intensity,
+        bundles["intensity"],
+        None,
+    )]
     for c in LD_COEFFS:
-        emul = flux_linear_emulators[c]
-        nm = f"flux_linear_{c:{LD_FMT}}"
-        spectrum_variants.append((nm, emul.intensity, bundles[nm]))
+        spectrum_variants.append((
+            f"flux_linear_{c:{LD_FMT}}",
+            flux_emulator.intensity,
+            bundles["flux_no_ld"],
+            jnp.array([float(c), 0.0, 0.0, 0.0]),
+        ))
 
     spectra: dict[str, dict[float, LineSpectra]] = {}
-    for name, intensity_fn, bundle in spectrum_variants:
+    for name, intensity_fn, bundle, ld_coeffs in spectrum_variants:
         t0 = time.perf_counter()
         spectra[name] = simulate_line_spectra(
             bundle.snapshots, bundle.snapshots[0], intensity_fn, (line_center,),
             line_width=line_width, steps=WL_STEPS,
+            ld_coeffs=ld_coeffs,
         )
         print(f"    {name:>20s}: {time.perf_counter() - t0:6.1f} s")
 
@@ -429,7 +448,7 @@ def main() -> int:
         return 0
 
     print(f"Will build {len(pending)} Cepheid(s) → {args.out_dir.resolve()}")
-    intensity_emulator, flux_linear_emulators = build_emulators(
+    intensity_emulator, flux_emulator = build_emulators(
         args.intensity_zarr, args.flux_zarr,
     )
 
@@ -439,7 +458,7 @@ def main() -> int:
         star_t0 = time.perf_counter()
         try:
             build_one(
-                cfg, intensity_emulator, flux_linear_emulators,
+                cfg, intensity_emulator, flux_emulator,
                 args.out_dir,
                 skip_spectra=args.skip_spectra,
                 n_mesh=args.n_mesh,
