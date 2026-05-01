@@ -38,6 +38,14 @@ from spice.spectrum.spectrum_emulator import SpectrumEmulator
 def _default_device():
     return jax.devices()[0]
 
+
+def _float_dtype():
+    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+
+
+def _np_float_dtype():
+    return np.float64 if jax.config.jax_enable_x64 else np.float32
+
 @jax.jit
 def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
     n = jnp.int32(values.shape[0])
@@ -546,7 +554,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                     f"solar_parameters must have length {len(params)} to match params "
                     f"{list(params)}; got {solar_arr.shape[-1]}"
                 )
-            self.solar_parameters = solar_arr
+            self._solar_parameters = solar_arr
             self._stellar_parameter_names = params
             # Read min/max parameters from GridIndex
             self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(param)].min() for param in params])
@@ -605,31 +613,42 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
     @property
     def stellar_parameter_names(self):
         return self._stellar_parameter_names
-    
+
     @property
     def parameter_names(self):
         return self._stellar_parameter_names
 
+    @property
+    def solar_parameters(self):
+        return self._solar_parameters
+
     def _accumulate_in_memory(self, rows, weights):
+        # Peak memory is (K, L) per step instead of (B, K, L) — the gather +
+        # reduce is mapped over the batch axis with lax.map. For B=1000, K=16,
+        # L=100k that's ~6 GB → ~6 MB.
         flux_data = self.rowwise_data['flux']
         cont_data = self.rowwise_data['continuum']
+        out_dtype = _float_dtype()
 
-        valid = rows >= 0
-        safe_rows = jnp.where(valid, rows, 0)
-        safe_weights = jnp.where(valid, weights, 0.0).astype(flux_data.dtype)
+        def per_query(rw):
+            r, w = rw
+            valid = r >= 0
+            safe_rows = jnp.where(valid, r, 0)
+            safe_weights = jnp.where(valid, w, 0.0).astype(flux_data.dtype)
+            w_col = safe_weights[:, None]
+            flux_sel = flux_data[safe_rows]
+            cont_sel = cont_data[safe_rows]
+            flux_acc = jnp.sum(flux_sel * w_col, axis=0).astype(out_dtype)
+            cont_acc = jnp.sum(cont_sel * w_col, axis=0).astype(out_dtype)
+            return flux_acc, cont_acc
 
-        flux_sel = flux_data[safe_rows]
-        cont_sel = cont_data[safe_rows]
-
-        w = safe_weights[..., None]
-        flux_out = jnp.sum(flux_sel * w, axis=1)
-        cont_out = jnp.sum(cont_sel * w, axis=1)
-
-        return flux_out, cont_out
+        return jax.lax.map(per_query, (rows, weights))
 
     def _accumulate_direct(self, rows, weights):
         L = self.static_data['wavelength'].shape[0]
         rowwise_data = self.rowwise_data
+        np_dtype = _np_float_dtype()
+        jax_dtype = _float_dtype()
 
         def _host_fn(rows_np, weights_np):
             # broadcast_all: vmap adds a leading batch dim → (vmap_B, B_inner, K)
@@ -651,8 +670,8 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             unique_rows = np.unique(rows_flat[valid_mask])
 
             if len(unique_rows) == 0:
-                flux_out = np.zeros((total_B, L), dtype=np.float32)
-                cont_out = np.zeros((total_B, L), dtype=np.float32)
+                flux_out = np.zeros((total_B, L), dtype=np_dtype)
+                cont_out = np.zeros((total_B, L), dtype=np_dtype)
             else:
                 flux_subset = np.asarray(rowwise_data['flux'][unique_rows])  # (U, L)
                 cont_subset = np.asarray(rowwise_data['continuum'][unique_rows])  # (U, L)
@@ -665,15 +684,15 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                 # Avoids materialising the (total_B, K, L) intermediate which is
                 # total_B * 2^d * L in size and causes OOM for large chunk_size/d.
                 U = len(unique_rows)
-                weights_per_row = np.zeros((total_B, U), dtype=np.float32)
+                weights_per_row = np.zeros((total_B, U), dtype=np_dtype)
                 b_idx = np.repeat(np.arange(total_B), K)
                 u_idx = safe_idx.ravel()
-                w_flat = w.ravel().astype(np.float32)
+                w_flat = w.ravel().astype(np_dtype)
                 valid_flat = valid_mask.ravel()
                 np.add.at(weights_per_row, (b_idx[valid_flat], u_idx[valid_flat]), w_flat[valid_flat])
 
-                flux_out = (weights_per_row @ flux_subset).astype(np.float32)   # (total_B, L)
-                cont_out = (weights_per_row @ cont_subset).astype(np.float32)   # (total_B, L)
+                flux_out = (weights_per_row @ flux_subset).astype(np_dtype)   # (total_B, L)
+                cont_out = (weights_per_row @ cont_subset).astype(np_dtype)   # (total_B, L)
 
             if vmap_B is not None:
                 return (flux_out.reshape(vmap_B, B_inner, L),
@@ -682,8 +701,8 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
         B = rows.shape[0]
         result_shape = (
-            jax.ShapeDtypeStruct((B, L), jnp.float32),
-            jax.ShapeDtypeStruct((B, L), jnp.float32),
+            jax.ShapeDtypeStruct((B, L), jax_dtype),
+            jax.ShapeDtypeStruct((B, L), jax_dtype),
         )
         return jax.pure_callback(_host_fn, result_shape, rows, weights, **_BROADCAST_ALL_KW)
 
@@ -740,7 +759,7 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
 
         mu_idx = params.index('mu')
-        self.solar_parameters = np.delete(np.asarray(self.solar_parameters), mu_idx)
+        self._solar_parameters = np.delete(np.asarray(self._solar_parameters), mu_idx)
         
     
 
