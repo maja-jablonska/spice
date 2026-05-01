@@ -15,17 +15,25 @@ from spice.spectrum.spectrum_emulator import SpectrumEmulator
 def _lazy_import_astro_emulators_toolkit():
     try:
         import astro_emulators_toolkit
-        from astro_emulators_toolkit.emulator_runtime import (
-            apply_jax_runtime,
-            make_frozen_apply_runtime,
-        )
-        return astro_emulators_toolkit, apply_jax_runtime, make_frozen_apply_runtime
     except ImportError as e:
         raise ValueError(
             "astro_emulators_toolkit is required for this functionality but is "
             "not installed. Install via the optional extra declared in "
             "pyproject.toml: `pip install \"stellar-spice[aemu]\"`."
         ) from e
+    try:
+        from astro_emulators_toolkit.emulator_runtime import (
+            apply_jax_runtime,
+            make_frozen_apply_runtime,
+        )
+    except ImportError as e:
+        raise ImportError(
+            "astro_emulators_toolkit is installed but failed to import "
+            "(commonly a flax/JAX version mismatch — newer flax.nnx requires "
+            "jax._src.core.mutable_array, added in JAX 0.4.34). Original "
+            f"error: {e}"
+        ) from e
+    return astro_emulators_toolkit, apply_jax_runtime, make_frozen_apply_runtime
 
 
 aemu, _apply_jax_runtime, _make_frozen_apply_runtime = _lazy_import_astro_emulators_toolkit()
