@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 import inspect as _inspect
+import os
 import time as _time
 import sys as _sys
 import warnings
@@ -535,7 +536,14 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             if params is None:
                 params = self.store['param_names']
 
-            df = pd.read_parquet(f'{zarr_path}/index.parquet')
+            index_path = f'{zarr_path}/index.parquet'
+            if not os.path.exists(index_path):
+                raise ValueError(
+                    f"No index.parquet found at '{index_path}'. Generate it with:\n"
+                    f"    python -m spice.spectrum.generate_zarr_index {zarr_path}\n"
+                    f"(use --exclude-mu if the grid has no mu axis)."
+                )
+            df = pd.read_parquet(index_path)
             if sparse:
                 self.grid_index = SparseGridIndex.from_dataframe(df, columns=params, device=device)
             else:
