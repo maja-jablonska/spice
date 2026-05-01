@@ -93,7 +93,7 @@ pip install stellar-spice[phoebe]
 import numpy as np
 from spice.models import IcosphereModel
 from spice.spectrum import simulate_observed_flux
-from spice.spectrum.planck_law import Blackbody
+from spice.spectrum.blackbody import Blackbody
 
 # Create a solar-like star
 star = IcosphereModel.construct(

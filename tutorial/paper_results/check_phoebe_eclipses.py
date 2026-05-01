@@ -110,7 +110,7 @@ def init_worker():
     filter — all of which are reused for every task this worker handles.
     """
     import phoebe
-    from transformer_payne import Blackbody
+    from spice.spectrum.blackbody import Blackbody
     from spice.spectrum.filter import Bolometric
 
     phoebe.multiprocessing_set_nprocs(1)
