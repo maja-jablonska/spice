@@ -15,6 +15,11 @@ Each worker builds one PHOEBE default_binary() at startup and reuses it for
 every task — only parameter values and dataset times are updated between
 runs. Outputs are written one pickle per parameter set; existing files are
 skipped, so the script is restartable across SLURM/job-array invocations.
+
+Error policy: PHOEBE "model not converged" failures are logged and skipped
+so the rest of the grid can finish. Any other exception aborts the whole
+run (the pool is terminated and the script exits non-zero), so unexpected
+bugs surface immediately instead of being silently swallowed.
 """
 import os
 # JAX env vars must be set before jax is imported
@@ -53,10 +58,25 @@ DEG_TO_RAD = 0.017453292519943295
 # Per-worker singletons: built once in init_worker(), reused across all tasks
 _WORKER = {}
 
+_PHOEBE_INSTALL_HINT = (
+    "PHOEBE is required for this script but is not installed. "
+    "Install via the optional extra declared in pyproject.toml: "
+    "`pip install \"stellar-spice[phoebe]\"`."
+)
+
+
+def _import_phoebe():
+    """Import phoebe or raise ValueError with the pyproject extras hint."""
+    try:
+        import phoebe
+    except ImportError as exc:
+        raise ValueError(_PHOEBE_INSTALL_HINT) from exc
+    return phoebe
+
 
 def _build_phoebe_bundle():
     """Build a default_binary and apply the constraint flip exactly once."""
-    import phoebe
+    phoebe = _import_phoebe()
     b = phoebe.default_binary()
     b.flip_constraint('mass@primary', solve_for='sma')
     return b
@@ -69,7 +89,10 @@ def _ensure_datasets(b, times):
     only on first add — those values don't change across grid points so we
     don't need to re-set them every iteration.
     """
-    from phoebe.parameters.dataset import _mesh_columns
+    try:
+        from phoebe.parameters.dataset import _mesh_columns
+    except ImportError as exc:
+        raise ValueError(_PHOEBE_INSTALL_HINT) from exc
     times = np.asarray(times)
     if 'mesh01' not in b.datasets:
         b.add_dataset('mesh', times=times, columns=_mesh_columns, dataset='mesh01')
@@ -109,7 +132,7 @@ def init_worker():
     Builds the PHOEBE bundle, the Blackbody emulator, and the Bolometric
     filter — all of which are reused for every task this worker handles.
     """
-    import phoebe
+    phoebe = _import_phoebe()
     from spice.spectrum.blackbody import Blackbody
     from spice.spectrum.filter import Bolometric
 
@@ -233,13 +256,30 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
     return str(out_pkl)
 
 
+_PHOEBE_CONVERGENCE_KEYWORDS = ('converge', 'not converged')
+
+
+def _is_phoebe_convergence_error(exc):
+    """True for PHOEBE 'model not converged' style failures we tolerate.
+
+    Matched by message keyword so it works regardless of whether PHOEBE
+    surfaces the failure as ValueError, RuntimeError, or its own subclass.
+    """
+    msg = str(exc).lower()
+    return any(k in msg for k in _PHOEBE_CONVERGENCE_KEYWORDS)
+
+
 def _process_task(task):
     try:
         return run_one(**task)
     except Exception as exc:
+        if _is_phoebe_convergence_error(exc):
+            print(f"[skip-converge] {task}: {exc}", file=sys.stderr)
+            return None
+        # Non-PHOEBE failure: log + re-raise so the pool aborts the whole run.
         print(f"[fail] {task}: {exc}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-        return None
+        raise
 
 
 def _read_grid_csv(path, defaults):
@@ -289,11 +329,21 @@ def main():
         if n_workers == 1:
             init_worker()
             for t in tqdm(tasks):
+                # _process_task re-raises any non-PHOEBE-convergence error,
+                # which propagates out of main() and aborts the run.
                 _process_task(t)
         else:
             with mp.Pool(n_workers, initializer=init_worker, maxtasksperchild=None) as pool:
-                for _ in tqdm(pool.imap_unordered(_process_task, tasks), total=len(tasks)):
-                    pass
+                try:
+                    for _ in tqdm(pool.imap_unordered(_process_task, tasks), total=len(tasks)):
+                        pass
+                except Exception:
+                    # A worker raised a non-PHOEBE-convergence error. Stop the
+                    # remaining tasks immediately rather than letting them run
+                    # to completion against a broken environment.
+                    pool.terminate()
+                    pool.join()
+                    raise
         return
 
     if args.inclination is None or args.period is None:

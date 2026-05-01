@@ -21,9 +21,10 @@ def _lazy_import_astro_emulators_toolkit():
         )
         return astro_emulators_toolkit, apply_jax_runtime, make_frozen_apply_runtime
     except ImportError as e:
-        raise ImportError(
-            "astro_emulators_toolkit is required for this functionality. "
-            "Please install it with `pip install astro-emulators-toolkit`."
+        raise ValueError(
+            "astro_emulators_toolkit is required for this functionality but is "
+            "not installed. Install via the optional extra declared in "
+            "pyproject.toml: `pip install \"stellar-spice[aemu]\"`."
         ) from e
 
 

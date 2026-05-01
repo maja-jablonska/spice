@@ -1,8 +1,17 @@
 import argparse
-import phoebe
+
+try:
+    import phoebe
+    from phoebe.parameters.dataset import _mesh_columns
+except ImportError as exc:
+    raise ValueError(
+        "PHOEBE is required for this script but is not installed. "
+        "Install via the optional extra declared in pyproject.toml: "
+        '`pip install "stellar-spice[phoebe]"`.'
+    ) from exc
+
 import numpy as np
 import matplotlib.pyplot as plt
-from phoebe.parameters.dataset import _mesh_columns
 import jax.numpy as jnp
 from transformer_payne import Blackbody
 from spice.models.binary import PhoebeBinary

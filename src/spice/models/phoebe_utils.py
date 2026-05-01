@@ -38,7 +38,11 @@ class PhoebeConfig:
                  mesh_dataset_name: str = 'mesh01',
                  orbit_dataset_name: Optional[str] = None):
         if not PHOEBE_AVAILABLE:
-            raise ImportError("PHOEBE is not installed. Please install it with 'pip install stellar-spice[phoebe]'")
+            raise ValueError(
+                "PHOEBE is required for PhoebeConfig but is not installed. "
+                "Install via the optional extra declared in pyproject.toml: "
+                "`pip install \"stellar-spice[phoebe]\"`."
+            )
             
         self.__b: phoebe.frontend.bundle.Bundle = bundle
         self.__times: np.array = np.array(self.__b.times).astype(np.float64)
