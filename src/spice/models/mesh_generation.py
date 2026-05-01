@@ -1,4 +1,5 @@
 import os
+import uuid
 import warnings
 from typing import Tuple, Any
 import pkgutil
@@ -251,8 +252,15 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
             _user_icosphere_cache_dir(), f"icosphere_{subdivs}.pickle"
         )
         if os.path.exists(user_cache_path):
-            with open(user_cache_path, "rb") as fh:
-                return pickle.load(fh)
+            try:
+                with open(user_cache_path, "rb") as fh:
+                    return pickle.load(fh)
+            except (EOFError, pickle.UnpicklingError, OSError) as exc:
+                # Partial/corrupt cache (e.g. another process is mid-write, or a
+                # previous run was killed). Fall through and regenerate.
+                warnings.warn(
+                    f"Ignoring unreadable icosphere cache {user_cache_path}: {exc}"
+                )
         warnings.warn(
             f"No cached icosphere for subdivs={subdivs}; generating it now "
             "(this can take ~1 min — result will be cached under "
@@ -267,11 +275,25 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
         verts, faces, areas, centers = _icosphere(subdivs)
 
     if use_cache and user_cache_path is not None:
+        # Write atomically: dump to a unique temp file in the same directory,
+        # then os.replace() into place. Concurrent readers will only ever see
+        # the old file (or none) or the fully-written new file — never a
+        # truncated half-write that produces EOFError on pickle.load.
+        cache_dir = os.path.dirname(user_cache_path)
         try:
-            os.makedirs(os.path.dirname(user_cache_path), exist_ok=True)
-            with open(user_cache_path, "wb") as fh:
+            os.makedirs(cache_dir, exist_ok=True)
+            tmp_path = f"{user_cache_path}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+            with open(tmp_path, "wb") as fh:
                 pickle.dump((verts, faces, areas, centers), fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, user_cache_path)
         except OSError as exc:
             warnings.warn(f"Could not write icosphere cache to {user_cache_path}: {exc}")
+            try:
+                if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
 
     return verts, faces, areas, centers
