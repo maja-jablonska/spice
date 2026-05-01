@@ -50,7 +50,7 @@ def blackbody_intensity(
         ld = limb_darkening(mu, get_limb_darkening_law_id(ld_law), jnp.asarray(ld_coeffs))
         intensity = intensity * ld
 
-    return jnp.tile(intensity, (2, 1))
+    return jnp.stack([intensity, intensity], axis=-1)
 
 
 class Blackbody:

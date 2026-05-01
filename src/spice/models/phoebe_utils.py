@@ -1,6 +1,16 @@
+import logging as _logging
+
+# PHOEBE retries online passband fetches from tables.phoebe-project.org three
+# times on every passband op and emits a WARNING:PASSBANDS line per attempt.
+# On offline nodes (e.g. cluster compute) this floods the log. SPICE never
+# relies on those online passbands, so demote the logger to ERROR.
+_logging.getLogger("PASSBANDS").setLevel(_logging.ERROR)
+
 try:
     import phoebe
     PHOEBE_AVAILABLE = True
+    # Re-apply: phoebe configures logging during import and may reset the level.
+    _logging.getLogger("PASSBANDS").setLevel(_logging.ERROR)
 except ImportError:
     PHOEBE_AVAILABLE = False
     phoebe = None

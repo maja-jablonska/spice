@@ -1,3 +1,4 @@
+import logging as _logging
 import os as _os
 import sys as _sys
 
@@ -5,6 +6,13 @@ import sys as _sys
 # Users who want Metal can set JAX_PLATFORMS=metal before importing spice.
 if _sys.platform == "darwin" and "JAX_PLATFORMS" not in _os.environ:
     _os.environ["JAX_PLATFORMS"] = "cpu"
+
+# Pre-emptively quiet PHOEBE's "could not connect to tables.phoebe-project.org"
+# retry warnings. The PASSBANDS logger fires three WARNING lines on every
+# passband op when offline; SPICE never depends on online passbands, so demote
+# it before phoebe is imported. Re-applied in spice/models/phoebe_utils.py in
+# case phoebe resets the level during its own setup.
+_logging.getLogger("PASSBANDS").setLevel(_logging.ERROR)
 
 from . import _jax_compat as _jax_compat
 _jax_compat.apply()
