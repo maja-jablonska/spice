@@ -140,17 +140,30 @@ def simulate_line_spectra(
     line_width: float = 2.0,
     steps: int = 500,
     desc: str = "lines",
+    ld_law: str | None = None,
+    ld_coeffs=None,
 ) -> dict[float, LineSpectra]:
-    """Synthesise spectra for each line center across all snapshots + a t=0 template."""
+    """Synthesise spectra for each line center across all snapshots + a t=0 template.
+
+    ``ld_law`` and ``ld_coeffs`` are forwarded to :func:`simulate_observed_flux`,
+    which binds them into ``intensity_fn`` (used with the flux emulator's
+    ``intensity`` method to apply a flux-conservation limb-darkening law per
+    call without rebuilding the bundle).
+    """
     out: dict[float, LineSpectra] = {}
+    extra = {}
+    if ld_law is not None:
+        extra["ld_law"] = ld_law
+    if ld_coeffs is not None:
+        extra["ld_coeffs"] = ld_coeffs
     for lc in tqdm(line_centers, desc=desc):
         wl = jnp.linspace(lc - line_width, lc + line_width, steps)
         log_wl = jnp.log10(wl)
         per_snapshot = [
-            simulate_observed_flux(intensity_fn, m, log_wl)
+            simulate_observed_flux(intensity_fn, m, log_wl, **extra)
             for m in tqdm(snapshots, desc=f"line {lc:.2f}", leave=False)
         ]
-        template = simulate_observed_flux(intensity_fn, template_snapshot, log_wl)
+        template = simulate_observed_flux(intensity_fn, template_snapshot, log_wl, **extra)
         out[float(lc)] = LineSpectra(wavelengths=wl, spectra=per_snapshot, template=template)
     return out
 

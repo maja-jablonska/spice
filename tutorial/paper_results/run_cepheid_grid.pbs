@@ -15,15 +15,16 @@
 #                 (add `--force` in the python invocation to rebuild).
 #
 #  WALLTIME SIZING
-#    With LD_COEFFS = linspace(0,1,100) and WL_STEPS = 5000, spectrum
-#    synthesis dominates: ~3 min per LD variant × ~100 variants ≈ 5 h per
-#    Cepheid (plus ~5 min for emulators / bundle build). 12 h walltime is
-#    generous; drop to 06:00:00 if you reduce LD_COEFFS or WL_STEPS.
+#    With LD_COEFFS = linspace(0,1,20) and WL_STEPS = 2000 (the
+#    cepheid_build_vmicro.ipynb defaults), synthesis is ~1-2 min per LD
+#    variant × 21 variants ≈ 30-45 min per Cepheid, plus ~5 min for emulator
+#    load and bundle build. 02:00:00 covers it with margin; bump to 04:00:00
+#    if you increase LD_COEFFS or WL_STEPS.
 #============================================================================
 
 #PBS -P xx00                                   # EDIT: NCI project code
 #PBS -q normal                                 # queue: normal|express|hugemem
-#PBS -l walltime=12:00:00
+#PBS -l walltime=02:00:00
 #PBS -l ncpus=8                                # JAX/XLA threads per task
 #PBS -l mem=32GB
 #PBS -l jobfs=50GB
