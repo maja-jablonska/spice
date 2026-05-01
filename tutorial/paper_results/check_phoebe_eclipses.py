@@ -16,10 +16,12 @@ every task — only parameter values and dataset times are updated between
 runs. Outputs are written one pickle per parameter set; existing files are
 skipped, so the script is restartable across SLURM/job-array invocations.
 
-Error policy: PHOEBE "model not converged" failures are logged and skipped
-so the rest of the grid can finish. Any other exception aborts the whole
-run (the pool is terminated and the script exits non-zero), so unexpected
-bugs surface immediately instead of being silently swallowed.
+Error policy: PHOEBE "model not converged" failures and grid points where
+no eclipse occurs (impact parameter exceeds R1+R2, so eclipse_timestamps_kepler
+returns NaN) are logged and skipped so the rest of the grid can finish. Any
+other exception aborts the whole run (the pool is terminated and the script
+exits non-zero), so unexpected bugs surface immediately instead of being
+silently swallowed.
 """
 import os
 # JAX env vars must be set before jax is imported
@@ -188,10 +190,21 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
         los_vector=jnp.array([0., 0., -1.]),
     )
 
+    eclipse_edges = (float(t1_p), float(t4_p), float(t1_s), float(t4_s))
+    if not all(np.isfinite(eclipse_edges)):
+        # eclipse_timestamps_kepler returns NaN when the impact parameter
+        # exceeds (R1+R2)*pad — i.e. the system never eclipses at this
+        # geometry. PHOEBE's compute_phases constraint can't be evaluated
+        # against NaN times, so bail out before touching the bundle.
+        raise NoEclipseError(
+            f"no eclipse for incl={inclination}, P={period}, q={q}, "
+            f"ecc={ecc}, m1={primary_mass}: edges={eclipse_edges}"
+        )
+
     half = int(n_times / 2)
     times = np.concatenate([
-        np.linspace(float(t1_p) / DAYS_TO_YR, float(t4_p) / DAYS_TO_YR, half),
-        np.linspace(float(t1_s) / DAYS_TO_YR, float(t4_s) / DAYS_TO_YR, half),
+        np.linspace(eclipse_edges[0] / DAYS_TO_YR, eclipse_edges[1] / DAYS_TO_YR, half),
+        np.linspace(eclipse_edges[2] / DAYS_TO_YR, eclipse_edges[3] / DAYS_TO_YR, half),
     ])
     times_yr = times * DAYS_TO_YR
 
@@ -259,6 +272,10 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
 _PHOEBE_CONVERGENCE_KEYWORDS = ('converge', 'not converged')
 
 
+class NoEclipseError(RuntimeError):
+    """Raised when eclipse_timestamps_kepler returns NaN for a grid point."""
+
+
 def _is_phoebe_convergence_error(exc):
     """True for PHOEBE 'model not converged' style failures we tolerate.
 
@@ -272,6 +289,9 @@ def _is_phoebe_convergence_error(exc):
 def _process_task(task):
     try:
         return run_one(**task)
+    except NoEclipseError as exc:
+        print(f"[skip-no-eclipse] {task}: {exc}", file=sys.stderr)
+        return None
     except Exception as exc:
         if _is_phoebe_convergence_error(exc):
             print(f"[skip-converge] {task}: {exc}", file=sys.stderr)
