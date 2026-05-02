@@ -24,19 +24,19 @@
 #    if you increase LD_COEFFS or WL_STEPS.
 #============================================================================
 
-#PBS -P xx00                                   # EDIT: NCI project code
-#PBS -q normal                                 # queue: normal|express|hugemem
-#PBS -l walltime=02:00:00
-#PBS -l ncpus=8                                # JAX/XLA threads per task
+#PBS -P mk27                            
+#PBS -q rsaa
+#PBS -l walltime=12:00:00
+#PBS -l ncpus=8                        
 #PBS -l mem=32GB
 #PBS -l jobfs=50GB
-#PBS -l storage=scratch/xx00+gdata/xx00        # EDIT: storage mounts needed
-#PBS -l wd                                     # start in PBS_O_WORKDIR
-#PBS -J 0-5                                    # EDIT: 0..(rows in CSV minus 1)
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd                              
+#PBS -J 0-5                               
 #PBS -N cepheid_grid
-#PBS -j oe                                     # merge stdout+stderr per task
-#PBS -m a                                      # email on abort only
-##PBS -M you@example.com                       # EDIT (uncomment) for email
+#PBS -j oe                                 
+#PBS -m a                                    
+#PBS -M maja.jablonska@anu.edu.au
 
 set -euo pipefail
 
@@ -57,21 +57,6 @@ mapfile -t GRID_NAMES < <(tail -n +2 "$CONFIG" | cut -d',' -f1 | sed '/^$/d')
 # ---------------------------------------------------------------------------
 module purge
 module load python3/3.11.7    # nearest available; check `module avail python3`
-module load hdf5/1.14.3p      # for astropy.io.fits
-
-# Activate the spice environment (EDIT path or method).
-PYENV="${PYENV:-$HOME/spice-env}"
-if   [ -f "$PYENV/bin/activate" ]; then
-    # shellcheck disable=SC1091
-    source "$PYENV/bin/activate"
-elif command -v conda &>/dev/null; then
-    # shellcheck disable=SC1091
-    source "$(conda info --base)/etc/profile.d/conda.sh"
-    conda activate "${CONDA_ENV:-spice}"
-else
-    echo "ERROR: no python environment found at $PYENV (and conda not on PATH)"
-    exit 2
-fi
 
 # JAX & BLAS thread parallelism — match what PBS gave us.
 export JAX_PLATFORMS=cpu
@@ -80,6 +65,7 @@ export OMP_NUM_THREADS=${PBS_NCPUS:-8}
 export MKL_NUM_THREADS=${PBS_NCPUS:-8}
 export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
 export TF_CPP_MIN_LOG_LEVEL=2
+export PYTHON_BIN=${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}
 
 # ---------------------------------------------------------------------------
 # 3) Pick this task's Cepheid
@@ -102,7 +88,7 @@ cd "$PBS_O_WORKDIR"
 OUT_DIR="${OUT_DIR:-$PBS_O_WORKDIR/cepheid_grid}"
 mkdir -p "$OUT_DIR"
 
-python -u build_cepheid_grid.py \
+"${PYTHON_BIN}" -u build_cepheid_grid.py \
     --config "$CONFIG" \
     --names "$NAME" \
     --out-dir "$OUT_DIR" \
