@@ -10,6 +10,9 @@
 #  USAGE
 #    1. Edit the "EDIT" lines below: project code, storage, env, CSV path.
 #    2. Edit cepheid_grid.csv (or supply your own) — names come from column 1.
+#       Optional per-row columns include `rotation_velocity` (km/s, default 0)
+#       and `n_vertices` (icosphere mesh resolution, falls back to --n-mesh
+#       when blank). See load_grid_csv() for the full column list.
 #    3. Set #PBS -J 0-(N-1) where N is the number of CSV rows, OR submit with:
 #         qsub -J 0-$(( $(wc -l < cepheid_grid.csv) - 2 )) run_cepheid_grid.pbs
 #    4. Monitor:  qstat -fx <jobid>     ; tail -f cepheid_grid.o<jobid>.*
