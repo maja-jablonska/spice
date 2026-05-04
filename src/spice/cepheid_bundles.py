@@ -80,6 +80,7 @@ def build_bundle(
     n_mesh: int = 5000,
     radius: float = 43.06,
     mass: float = 5.26,
+    rotation_velocity: float = 0.0,
     max_fourier_order: int = 10,
     param_names_attr: str = "stellar_parameter_names",
     desc: str = "Evaluating",
@@ -95,7 +96,7 @@ def build_bundle(
             base, m_order=0, l_degree=0,
             period=period, fourier_series_parameters=fourier_params,
         ),
-        0.0,
+        rotation_velocity,
     )
     snapshots = [
         evaluate_rotation(evaluate_pulsations(pulsating, t), t)

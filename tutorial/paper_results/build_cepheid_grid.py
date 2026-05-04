@@ -116,6 +116,8 @@ class CepheidConfig:
     o_fe: float = 0.0
     r_fe: float = 0.0
     s_fe: float = 0.0
+    rotation_velocity: float = 0.0                 # km/s; 0 = no rotation
+    n_vertices: Optional[int] = None               # None → fall back to --n-mesh
     pulsation_fits: Path = field(default_factory=lambda: DEFAULT_PULSATION_FITS)
 
     def stellar_params_dict(self, teff_default: float, logg_default: float) -> dict:
@@ -171,7 +173,7 @@ def load_grid_csv(path: Path) -> list[CepheidConfig]:
 
     Required columns: ``name, period, radius, mass``.
     Optional: ``teff, logg, fe_h, vmicro, a_fe, c_fe, n_fe, o_fe, r_fe, s_fe,
-    pulsation_fits``.
+    rotation_velocity, n_vertices, pulsation_fits``.
     """
     configs = []
     with open(path) as f:
@@ -182,9 +184,12 @@ def load_grid_csv(path: Path) -> list[CepheidConfig]:
                       "radius": float(row["radius"]),
                       "mass":   float(row["mass"])}
             for key in ("teff", "logg", "fe_h", "vmicro",
-                        "a_fe", "c_fe", "n_fe", "o_fe", "r_fe", "s_fe"):
+                        "a_fe", "c_fe", "n_fe", "o_fe", "r_fe", "s_fe",
+                        "rotation_velocity"):
                 if key in row and row[key] != "":
                     kwargs[key] = float(row[key])
+            if "n_vertices" in row and row["n_vertices"] != "":
+                kwargs["n_vertices"] = int(row["n_vertices"])
             if "pulsation_fits" in row and row["pulsation_fits"]:
                 kwargs["pulsation_fits"] = Path(row["pulsation_fits"])
             configs.append(CepheidConfig(**kwargs))
@@ -296,8 +301,10 @@ def build_one(
 ) -> None:
     bundles_path = out_dir / f"{config.name}_bundles.pkl"
     spectra_path = out_dir / f"{config.name}_spectra.pkl"
+    n_mesh_used = config.n_vertices if config.n_vertices is not None else n_mesh
     print(f"\n=== {config.name}  P={config.period:.4f} d  "
-          f"R={config.radius:.2f} R_sun  M={config.mass:.2f} M_sun ===")
+          f"R={config.radius:.2f} R_sun  M={config.mass:.2f} M_sun  "
+          f"v_rot={config.rotation_velocity:.2f} km/s  n_vertices={n_mesh_used} ===")
 
     with fits.open(config.pulsation_fits, ignore_missing_simple=True) as hdul:
         pulsation_data = Table(hdul[2].data)
@@ -336,7 +343,8 @@ def build_one(
             emul, params,
             fourier_params=fourier,
             period=config.period, timeseries=timeseries,
-            n_mesh=n_mesh, radius=config.radius, mass=config.mass,
+            n_mesh=n_mesh_used, radius=config.radius, mass=config.mass,
+            rotation_velocity=config.rotation_velocity,
             param_names_attr=attr, desc=f"  evaluating {name}",
         )
 
