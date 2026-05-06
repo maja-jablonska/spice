@@ -107,15 +107,10 @@ def _axis_linear_bracket(values, value, radius=0, atol=1e-6, rtol=1e-6):
     lo_value = values[lo]
     hi_value = values[hi]
 
-    def compute_t(_):
-        return (value - lo_value) / (hi_value - lo_value)
-
-    t = lax.cond(
-        same,
-        lambda _: jnp.array(0.0, dtype=values.dtype),
-        compute_t,
-        operand=None,
-    )
+    denom = hi_value - lo_value
+    safe_denom = jnp.where(same, jnp.ones_like(denom), denom)
+    t_raw = (value - lo_value) / safe_denom
+    t = jnp.where(same, jnp.zeros_like(t_raw), t_raw)
 
     return lo, hi, t
 
