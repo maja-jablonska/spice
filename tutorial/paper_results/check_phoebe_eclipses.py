@@ -16,12 +16,13 @@ every task — only parameter values and dataset times are updated between
 runs. Outputs are written one pickle per parameter set; existing files are
 skipped, so the script is restartable across SLURM/job-array invocations.
 
-Error policy: PHOEBE "model not converged" failures and grid points where
-no eclipse occurs (impact parameter exceeds R1+R2, so eclipse_timestamps_kepler
-returns NaN) are logged and skipped so the rest of the grid can finish. Any
-other exception aborts the whole run (the pool is terminated and the script
-exits non-zero), so unexpected bugs surface immediately instead of being
-silently swallowed.
+Error policy: PHOEBE "model not converged" failures, PHOEBE "failed to pass
+checks" preflight errors (e.g. components overflowing at periastron at the
+chosen geometry), and grid points where no eclipse occurs (impact parameter
+exceeds R1+R2, so eclipse_timestamps_kepler returns NaN) are logged and
+skipped so the rest of the grid can finish. Any other exception aborts the
+whole run (the pool is terminated and the script exits non-zero), so
+unexpected bugs surface immediately instead of being silently swallowed.
 """
 import os
 # JAX env vars must be set before jax is imported
@@ -269,21 +270,29 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
     return str(out_pkl)
 
 
-_PHOEBE_CONVERGENCE_KEYWORDS = ('converge', 'not converged')
+_SKIPPABLE_PHOEBE_KEYWORDS = (
+    'converge', 'not converged',
+    # run_checks_compute / run_checks_system raise ValueError("failed to pass
+    # checks ...") for preflight conditions like a component overflowing its
+    # Roche lobe at periastron. These are geometry rejections, not bugs — skip.
+    'failed to pass checks',
+)
 
 
 class NoEclipseError(RuntimeError):
     """Raised when eclipse_timestamps_kepler returns NaN for a grid point."""
 
 
-def _is_phoebe_convergence_error(exc):
-    """True for PHOEBE 'model not converged' style failures we tolerate.
+def _is_skippable_phoebe_error(exc):
+    """True for PHOEBE failures we tolerate per-task.
 
     Matched by message keyword so it works regardless of whether PHOEBE
     surfaces the failure as ValueError, RuntimeError, or its own subclass.
+    Covers 'model not converged' and 'failed to pass checks' (e.g. components
+    overflowing at periastron at the requested geometry).
     """
     msg = str(exc).lower()
-    return any(k in msg for k in _PHOEBE_CONVERGENCE_KEYWORDS)
+    return any(k in msg for k in _SKIPPABLE_PHOEBE_KEYWORDS)
 
 
 def _process_task(task):
@@ -293,8 +302,8 @@ def _process_task(task):
         print(f"[skip-no-eclipse] {task}: {exc}", file=sys.stderr)
         return None
     except Exception as exc:
-        if _is_phoebe_convergence_error(exc):
-            print(f"[skip-converge] {task}: {exc}", file=sys.stderr)
+        if _is_skippable_phoebe_error(exc):
+            print(f"[skip-phoebe] {task}: {exc}", file=sys.stderr)
             return None
         # Non-PHOEBE failure: log + re-raise so the pool aborts the whole run.
         print(f"[fail] {task}: {exc}", file=sys.stderr)
@@ -358,9 +367,9 @@ def main():
                     for _ in tqdm(pool.imap_unordered(_process_task, tasks), total=len(tasks)):
                         pass
                 except Exception:
-                    # A worker raised a non-PHOEBE-convergence error. Stop the
-                    # remaining tasks immediately rather than letting them run
-                    # to completion against a broken environment.
+                    # A worker raised an unexpected (non-skippable) error. Stop
+                    # the remaining tasks immediately rather than letting them
+                    # run to completion against a broken environment.
                     pool.terminate()
                     pool.join()
                     raise

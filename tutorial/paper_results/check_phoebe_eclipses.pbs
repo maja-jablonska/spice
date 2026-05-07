@@ -16,8 +16,10 @@
 # Resume after a timeout: just resubmit — already-finished tasks are skipped.
 #
 # Error policy (matches the Python script):
-#   * PHOEBE "model not converged" failures are skipped per-task; the grid
-#     keeps running and the job exits 0 if every other task succeeded.
+#   * PHOEBE "model not converged" and "failed to pass checks" failures
+#     (e.g. components overflowing at periastron at the requested geometry)
+#     are skipped per-task; the grid keeps running and the job exits 0 if
+#     every other task succeeded.
 #   * Any other exception aborts the run — the worker pool is terminated,
 #     python exits non-zero, and `set -euo pipefail` below propagates that
 #     to PBS so the job is marked failed (and `#PBS -m abe` emails you).
@@ -126,8 +128,9 @@ echo "==============================================================="
 # if a worker runs out of memory (each worker holds a PHOEBE bundle plus JAX
 # caches; 4 GB/worker is a safe headroom estimate on the normal queue).
 #
-# `set -e` above means a non-zero exit from python (i.e. a non-PHOEBE-convergence
-# error inside any worker) will skip the trailing "Done." line and fail the job.
+# `set -e` above means a non-zero exit from python (i.e. a non-skippable error
+# inside any worker — anything other than PHOEBE "not converged" / "failed to
+# pass checks") will skip the trailing "Done." line and fail the job.
 if python3 "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
     --grid-config "${GRID_CSV}" \
     --n-workers   "${PBS_NCPUS}" \
