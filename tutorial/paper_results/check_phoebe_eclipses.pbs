@@ -27,17 +27,18 @@
 #     after a fix resumes from where it stopped.
 # =============================================================================
 
-#PBS -P <PROJECT>
-#PBS -q normal
-#PBS -l ncpus=48
-#PBS -l mem=190GB
-#PBS -l walltime=08:00:00
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=104
+#PBS -l mem=400GB
+#PBS -l walltime=48:00:00
 #PBS -l jobfs=20GB
-#PBS -l storage=scratch/<PROJECT>+gdata/<PROJECT>
+#PBS -l storage=scratch/y89+gdata/y89+scratch/mk27
 #PBS -l wd
 #PBS -N spice_eclipses
 #PBS -j oe
 #PBS -m abe
+#PBS -M maja.jablonska@anu.edu.au
 # (optional) email on abort/begin/end — comment out if undesired
 
 set -euo pipefail
@@ -48,16 +49,9 @@ set -euo pipefail
 module purge
 module load python3/3.11.0          # adjust to whatever Python the venv uses
 
-SPICE_REPO="${PBS_O_WORKDIR}/../.."  # this PBS lives in tutorial/paper_results
+SPICE_REPO="${PBS_O_WORKDIR}"  # this PBS lives in tutorial/paper_results
 SPICE_REPO="$(cd "${SPICE_REPO}" && pwd)"
-SPICE_VENV="${SPICE_VENV:-${SPICE_REPO}/.venv}"   # override via `qsub -v SPICE_VENV=...`
-
-if [[ -d "${SPICE_VENV}" ]]; then
-    # shellcheck disable=SC1091
-    source "${SPICE_VENV}/bin/activate"
-else
-    echo "warning: SPICE_VENV=${SPICE_VENV} not found — relying on system python" >&2
-fi
+PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
 
 # Keep every numerical library single-threaded; we get parallelism from the
 # multiprocessing pool, not from threaded BLAS / JAX inside each worker.
@@ -75,7 +69,7 @@ cd "${PBS_O_WORKDIR}"
 # Output paths — write to /scratch so we don't fill the home volume
 # ---------------------------------------------------------------------------
 PROJECT="$(echo "${PBS_O_WORKDIR}" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="scratch"){print $(i+1); exit}}')"
-PROJECT="${PROJECT:-<PROJECT>}"
+PROJECT="${PROJECT:-y89}"
 OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${PROJECT}/${USER}/spice_eclipses/${PBS_JOBID%.*}}"
 GRID_CSV="${GRID_CSV:-${OUTPUT_DIR}/grid.csv}"
 mkdir -p "${OUTPUT_DIR}"
@@ -91,10 +85,10 @@ if [[ ! -s "${GRID_CSV}" ]]; then
 import csv, sys
 import numpy as np
 
-inclinations  = np.linspace(60.0, 90.0, 4)        # degrees
-periods       = np.linspace(2.0, 20.0, 6)         # days
-qs            = [0.5, 1.0]
-eccs          = [0.0, 0.2]
+inclinations  = [85.0, 90.0]        # degrees
+periods       = np.linspace(2.0, 100.0, 10)         # days
+qs            = np.linspace(0.5, 1.0, 5)
+eccs          = np.linspace(0.0, 0.8, 5)
 primary_mass  = 1.0
 n_times       = 20
 
@@ -116,7 +110,6 @@ echo "Job:        ${PBS_JOBID}"
 echo "Node:       $(hostname)"
 echo "CPUs:       ${PBS_NCPUS}"
 echo "Repo:       ${SPICE_REPO}"
-echo "Venv:       ${SPICE_VENV}"
 echo "Grid CSV:   ${GRID_CSV}  (${NTASKS} tasks)"
 echo "Output:     ${OUTPUT_DIR}"
 echo "==============================================================="
@@ -128,10 +121,9 @@ echo "==============================================================="
 # if a worker runs out of memory (each worker holds a PHOEBE bundle plus JAX
 # caches; 4 GB/worker is a safe headroom estimate on the normal queue).
 #
-# `set -e` above means a non-zero exit from python (i.e. a non-skippable error
-# inside any worker — anything other than PHOEBE "not converged" / "failed to
-# pass checks") will skip the trailing "Done." line and fail the job.
-if python3 "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
+# `set -e` above means a non-zero exit from python (i.e. a non-PHOEBE-convergence
+# error inside any worker) will skip the trailing "Done." line and fail the job.
+if "${PYTHON_BIN}" "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
     --grid-config "${GRID_CSV}" \
     --n-workers   "${PBS_NCPUS}" \
     --output_path "${OUTPUT_DIR}"; then
