@@ -25,6 +25,10 @@ def _load_module():
         "spice.spectrum",
         "spice.spectrum.spectrum_emulator",
         "spice.spectrum.lazy_zarr_interpolator",
+        "spice.spectrum.solar_parameters",
+        "spice.spectrum.parameters",
+        "spice.spectrum.flux_limb_darkening",
+        "spice.utils",
     ]
     missing = object()
     saved_modules = {name: sys.modules.get(name, missing) for name in target_module_names}
@@ -38,6 +42,49 @@ def _load_module():
 
         sys.modules["spice"] = spice_pkg
         sys.modules["spice.spectrum"] = spectrum_pkg
+
+        utils_pkg = types.ModuleType("spice.utils")
+        utils_pkg.__path__ = []
+
+        class _LogShim:
+            class _Timed:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_a):
+                    return False
+
+            def info(self, *_a, **_k):
+                pass
+
+            def warning(self, *_a, **_k):
+                pass
+
+            def timed(self, *_a, **_k):
+                return self._Timed()
+
+        utils_pkg.log = _LogShim()
+        sys.modules["spice.utils"] = utils_pkg
+
+        solar_pkg = types.ModuleType("spice.spectrum.solar_parameters")
+        solar_pkg.SOLAR_PARAMETERS = {"teff": 5777.0, "logg": 4.44, "v_micro": 2.0}
+        sys.modules["spice.spectrum.solar_parameters"] = solar_pkg
+
+        params_pkg = types.ModuleType("spice.spectrum.parameters")
+
+        def _parameter_helper(*_a, **_k):
+            return None
+
+        params_pkg.parameter_helper = _parameter_helper
+        sys.modules["spice.spectrum.parameters"] = params_pkg
+
+        ld_pkg = types.ModuleType("spice.spectrum.flux_limb_darkening")
+
+        def _apply_flux_limb_darkening(*_a, **_k):
+            return None
+
+        ld_pkg.apply_flux_limb_darkening = _apply_flux_limb_darkening
+        sys.modules["spice.spectrum.flux_limb_darkening"] = ld_pkg
 
         emulator_spec = importlib.util.spec_from_file_location(
             "spice.spectrum.spectrum_emulator", emulator_path
@@ -108,6 +155,37 @@ class TestSparseGridIndex:
         valid = weights > 0
         assert jnp.sum(valid) >= 1
         assert jnp.isclose(jnp.sum(weights), 1.0)
+
+    def test_lookup_exact_match_interior_axis_returns_matching_row(self):
+        # Regression: interior exact matches used to expand to (idx-1, idx+1)
+        # with t=0.5, returning 0.5*row[idx-1] + 0.5*row[idx+1] instead of
+        # row[idx]. Verify the matching row carries weight 1 on every axis.
+        columns = ["teff", "logg", "feh"]
+        df = _make_test_df(
+            [
+                [5000.0, 5500.0, 6000.0, 6500.0, 7000.0],
+                [3.5, 4.0, 4.5, 5.0],
+                [-1.0, -0.5, 0.0, 0.5],
+            ],
+            columns,
+        )
+        idx = SparseGridIndex.from_dataframe(df, columns)
+
+        # Interior point on every axis (none at idx=0 or idx=n-1).
+        query = jnp.array([6000.0, 4.5, 0.0])
+        rows, weights = idx.lookup(query)
+
+        # Find the expected row index for this combination.
+        match = (df["teff"] == 6000.0) & (df["logg"] == 4.5) & (df["feh"] == 0.0)
+        expected_row = int(df.loc[match, "row_idx"].iloc[0])
+
+        rows_np = np.asarray(rows)
+        weights_np = np.asarray(weights)
+        total_for_expected = float(weights_np[rows_np == expected_row].sum())
+        np.testing.assert_allclose(total_for_expected, 1.0, atol=1e-6)
+        # Any other rows should carry zero weight.
+        other_weight = float(weights_np[(rows_np != expected_row) & (rows_np >= 0)].sum())
+        np.testing.assert_allclose(other_weight, 0.0, atol=1e-6)
 
     def test_lookup_interpolation(self):
         columns = ["teff", "logg"]
