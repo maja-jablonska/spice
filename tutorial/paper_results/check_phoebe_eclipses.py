@@ -98,7 +98,11 @@ def _ensure_datasets(b, times):
         raise ValueError(_PHOEBE_INSTALL_HINT) from exc
     times = np.asarray(times)
     if 'mesh01' not in b.datasets:
-        b.add_dataset('mesh', times=times, columns=_mesh_columns, dataset='mesh01')
+        # Mesh datasets only expose `compute_times` in the dataset context
+        # (passing `times=` triggers a deprecation warning + silent rewrite to
+        # `compute_times`). Use `compute_times` directly so the update path
+        # below can find the parameter on the second and later iterations.
+        b.add_dataset('mesh', compute_times=times, columns=_mesh_columns, dataset='mesh01')
         b.add_dataset('orb', compute_times=times, dataset='orb01')
         b.add_dataset('lc', compute_times=times,
                       passband='Bolometric:900-40000', dataset='lc_bolometric')
@@ -114,7 +118,7 @@ def _ensure_datasets(b, times):
         b.set_value_all('irrad_method', 'none')
         b.set_value_all('gravb_bol', 0.0)
     else:
-        b.set_value_all('times', dataset='mesh01', value=times)
+        b.set_value_all('compute_times', dataset='mesh01', value=times)
         b.set_value_all('compute_times', dataset='orb01', value=times)
         b.set_value_all('compute_times', dataset='lc_bolometric', value=times)
 
