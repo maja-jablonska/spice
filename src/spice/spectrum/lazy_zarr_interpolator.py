@@ -60,24 +60,11 @@ def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
     idx = jnp.int32(jnp.argmax(mask))
 
     # --- match case ---
+    # Collapse the bracket onto the matched index. Returning (idx-1, idx+1)
+    # for interior matches would skip the matching row entirely — with t≈0.5
+    # the result becomes 0.5*row[idx-1] + 0.5*row[idx+1] instead of row[idx].
     def match_case(_):
-        def single(_):
-            return idx, idx
-
-        def multiple(_):
-            return lax.cond(
-                idx == 0,
-                lambda _: (jnp.int32(0), jnp.int32(1)),
-                lambda _: lax.cond(
-                    idx == n - 1,
-                    lambda _: (n - jnp.int32(2), n - jnp.int32(1)),
-                    lambda _: (idx - jnp.int32(1), idx + jnp.int32(1)),
-                    operand=None,
-                ),
-                operand=None,
-            )
-
-        return lax.cond(n == 1, single, multiple, operand=None)
+        return idx, idx
 
     # --- no match case ---
     def no_match_case(_):
