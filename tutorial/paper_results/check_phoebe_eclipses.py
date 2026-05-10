@@ -123,12 +123,12 @@ def _ensure_datasets(b, times):
         b.set_value_all('compute_times', dataset='lc_bolometric', value=times)
 
 
-def _default_icosphere(mass, bb, n_elements):
+def _default_icosphere(mass, radius, bb, n_elements):
     from spice.models.binary import Binary  # noqa: F401 - touch to warm import
     from spice.models.mesh_model import IcosphereModel
     from spice.models.mesh_view import get_mesh_view
     return get_mesh_view(
-        IcosphereModel.construct(n_elements, 1., mass, bb.solar_parameters, bb.parameter_names),
+        IcosphereModel.construct(n_elements, radius, mass, bb.solar_parameters, bb.parameter_names),
         jnp.array([0., 0., -1.]),
     )
 
@@ -188,7 +188,7 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, n_mesh_elements,
         b.get_parameter('t0_perpass@binary@component').value * DAYS_TO_YR,
         jnp.deg2rad(b.get_parameter('incl@binary@component').value),
         b.get_parameter('per0@binary@component').value * DEG_TO_RAD,
-        b.get_parameter('long_an@binary@component').value * DAYS_TO_YR,
+        b.get_parameter('long_an@binary@component').value * DEG_TO_RAD,
         b.get_parameter('requiv@primary@component').value,
         b.get_parameter('requiv@secondary@component').value,
         pad=1.1,
@@ -220,21 +220,41 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, n_mesh_elements,
 
     fluxes_phoebe = np.asarray(b.get_parameter('fluxes@lc_bolometric@model').value)
 
-    body1 = _default_icosphere(b.get_parameter('mass@primary@component').value, bb, n_mesh_elements)
-    body2 = _default_icosphere(b.get_parameter('mass@secondary@component').value, bb, n_mesh_elements)
+    body1 = _default_icosphere(
+        b.get_parameter('mass@primary@component').value,
+        b.get_parameter('requiv@primary@component').value,
+        bb, n_mesh_elements,
+    )
+    body2 = _default_icosphere(
+        b.get_parameter('mass@secondary@component').value,
+        b.get_parameter('requiv@secondary@component').value,
+        bb, n_mesh_elements,
+    )
     binary = Binary.from_bodies(body1, body2)
     binary = add_orbit(
         binary,
         P=b.get_parameter('period@binary@component').value * DAYS_TO_YR,
         ecc=b.get_parameter('ecc@binary@component').value,
-        T=b.get_parameter('t0_perpass@binary@component').value * DAYS_TO_YR,
+        # `T` (periastron-passage time) is required by add_orbit's signature
+        # but is currently a no-op inside get_orbit_jax — orbit phase is set
+        # entirely by `mean_anomaly`, treated as M at t=0. PHOEBE's mean_anom
+        # is M(t=t0_ref); for default_binary t0_ref=0 the two coincide.
+        T=0.0,
         i=jnp.deg2rad(b.get_parameter('incl@binary@component').value),
         omega=b.get_parameter('per0@binary@component').value * DEG_TO_RAD,
-        Omega=b.get_parameter('long_an@binary@component').value * DAYS_TO_YR,
-        vgamma=b.get_parameter('vgamma').value,
+        Omega=b.get_parameter('long_an@binary@component').value * DEG_TO_RAD,
+        # PHOEBE stores vgamma in km/s; SPICE's get_orbit_jax integrates in SI
+        # (z in m, time in s after *c.yr), so convert to m/s.
+        vgamma=b.get_parameter('vgamma').value * 1000.0,
         reference_time=b.get_parameter('t0_ref@binary@component').value * DAYS_TO_YR,
         mean_anomaly=b.get_parameter('mean_anom@binary@component').value * DEG_TO_RAD,
-        orbit_resolution_points=len(times_yr),
+        # SPICE's add_orbit precomputes positions on a uniform [0, P] grid, then
+        # linearly interpolates at evaluate_orbit_at_times. With resolution=n_times
+        # the eclipse window (a small fraction of P) ends up with ~1 grid point,
+        # so positions inside the eclipse are essentially extrapolated. Use a
+        # densely-sampled grid so interpolation error is sub-percent of a stellar
+        # radius across any reasonable eclipse window.
+        orbit_resolution_points=10000,
     )
 
     pb1, pb2 = evaluate_orbit_at_times(binary, times_yr)
