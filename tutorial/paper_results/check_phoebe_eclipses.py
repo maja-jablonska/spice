@@ -8,8 +8,8 @@ Grid mode (multiprocessing across a CSV of parameter sets):
     python check_phoebe_eclipses.py --grid-config grid.csv \
         --n-workers 16 --output_path lc_eclipse
 
-CSV columns (header required): inclination,period[,q,ecc,primary_mass,n_times].
-Missing optional columns fall back to the corresponding CLI flags.
+CSV columns (header required): inclination,period[,q,ecc,primary_mass,n_times,
+n_mesh_elements]. Missing optional columns fall back to the corresponding CLI flags.
 
 Each worker builds one PHOEBE default_binary() at startup and reuses it for
 every task — only parameter values and dataset times are updated between
@@ -123,12 +123,12 @@ def _ensure_datasets(b, times):
         b.set_value_all('compute_times', dataset='lc_bolometric', value=times)
 
 
-def _default_icosphere(mass, bb):
+def _default_icosphere(mass, bb, n_elements):
     from spice.models.binary import Binary  # noqa: F401 - touch to warm import
     from spice.models.mesh_model import IcosphereModel
     from spice.models.mesh_view import get_mesh_view
     return get_mesh_view(
-        IcosphereModel.construct(1000, 1., mass, bb.solar_parameters, bb.parameter_names),
+        IcosphereModel.construct(n_elements, 1., mass, bb.solar_parameters, bb.parameter_names),
         jnp.array([0., 0., -1.]),
     )
 
@@ -149,7 +149,7 @@ def init_worker():
     _WORKER['bol'] = Bolometric()
 
 
-def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
+def run_one(inclination, period, q, ecc, n_times, primary_mass, n_mesh_elements, output_path):
     """Run a single grid point, reusing the worker's PHOEBE bundle."""
     from spice.models.binary import Binary, add_orbit, evaluate_orbit_at_times
     from spice.models.orbit_utils import eclipse_timestamps_kepler
@@ -166,7 +166,7 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
     output_path.mkdir(parents=True, exist_ok=True)
     out_pkl = output_path / (
         f'eclipses_incl_{inclination}_period_{period}_q_{q}_ecc_{ecc}'
-        f'_primary_mass_{primary_mass}.pkl'
+        f'_primary_mass_{primary_mass}_nmesh_{n_mesh_elements}.pkl'
     )
     if out_pkl.exists():
         print(f"[skip] {out_pkl.name}")
@@ -216,12 +216,12 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
     _ensure_datasets(b, times)
     b.compute_pblums(pbflux=True, set_value=True)
     b.compute_ld_coeffs(ld_mode='manual', ld_func='linear', ld_coeffs=[0.])
-    b.run_compute(irrad_method='none', coordinates='uvw', ltte=False, ntriangles=20000)
+    b.run_compute(irrad_method='none', coordinates='uvw', ltte=False, ntriangles=n_mesh_elements)
 
     fluxes_phoebe = np.asarray(b.get_parameter('fluxes@lc_bolometric@model').value)
 
-    body1 = _default_icosphere(b.get_parameter('mass@primary@component').value, bb)
-    body2 = _default_icosphere(b.get_parameter('mass@secondary@component').value, bb)
+    body1 = _default_icosphere(b.get_parameter('mass@primary@component').value, bb, n_mesh_elements)
+    body2 = _default_icosphere(b.get_parameter('mass@secondary@component').value, bb, n_mesh_elements)
     binary = Binary.from_bodies(body1, body2)
     binary = add_orbit(
         binary,
@@ -264,6 +264,7 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, output_path):
             'period': period,
             'q': q,
             'ecc': ecc,
+            'n_mesh_elements': n_mesh_elements,
         }, f)
 
     # Bound JAX cache + Python heap growth across many tasks per worker
@@ -326,6 +327,7 @@ def _read_grid_csv(path, defaults):
                 'ecc': float(r.get('ecc') or defaults['ecc']),
                 'primary_mass': float(r.get('primary_mass') or defaults['primary_mass']),
                 'n_times': int(r.get('n_times') or defaults['n_times']),
+                'n_mesh_elements': int(r.get('n_mesh_elements') or defaults['n_mesh_elements']),
             })
     return rows
 
@@ -342,6 +344,10 @@ def main():
     parser.add_argument('--primary_mass', type=float, default=1.0, help='Primary mass [Msun]')
     parser.add_argument('--n_times', type=int, default=10,
                         help='Time points per run (split evenly between primary/secondary eclipse).')
+    parser.add_argument('--n_mesh_elements', type=int, default=1000,
+                        help='Surface mesh resolution. Sets both the SPICE icosphere subdivision '
+                             'count and PHOEBE ntriangles so the two codes are compared at '
+                             'matching resolution.')
     parser.add_argument('--output_path', type=str, default='lc_eclipse',
                         help='Output directory for per-run pickles.')
     parser.add_argument('--grid-config', type=Path, default=None,
@@ -351,7 +357,7 @@ def main():
     args = parser.parse_args()
 
     defaults = {'q': args.q, 'ecc': args.ecc, 'primary_mass': args.primary_mass,
-                'n_times': args.n_times}
+                'n_times': args.n_times, 'n_mesh_elements': args.n_mesh_elements}
 
     if args.grid_config is not None:
         tasks = _read_grid_csv(args.grid_config, defaults)
@@ -384,7 +390,7 @@ def main():
 
     init_worker()
     run_one(args.inclination, args.period, args.q, args.ecc,
-            args.n_times, args.primary_mass, args.output_path)
+            args.n_times, args.primary_mass, args.n_mesh_elements, args.output_path)
 
 
 if __name__ == '__main__':

@@ -79,27 +79,34 @@ mkdir -p "${OUTPUT_DIR}"
 # ---------------------------------------------------------------------------
 # If the user already has a grid CSV, point GRID_CSV at it and skip generation.
 # Otherwise build a default sweep here. Columns: inclination,period,q,ecc,
-# primary_mass,n_times.
+# primary_mass,n_times,n_mesh_elements.
+#
+# N_MESH_ELEMENTS sets both the SPICE icosphere subdivision count and PHOEBE's
+# ntriangles, so the two codes are compared at matching surface resolution.
+N_MESH_ELEMENTS="${N_MESH_ELEMENTS:-1000}"
 if [[ ! -s "${GRID_CSV}" ]]; then
-    python3 - "${GRID_CSV}" <<'PY'
-import csv, sys
+    N_MESH_ELEMENTS="${N_MESH_ELEMENTS}" python3 - "${GRID_CSV}" <<'PY'
+import csv, os, sys
 import numpy as np
 
-inclinations  = [85.0, 90.0]        # degrees
-periods       = np.linspace(2.0, 100.0, 10)         # days
-qs            = np.linspace(0.5, 1.0, 5)
-eccs          = np.linspace(0.0, 0.8, 5)
-primary_mass  = 1.0
-n_times       = 20
+inclinations    = [85.0, 90.0]        # degrees
+periods         = np.linspace(2.0, 100.0, 10)         # days
+qs              = np.linspace(0.5, 1.0, 5)
+eccs            = np.linspace(0.0, 0.8, 5)
+primary_mass    = 1.0
+n_times         = 20
+n_mesh_elements = int(os.environ["N_MESH_ELEMENTS"])
 
 with open(sys.argv[1], "w", newline="") as f:
     w = csv.writer(f)
-    w.writerow(["inclination", "period", "q", "ecc", "primary_mass", "n_times"])
+    w.writerow(["inclination", "period", "q", "ecc", "primary_mass", "n_times",
+                "n_mesh_elements"])
     for incl in inclinations:
         for P in periods:
             for q in qs:
                 for e in eccs:
-                    w.writerow([f"{incl:.4f}", f"{P:.4f}", q, e, primary_mass, n_times])
+                    w.writerow([f"{incl:.4f}", f"{P:.4f}", q, e, primary_mass,
+                                n_times, n_mesh_elements])
 PY
     echo "Generated grid: ${GRID_CSV}"
 fi
