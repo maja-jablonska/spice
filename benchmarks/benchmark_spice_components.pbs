@@ -3,15 +3,28 @@
 #  Gadi PBS job — run the SPICE spectrum-synthesis benchmark on a GPU.
 #
 #  Runs `benchmark_spice_components.py`, which times `simulate_observed_flux`
-#  for three intensity sources (`static`, `gaussian`, `linear_grid`) while
-#  sweeping the number of wavelengths, the mesh size, and the mesh- and
-#  wavelength-chunk sizes.  Results stream to `<OUTPUT_PREFIX>.csv` as they
-#  are taken (so an interrupted job keeps its partial results) and a 3-panel
-#  plot is written to `<OUTPUT_PREFIX>.png` at the end.
+#  for several intensity sources — `static`, `gaussian`, `linear_grid`, and the
+#  pretrained `aemu_harps` / `aemu_small_random` bundles
+#  (`aemu.Emulator.from_pretrained('RozanskiT/TPayne-spice-{harps,small-random}')`)
+#  — while sweeping the number of wavelengths, the mesh size, and the mesh- and
+#  wavelength-chunk sizes.  Results stream to `<OUTPUT_PREFIX>.csv` as they are
+#  taken (so an interrupted job keeps its partial results) and a 3-panel plot
+#  is written to `<OUTPUT_PREFIX>.png` at the end.
 #
 #  The benchmark script only pins JAX to the CPU backend on macOS, so on a
 #  Gadi GPU node JAX automatically picks up CUDA — no code change needed, just
 #  submit this from a GPU queue.
+#
+#  AEMU BUNDLES: the `aemu_*` sources need the `[aemu]` extra
+#  (astro_emulators_toolkit) installed in the env, and they download from the
+#  Hugging Face Hub on first use.  Gadi compute nodes have no internet, so
+#  pre-populate the cache on a login node first, e.g.
+#      export HF_HOME=/scratch/y89/$USER/hf-cache
+#      python -c "from astro_emulators_toolkit import Emulator; \
+#          [Emulator.from_pretrained(n) for n in \
+#           ('RozanskiT/TPayne-spice-harps','RozanskiT/TPayne-spice-small-random')]"
+#  and pass the same HF_HOME below.  If a bundle can't be loaded the script
+#  just skips that source and carries on with the rest.
 #
 #  USAGE
 #    1. Edit the "EDIT" lines below: project code (-P), queue (-q), storage,
@@ -19,9 +32,12 @@
 #    2. Submit:   qsub benchmarks/benchmark_spice_components.pbs
 #       Override knobs at submit time, e.g. a quick GPU smoke test:
 #         qsub -v QUICK=1 benchmarks/benchmark_spice_components.pbs
-#       or a focused run:
+#       a focused run:
 #         qsub -v SOURCES="static linear_grid",SWEEPS="mesh chunks",N_RUNS=9 \
 #              benchmarks/benchmark_spice_components.pbs
+#       include the pretrained emulators (cache pre-populated, see above):
+#         qsub -v SOURCES="static aemu_harps aemu_small_random",\
+#HF_HOME=/scratch/y89/$USER/hf-cache benchmarks/benchmark_spice_components.pbs
 #    3. Monitor:  qstat -fx <jobid>  ;  tail -f benchmark_spice_components.o<jobid>
 #    4. Restart:  just resubmit — it re-runs from scratch and overwrites the CSV.
 #
@@ -60,8 +76,8 @@ module load python3/3.11.7        # nearest available; check `module avail pytho
 # wheels), uncomment and pin to whatever the env was built against:
 # module load cuda/12.6.2 cudnn/9.5.0-cuda12
 
-# Conda/venv with spice + jax[cuda] (and matplotlib, zarr, pandas, pyarrow)
-# installed.
+# Conda/venv with spice + jax[cuda] (and matplotlib, zarr, pandas, pyarrow;
+# plus stellar-spice[aemu] for the aemu_* sources) installed.
 PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
 
 # Don't let SPICE / JAX fall back to CPU; let XLA size its own GPU allocation.
@@ -73,11 +89,13 @@ export TF_CPP_MIN_LOG_LEVEL=2
 export OMP_NUM_THREADS=${PBS_NCPUS:-12}
 export MKL_NUM_THREADS=${PBS_NCPUS:-12}
 export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-12}
+# Hugging Face cache for the aemu_* bundles (override with `qsub -v HF_HOME=...`).
+export HF_HOME="${HF_HOME:-$PBS_O_WORKDIR/hf-cache}"
 
 # ---------------------------------------------------------------------------
 # 2) Knobs (override with `qsub -v NAME=value,...`)
 # ---------------------------------------------------------------------------
-SOURCES="${SOURCES:-static gaussian linear_grid}"   # subset of: static gaussian linear_grid
+SOURCES="${SOURCES:-static gaussian linear_grid}"   # subset of: static gaussian linear_grid aemu_harps aemu_small_random
 SWEEPS="${SWEEPS:-wavelengths mesh chunks}"         # subset of: wavelengths mesh chunks
 N_RUNS="${N_RUNS:-5}"                               # timed runs per configuration
 QUICK="${QUICK:-0}"                                 # 1 -> tiny sizes (smoke test)
@@ -99,6 +117,7 @@ echo "Job:        ${PBS_JOBID:-<interactive>}"
 echo "Node:       $(hostname)"
 echo "CPUs/GPUs:  ${PBS_NCPUS:-?} / ${PBS_NGPUS:-?}"
 echo "Python:     ${PYTHON_BIN}"
+echo "HF_HOME:    ${HF_HOME}"
 echo "Args:       ${ARGS[*]}"
 echo "Output:     ${OUTPUT_PREFIX}.csv / .png"
 echo "==============================================================="

@@ -1,20 +1,29 @@
 #!/usr/bin/env python
 """Benchmark spectrum synthesis in SPICE.
 
-Three intensity sources of increasing cost are compared, all driven through
+Several intensity sources of increasing cost are compared, all driven through
 ``spice.spectrum.simulate_observed_flux``:
 
-* ``static``       – a fixed, precomputed spectrum that is merely interpolated
-  onto the requested wavelengths and is independent of stellar parameters and
-  ``mu``.  This isolates the cost of SPICE's own machinery: mesh geometry,
-  Doppler shifting, area/visibility weighting, the wavelength + mesh-element
-  chunking, and the ``lax.scan`` accumulation.
-* ``gaussian``     – ``GaussianLineEmulator``: a small parametric emulator
+* ``static``            – a fixed, precomputed spectrum that is merely
+  interpolated onto the requested wavelengths and is independent of stellar
+  parameters and ``mu``.  Isolates the cost of SPICE's own machinery: mesh
+  geometry, Doppler shifting, area/visibility weighting, the wavelength +
+  mesh-element chunking, and the ``lax.scan`` accumulation.
+* ``gaussian``          – ``GaussianLineEmulator``: a small parametric emulator
   (Planck continuum plus a handful of Gaussian absorption lines).
-* ``linear_grid``  – ``FluxLazyZarrInterpolator`` over a tiny synthetic zarr
-  grid: multilinear interpolation in (Teff, logg), linear wavelength
+* ``linear_grid``       – ``FluxLazyZarrInterpolator`` over a tiny synthetic
+  zarr grid: multilinear interpolation in (Teff, logg), linear wavelength
   resampling, and a linear limb-darkening law.  A stand-in for a real
   precomputed atmosphere grid.
+* ``aemu_harps``        – ``IntensityPretrainedAemuSpectrumEmulator`` wrapping
+  ``aemu.Emulator.from_pretrained('RozanskiT/TPayne-spice-harps')``.
+* ``aemu_small_random`` – same wrapper around
+  ``aemu.Emulator.from_pretrained('RozanskiT/TPayne-spice-small-random')``.
+
+The two ``aemu_*`` sources need the optional dependency
+``astro_emulators_toolkit`` (``pip install "stellar-spice[aemu]"``) and
+download their bundles from the Hugging Face Hub on first use, so they are not
+in the default ``--sources`` set — request them explicitly.
 
 Three sweeps are run for each source:
 
@@ -25,8 +34,8 @@ Three sweeps are run for each source:
 3. ``chunks``      – a 2-D sweep over the mesh-element chunk size and the
    wavelength chunk size (fixed mesh, fixed wavelengths).
 
-Results are written to a CSV; unless ``--no-plot`` is given they are also
-plotted.
+Results stream to a CSV as they are taken; unless ``--no-plot`` is given a
+3-panel plot is written at the end.
 
 Examples
 --------
@@ -34,6 +43,8 @@ Examples
     python benchmark_spice_components.py --quick
     python benchmark_spice_components.py --sources static linear_grid \\
         --mesh-resolutions 300 1000 5000 --n-runs 7
+    python benchmark_spice_components.py \\
+        --sources static aemu_harps aemu_small_random
 """
 
 import argparse
@@ -74,7 +85,13 @@ from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
 # --------------------------------------------------------------------------- #
 # Defaults                                                                     #
 # --------------------------------------------------------------------------- #
-SOURCES = ("static", "gaussian", "linear_grid")
+# Hugging Face bundle ids for the pretrained astro_emulators_toolkit sources.
+AEMU_BUNDLES = {
+    "aemu_harps": "RozanskiT/TPayne-spice-harps",
+    "aemu_small_random": "RozanskiT/TPayne-spice-small-random",
+}
+LIGHTWEIGHT_SOURCES = ("static", "gaussian", "linear_grid")
+SOURCES = LIGHTWEIGHT_SOURCES + tuple(AEMU_BUNDLES)   # everything selectable
 
 # Wavelength window used for every sweep (Angstrom).  Wide enough that the
 # Gaussian lines fall inside it and the synthetic grid brackets it.
@@ -224,6 +241,24 @@ def build_linear_grid(stack: ExitStack):
     )
 
 
+def build_aemu_emulator(hf_name):
+    """Wrap ``aemu.Emulator.from_pretrained(hf_name)`` in SPICE's intensity
+    adapter (downloads the bundle from the Hugging Face Hub on first use)."""
+    try:
+        # Importing this module eagerly imports astro_emulators_toolkit, which
+        # raises ImportError/ValueError when the optional extra is missing.
+        from spice.spectrum.aemu_spectrum_emulator import (
+            IntensityPretrainedAemuSpectrumEmulator,
+        )
+    except (ImportError, ValueError) as exc:
+        raise RuntimeError(
+            f"the {hf_name!r} source needs astro_emulators_toolkit; install it "
+            'with `pip install "stellar-spice[aemu]"`'
+        ) from exc
+    print(f"  loading pretrained emulator '{hf_name}' ...")
+    return IntensityPretrainedAemuSpectrumEmulator(hf_name)
+
+
 def make_source(name, stack: ExitStack):
     if name == "static":
         return build_static_spectrum()
@@ -231,27 +266,40 @@ def make_source(name, stack: ExitStack):
         return build_gaussian_emulator()
     if name == "linear_grid":
         return build_linear_grid(stack)
+    if name in AEMU_BUNDLES:
+        return build_aemu_emulator(AEMU_BUNDLES[name])
     raise ValueError(f"unknown source {name!r}")
 
 
 # --------------------------------------------------------------------------- #
 # Mesh + wavelength helpers                                                    #
 # --------------------------------------------------------------------------- #
+def _source_default_params(source):
+    """A safe, in-bounds parameter vector for ``source``.
+
+    Emulators that advertise ``min_stellar_parameters`` / ``max_stellar_parameters``
+    (the zarr grid and the aemu bundles) get the midpoint of those bounds, which
+    keeps the lookups/networks out of their extrapolation regime; everything
+    else falls back to ``solar_parameters``.  The actual values don't affect
+    timing -- none of the sources branch on the data -- so this is purely about
+    avoiding out-of-bounds warnings / NaNs.
+    """
+    lo = getattr(source, "min_stellar_parameters", None)
+    hi = getattr(source, "max_stellar_parameters", None)
+    if lo is not None and hi is not None:
+        return jnp.asarray(0.5 * (np.asarray(lo, dtype=float) + np.asarray(hi, dtype=float)))
+    return jnp.asarray(source.solar_parameters)
+
+
 def make_mesh(source, n_vertices):
     param_names = list(source.stellar_parameter_names)
-    params = jnp.asarray(source.solar_parameters)
-    # ``override_log_g`` only matters when 'logg' is one of the parameters
-    # (the synthetic grid). Suppress its warning for the single-parameter
-    # emulators by disabling it there.
-    override_log_g = any(
-        pn.lower() in ("logg", "log_g", "loggs", "log_gs", "log g", "log gs")
-        for pn in param_names
-    )
+    params = _source_default_params(source)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
+        # ``params`` is already in-bounds, so don't let ``override_log_g`` move
+        # the logg column to a (possibly out-of-grid) self-gravity value.
         return IcosphereModel.construct(
-            n_vertices, 1.0, 1.0, params, param_names,
-            override_log_g=override_log_g,
+            n_vertices, 1.0, 1.0, params, param_names, override_log_g=False,
         )
 
 
@@ -483,8 +531,10 @@ def parse_args(argv=None):
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--sources", nargs="+", choices=SOURCES, default=list(SOURCES),
-                   help="which intensity sources to benchmark")
+    p.add_argument("--sources", nargs="+", choices=SOURCES, default=list(LIGHTWEIGHT_SOURCES),
+                   help="which intensity sources to benchmark (the aemu_* sources "
+                        'need `pip install "stellar-spice[aemu]"` and a Hugging Face '
+                        "download, so they are off by default)")
     p.add_argument("--sweeps", nargs="+", choices=("wavelengths", "mesh", "chunks"),
                    default=["wavelengths", "mesh", "chunks"], help="which sweeps to run")
     p.add_argument("--n-runs", type=int, default=N_TIMING_RUNS,
@@ -567,11 +617,17 @@ def main(argv=None):
     csv_path = f"{args.output_prefix}.csv"
     sink = CsvSink(csv_path)
     print(f"streaming results to : {csv_path}")
+    skipped = []
     try:
         with ExitStack() as stack:
-            sources = {name: make_source(name, stack) for name in args.sources}
             for name in args.sources:
-                src = sources[name]
+                print(f"\n========== source: {name} ==========")
+                try:
+                    src = make_source(name, stack)
+                except Exception as exc:  # noqa: BLE001 - keep going with the rest
+                    print(f"!! skipping source {name!r}: {exc}")
+                    skipped.append(name)
+                    continue
                 if "wavelengths" in args.sweeps:
                     sweep_wavelengths(name, src, cfg, sink)
                 if "mesh" in args.sweeps:
@@ -594,10 +650,15 @@ def main(argv=None):
             continue
         print(f"[{sweep}]")
         for r in sweep_rows:
-            print(f"  {r['source']:<12} n_mesh={r['n_mesh_elements']:>7d} "
-                  f"n_wl={r['n_wavelengths']:>7d} cs={r['chunk_size']:>6d} "
-                  f"wcs={r['wavelengths_chunk_size']:>6d}  "
+            print(f"  {r['source']:<18} n_mesh={r['n_mesh_elements']:>7d} "
+                  f"n_wl={r['n_wavelengths']:>7d} cs={r['chunk_size']:>7d} "
+                  f"wcs={r['wavelengths_chunk_size']:>7d}  "
                   f"{r['mean_time_s']*1e3:9.2f} ms")
+    if skipped:
+        print(f"\nskipped sources: {', '.join(skipped)}")
+    if not all_rows:
+        print("\nNo measurements were produced.")
+        raise SystemExit(1)
     print("\nDone.")
 
 
