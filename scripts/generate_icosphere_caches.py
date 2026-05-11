@@ -16,8 +16,6 @@ import pickle
 import sys
 import time
 
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
-
 REPO_ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_PATH   = os.path.join(REPO_ROOT, "src")
 CACHE_DIR  = os.path.join(SRC_PATH, "spice", "icosphere_cache")
