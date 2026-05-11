@@ -23,3 +23,7 @@ tutorial/paper_results/results/tutorial/paper_results/
 *.txt
 *.csv
 *.log
+
+# Packaged icosphere caches must ship with the wheel (see pyproject.toml
+# [tool.setuptools.package-data]).
+!src/spice/icosphere_cache/*.pickle
