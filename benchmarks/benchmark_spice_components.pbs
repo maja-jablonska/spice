@@ -1,0 +1,132 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS job — run the SPICE spectrum-synthesis benchmark on a GPU.
+#
+#  Runs `benchmark_spice_components.py`, which times `simulate_observed_flux`
+#  for several intensity sources — `static`, `gaussian`, `linear_grid`, and the
+#  pretrained `aemu_harps` / `aemu_small_random` bundles
+#  (`aemu.Emulator.from_pretrained('RozanskiT/TPayne-spice-{harps,small-random}')`)
+#  — while sweeping the number of wavelengths, the mesh size, and the mesh- and
+#  wavelength-chunk sizes.  Results stream to `<OUTPUT_PREFIX>.csv` as they are
+#  taken (so an interrupted job keeps its partial results) and a 3-panel plot
+#  is written to `<OUTPUT_PREFIX>.png` at the end.
+#
+#  The benchmark script only pins JAX to the CPU backend on macOS, so on a
+#  Gadi GPU node JAX automatically picks up CUDA — no code change needed, just
+#  submit this from a GPU queue.
+#
+#  AEMU BUNDLES: the `aemu_*` sources need the `[aemu]` extra
+#  (astro_emulators_toolkit) installed in the env, and they download from the
+#  Hugging Face Hub on first use.  Gadi compute nodes have no internet, so
+#  pre-populate the cache on a login node first, e.g.
+#      export HF_HOME=/scratch/y89/$USER/hf-cache
+#      python -c "from astro_emulators_toolkit import Emulator; \
+#          [Emulator.from_pretrained(n) for n in \
+#           ('RozanskiT/TPayne-spice-harps','RozanskiT/TPayne-spice-small-random')]"
+#  and pass the same HF_HOME below.  If a bundle can't be loaded the script
+#  just skips that source and carries on with the rest.
+#
+#  USAGE
+#    1. Edit the "EDIT" lines below: project code (-P), queue (-q), storage,
+#       PYTHON_BIN, and (optionally) the CUDA module load.
+#    2. Submit:   qsub benchmarks/benchmark_spice_components.pbs
+#       Override knobs at submit time, e.g. a quick GPU smoke test:
+#         qsub -v QUICK=1 benchmarks/benchmark_spice_components.pbs
+#       a focused run:
+#         qsub -v SOURCES="static linear_grid",SWEEPS="mesh chunks",N_RUNS=9 \
+#              benchmarks/benchmark_spice_components.pbs
+#       include the pretrained emulators (cache pre-populated, see above):
+#         qsub -v SOURCES="static aemu_harps aemu_small_random",\
+#HF_HOME=/scratch/y89/$USER/hf-cache benchmarks/benchmark_spice_components.pbs
+#    3. Monitor:  qstat -fx <jobid>  ;  tail -f benchmark_spice_components.o<jobid>
+#    4. Restart:  just resubmit — it re-runs from scratch and overwrites the CSV.
+#
+#  RESOURCE NOTES (gpuvolta)
+#    * ncpus must be a multiple of 12 and ngpus = ncpus/12; mem <= ~96 GB per
+#      GPU.  One V100 is plenty — synthesis is chunked over surface elements
+#      and wavelengths inside `simulate_observed_flux`.
+#    * Most of the walltime is XLA compilation: the full default run does
+#      ~60 distinct jit specialisations (one per source x chunk-size combo and
+#      per array-shape change).  01:00:00 is comfortable for the defaults;
+#      bump it if you enlarge --mesh-resolutions / --n-wavelengths-sweep a lot.
+#============================================================================
+
+#PBS -P mk27                                  # EDIT: your NCI project code
+#PBS -q gpuvolta                               # EDIT: GPU queue (gpuvolta / dgxa100 / an RSAA GPU queue)
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=90GB
+#PBS -l walltime=01:00:00
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/y89+gdata/y89          # EDIT: storage your env / outputs live on
+#PBS -l wd
+#PBS -N spice_benchmark
+#PBS -j oe
+#PBS -m ae
+#PBS -M maja.jablonska@anu.edu.au
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# 1) Environment
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.7        # nearest available; check `module avail python3`
+# If your JAX install relies on system CUDA (rather than the pip cuda12 plugin
+# wheels), uncomment and pin to whatever the env was built against:
+# module load cuda/12.6.2 cudnn/9.5.0-cuda12
+
+# Conda/venv with spice + jax[cuda] (and matplotlib, zarr, pandas, pyarrow;
+# plus stellar-spice[aemu] for the aemu_* sources) installed.
+PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
+
+# Don't let SPICE / JAX fall back to CPU; let XLA size its own GPU allocation.
+unset JAX_PLATFORMS
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+export TF_CPP_MIN_LOG_LEVEL=2
+# Host-side BLAS threads for the small numpy/grid bits — match the cores PBS gave us.
+export OMP_NUM_THREADS=${PBS_NCPUS:-12}
+export MKL_NUM_THREADS=${PBS_NCPUS:-12}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-12}
+# Hugging Face cache for the aemu_* bundles (override with `qsub -v HF_HOME=...`).
+export HF_HOME="${HF_HOME:-$PBS_O_WORKDIR/hf-cache}"
+
+# ---------------------------------------------------------------------------
+# 2) Knobs (override with `qsub -v NAME=value,...`)
+# ---------------------------------------------------------------------------
+SOURCES="${SOURCES:-static gaussian linear_grid}"   # subset of: static gaussian linear_grid aemu_harps aemu_small_random
+SWEEPS="${SWEEPS:-wavelengths mesh chunks}"         # subset of: wavelengths mesh chunks
+N_RUNS="${N_RUNS:-5}"                               # timed runs per configuration
+QUICK="${QUICK:-0}"                                 # 1 -> tiny sizes (smoke test)
+X64="${X64:-1}"                                     # 1 -> float64 (SPICE test default); 0 -> float32 (often faster on GPU)
+OUTPUT_DIR="${OUTPUT_DIR:-$PBS_O_WORKDIR/benchmark_results}"
+OUTPUT_PREFIX="${OUTPUT_PREFIX:-$OUTPUT_DIR/spice_components_${PBS_JOBID:-local}}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"                        # anything else, e.g. "--mesh-resolutions 300 1000 5000 20000 80000"
+mkdir -p "$OUTPUT_DIR"
+
+ARGS=( --sources $SOURCES --sweeps $SWEEPS --n-runs "$N_RUNS" --output-prefix "$OUTPUT_PREFIX" )
+[ "$QUICK" = "1" ] && ARGS+=( --quick )
+[ "$X64" = "0" ] && ARGS+=( --no-x64 )
+[ -n "$EXTRA_ARGS" ] && ARGS+=( $EXTRA_ARGS )
+
+cd "$PBS_O_WORKDIR"
+
+echo "==============================================================="
+echo "Job:        ${PBS_JOBID:-<interactive>}"
+echo "Node:       $(hostname)"
+echo "CPUs/GPUs:  ${PBS_NCPUS:-?} / ${PBS_NGPUS:-?}"
+echo "Python:     ${PYTHON_BIN}"
+echo "HF_HOME:    ${HF_HOME}"
+echo "Args:       ${ARGS[*]}"
+echo "Output:     ${OUTPUT_PREFIX}.csv / .png"
+echo "==============================================================="
+nvidia-smi || true
+"${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, '| devices:', jax.devices())" || true
+
+# ---------------------------------------------------------------------------
+# 3) Run
+# ---------------------------------------------------------------------------
+"${PYTHON_BIN}" -u benchmarks/benchmark_spice_components.py "${ARGS[@]}"
+
+echo "[$(date '+%F %T')] done — results in ${OUTPUT_PREFIX}.csv"
