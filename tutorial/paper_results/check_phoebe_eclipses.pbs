@@ -124,15 +124,37 @@ echo "==============================================================="
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-# --n-workers = PBS_NCPUS gives one PHOEBE bundle per CPU. Drop to ~PBS_NCPUS/2
-# if a worker runs out of memory (each worker holds a PHOEBE bundle plus JAX
-# caches; 4 GB/worker is a safe headroom estimate on the normal queue).
+# Parallelism vs memory: each worker holds PHOEBE + JAX; peak RSS per worker can
+# reach tens of GB on hard grid points. Do NOT set --n-workers = PBS_NCPUS unless
+# you have measured a safe per-worker peak. Rule of thumb on a 400 GB node:
+#   N_WORKERS ≈ (0.6 * mem_GB) / peak_RSS_GB_per_worker
+# Example: if `ps` shows peaks ~25 GB, use N_WORKERS≈9–12, not 104.
+# Override before qsub, e.g.  export N_WORKERS=12
+N_WORKERS="${N_WORKERS:-$(( PBS_NCPUS / 8 ))}"
+if (( N_WORKERS < 1 )); then N_WORKERS=1; fi
+# Recycle workers so JAX/PHOEBE heap cannot grow without bound across thousands
+# of tasks (slower per task due to re-init). Default 15 when unset; set
+# MAX_TASKS_PER_CHILD= to an empty string in this script to omit the flag entirely.
+if ! [[ -v MAX_TASKS_PER_CHILD ]]; then
+    MAX_TASKS_PER_CHILD=15
+fi
+MTPC_ARGS=()
+if [[ -n "${MAX_TASKS_PER_CHILD}" ]]; then
+    MTPC_ARGS=(--max-tasks-per-child "${MAX_TASKS_PER_CHILD}")
+fi
 #
 # `set -e` above means a non-zero exit from python (i.e. a non-PHOEBE-convergence
 # error inside any worker) will skip the trailing "Done." line and fail the job.
+echo "Python workers: ${N_WORKERS}  (PBS_NCPUS=${PBS_NCPUS})"
+if ((${#MTPC_ARGS[@]})); then
+    echo "maxtasksperchild: ${MAX_TASKS_PER_CHILD}"
+else
+    echo "maxtasksperchild: (disabled)"
+fi
 if "${PYTHON_BIN}" "${SPICE_REPO}/tutorial/paper_results/check_phoebe_eclipses.py" \
     --grid-config "${GRID_CSV}" \
-    --n-workers   "${PBS_NCPUS}" \
+    --n-workers   "${N_WORKERS}" \
+    "${MTPC_ARGS[@]}" \
     --output_path "${OUTPUT_DIR}"; then
     echo "Done. Outputs in ${OUTPUT_DIR}"
 else

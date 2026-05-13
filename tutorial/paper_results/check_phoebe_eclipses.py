@@ -6,7 +6,7 @@ Single-run (backwards-compatible):
 
 Grid mode (multiprocessing across a CSV of parameter sets):
     python check_phoebe_eclipses.py --grid-config grid.csv \
-        --n-workers 16 --output_path lc_eclipse
+        --n-workers 16 --max-tasks-per-child 10 --output_path lc_eclipse
 
 CSV columns (header required): inclination,period[,q,ecc,primary_mass,n_times,
 n_mesh_elements]. Missing optional columns fall back to the corresponding CLI flags.
@@ -374,6 +374,15 @@ def main():
                         help='CSV grid file. When set, runs all rows in parallel.')
     parser.add_argument('--n-workers', type=int, default=os.cpu_count() or 1,
                         help='Number of parallel workers (grid mode).')
+    parser.add_argument(
+        '--max-tasks-per-child',
+        type=int,
+        default=None,
+        metavar='N',
+        help='Recycle each worker after N grid tasks (multiprocessing Pool maxtasksperchild). '
+             'Use a small value (e.g. 1–20) if worker RSS grows without bound (JAX/PHOEBE caches). '
+             'Default: unlimited (same worker for the whole run).',
+    )
     args = parser.parse_args()
 
     defaults = {'q': args.q, 'ecc': args.ecc, 'primary_mass': args.primary_mass,
@@ -392,7 +401,11 @@ def main():
                 # which propagates out of main() and aborts the run.
                 _process_task(t)
         else:
-            with mp.Pool(n_workers, initializer=init_worker, maxtasksperchild=None) as pool:
+            with mp.Pool(
+                n_workers,
+                initializer=init_worker,
+                maxtasksperchild=args.max_tasks_per_child,
+            ) as pool:
                 try:
                     for _ in tqdm(pool.imap_unordered(_process_task, tasks), total=len(tasks)):
                         pass
