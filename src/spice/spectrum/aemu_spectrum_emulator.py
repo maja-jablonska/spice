@@ -5,6 +5,7 @@ from jaxtyping import ArrayLike
 import numpy as np
 import jax
 import jax.numpy as jnp
+import os
 import warnings
 
 from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
@@ -39,6 +40,99 @@ def _lazy_import_astro_emulators_toolkit():
 aemu, _apply_jax_runtime, _make_frozen_apply_runtime = _lazy_import_astro_emulators_toolkit()
 
 
+def _load_emulator(name: str) -> "aemu.Emulator":
+    """Load an :class:`aemu.Emulator` from ``name``.
+
+    Accepts either a local bundle directory (loaded with ``Emulator.from_bundle``)
+    or a Hugging Face repo id (loaded with ``Emulator.from_pretrained``). The
+    older code path only supported the latter, which broke when ``name`` was a
+    path to a bundle produced by a local training run.
+    """
+    try:
+        is_dir = os.path.isdir(name)
+    except (TypeError, ValueError):
+        is_dir = False
+    if is_dir:
+        return aemu.Emulator.from_bundle(name)
+    return aemu.Emulator.from_pretrained(name)
+
+
+def _affine_section_of_combined(combined: Any, side: str) -> Optional[Dict[str, Any]]:
+    """Extract the input- or output-side affine block from a *combined*
+    ``reference_scaling`` block whose ``min_tree`` / ``max_tree`` are nested by
+    section (``{"inputs": {...}, "outputs": {...}}``). Returns ``None`` when the
+    block is absent or not laid out this way."""
+    if not isinstance(combined, dict):
+        return None
+    min_tree = combined.get("min_tree")
+    max_tree = combined.get("max_tree")
+    if not isinstance(min_tree, dict) or not isinstance(max_tree, dict):
+        return None
+    side_min = min_tree.get(side)
+    side_max = max_tree.get(side)
+    if not isinstance(side_min, dict) or not isinstance(side_max, dict):
+        return None
+    block: Dict[str, Any] = {"min_tree": side_min, "max_tree": side_max}
+    for key in ("kind", "parametrization"):
+        value = combined.get(key)
+        if value is not None:
+            block[key] = value
+    return block
+
+
+def _affine_reference_scaling(emulator: "aemu.Emulator", side: str) -> Optional[Dict[str, Any]]:
+    """Return ``{"min_tree": ..., "max_tree": ...}`` affine reference scaling for
+    ``side`` (``"inputs"`` / ``"outputs"``), tolerating the toolkit versions we
+    support:
+
+    * older bundles expose split top-level ``reference_scaling_inputs`` /
+      ``reference_scaling_outputs`` blocks (and the ``Emulator`` surfaces them
+      as attributes);
+    * newer bundles keep a single ``reference_scaling`` block whose
+      ``min_tree`` / ``max_tree`` are nested by section.
+
+    Falls back to reading the raw ``emulator.spec`` if the convenience
+    attributes are missing entirely. Returns ``None`` when nothing usable is
+    found (callers already treat ``None`` as "bundle declares no scaling").
+    """
+    block = getattr(emulator, f"reference_scaling_{side}", None)
+    if isinstance(block, dict) and isinstance(block.get("min_tree"), dict) and isinstance(block.get("max_tree"), dict):
+        return block
+
+    section = _affine_section_of_combined(getattr(emulator, "reference_scaling", None), side)
+    if section is not None:
+        return section
+
+    spec = getattr(emulator, "spec", None)
+    if isinstance(spec, dict):
+        block = spec.get(f"reference_scaling_{side}")
+        if isinstance(block, dict) and isinstance(block.get("min_tree"), dict) and isinstance(block.get("max_tree"), dict):
+            return block
+        section = _affine_section_of_combined(spec.get("reference_scaling"), side)
+        if section is not None:
+            return section
+    return None
+
+
+def _input_domain_param_bounds(emulator: "aemu.Emulator", which: str) -> Optional[ArrayLike]:
+    """Return the ``parameters`` leaf of ``input_domain`` ``{which}_tree``
+    (``which`` is ``"min"`` / ``"max"``), tolerating both the flat
+    (``{"parameters": ...}``) and section-nested (``{"inputs": {"parameters": ...}}``)
+    layouts. Returns ``None`` if the bundle declares no such bounds."""
+    domain = getattr(emulator, "input_domain", None)
+    if not isinstance(domain, dict):
+        return None
+    tree = domain.get(f"{which}_tree")
+    if not isinstance(tree, dict):
+        return None
+    if "parameters" in tree:
+        return tree["parameters"]
+    inputs = tree.get("inputs")
+    if isinstance(inputs, dict) and "parameters" in inputs:
+        return inputs["parameters"]
+    return None
+
+
 def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> ArrayLike:
     # Use ``is None`` / dict-empty check explicitly: ``if not parameter_values``
     # raises on multi-element numpy arrays ("truth value is ambiguous").
@@ -62,7 +156,11 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
 class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
     def __init__(self, emulator: aemu.Emulator):
         self._emulator = emulator
-        self.ref = emulator.reference_scaling_inputs
+        # Input-side affine reference scaling. Newer toolkit builds no longer
+        # expose ``Emulator.reference_scaling_inputs`` directly (they keep a
+        # single ``reference_scaling`` block nested by section), so resolve it
+        # tolerantly. ``None`` means the bundle declares no input scaling.
+        self.ref = _affine_reference_scaling(emulator, "inputs")
         self._apply: Callable[..., Any] = self._build_frozen_apply(emulator)
 
     @staticmethod
@@ -119,14 +217,20 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
     @override
     @property
     def min_stellar_parameters(self) -> ArrayLike:
-        bounds = np.asarray(self.emulator.input_domain['min_tree']['parameters'])
+        bounds = _input_domain_param_bounds(self.emulator, "min")
+        if bounds is None:
+            raise ValueError("Bundle does not declare input_domain parameter bounds.")
+        bounds = np.asarray(bounds)
         idx = self._mu_index()
         return bounds if idx is None else np.delete(bounds, idx)
 
     @override
     @property
     def max_stellar_parameters(self) -> ArrayLike:
-        bounds = np.asarray(self.emulator.input_domain['max_tree']['parameters'])
+        bounds = _input_domain_param_bounds(self.emulator, "max")
+        if bounds is None:
+            raise ValueError("Bundle does not declare input_domain parameter bounds.")
+        bounds = np.asarray(bounds)
         idx = self._mu_index()
         return bounds if idx is None else np.delete(bounds, idx)
 
@@ -161,7 +265,8 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
 class PretrainedAemuSpectrumEmulator(AemuSpectrumEmulator):
     def __init__(self, name: str):
-        emulator = aemu.Emulator.from_pretrained(name)
+        # ``name`` may be a Hugging Face repo id or a local bundle directory.
+        emulator = _load_emulator(name)
         super().__init__(emulator)
 
 
@@ -262,7 +367,8 @@ class FluxPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
 class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
     """Wavelength-conditioned, two-channel, log10-output intensity bundle.
 
-    Matches bundles like ``RozanskiT/TPayne-spice-small-random``:
+    Matches bundles like ``RozanskiT/TPayne-spice-small-random`` (and the
+    locally-trained "new FE" Tpayne intensity bundles):
         * Inputs:  ``{"parameters": (B, n_p), "wavelengths": (B, n_w)}`` —
           ``wavelengths`` are **log10(Angstrom)**. The full input parameter
           channel list includes ``mu`` (the bundle is a true intensity
@@ -271,7 +377,10 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
         * Outputs: ``{"flux": (B, n_w, 2)}`` with channels
           ``[log10 line intensity, log10 continuum intensity]``.
         * Both ``inputs`` and ``outputs`` are min-max normalised against the
-          bundle's ``reference_scaling_inputs`` / ``reference_scaling_outputs``.
+          bundle's affine reference scaling — exposed either as split
+          ``reference_scaling_inputs`` / ``reference_scaling_outputs`` blocks
+          (older bundles) or as a single section-nested ``reference_scaling``
+          block (newer bundles); both layouts are handled here.
 
     The forward pass mirrors the reference quickstart shipped with the bundle:
     normalise → apply → denormalise → ``10**y``.
@@ -279,11 +388,13 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
 
     def __init__(self, name: str):
         super().__init__(name)
-        ref_outputs = self.emulator.reference_scaling_outputs
+        ref_outputs = _affine_reference_scaling(self.emulator, "outputs")
         if self.ref is None or ref_outputs is None:
             raise ValueError(
                 "IntensityPretrainedAemuSpectrumEmulator requires the bundle to "
-                "declare both reference_scaling_inputs and reference_scaling_outputs."
+                "declare both input and output reference scaling (got "
+                f"reference_scaling_inputs={'present' if self.ref is not None else 'missing'}, "
+                f"reference_scaling_outputs={'present' if ref_outputs is not None else 'missing'})."
             )
         mu_idx = self._mu_index()
         if mu_idx is None:
