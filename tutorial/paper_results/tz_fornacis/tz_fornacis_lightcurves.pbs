@@ -1,0 +1,145 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS job — synthesize TZ Fornacis lightcurves (general + eclipse) on
+#  one GPU.
+#
+#  Runs `tz_fornacis_lightcurves.py`, which writes one pickle per sweep:
+#      <OUTPUT_DIR>/tz_fornacis_data_general_<NW>.pkl
+#      <OUTPUT_DIR>/tz_fornacis_data_eclipses_<NW>.pkl
+#  matching the file convention used by `tz_fornacis_lightcurve_plot.ipynb`.
+#  Already-finished pickles are skipped (resubmit to continue after a
+#  walltime hit).
+#
+#  USAGE
+#    1. Edit the "EDIT" lines below: project code (-P), queue (-q), storage,
+#       PYTHON_BIN, and (optionally) the CUDA module load.
+#    2. Submit:   qsub tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.pbs
+#       Override knobs at submit time, e.g.:
+#         qsub -v MODE=eclipse,NUM_WAVELENGTHS=100000,NUM_ECLIPSE_TIMES=200 \
+#              tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.pbs
+#         qsub -v FORCE=1 tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.pbs
+#    3. Monitor:  qstat -fx <jobid>  ;  tail -f tz_fornacis_lightcurves.o<jobid>
+#    4. Restart:  just resubmit — already-finished per-mode pickles are skipped
+#                 unless you pass FORCE=1.
+#
+#  RESOURCE NOTES (gpuvolta)
+#    * ncpus must be a multiple of 12 and ngpus = ncpus/12; mem <= ~96 GB per
+#      GPU. One V100 is plenty — the emulator + binary mesh easily fit.
+#    * Most of the walltime is XLA compilation on first call (a few minutes)
+#      plus simulate_observed_flux looped over time points. The 40k-wavelength
+#      / 150-time general sweep typically finishes in <30 min on V100; the
+#      80-time eclipse sweep is a few minutes once the JIT cache is warm.
+#      04:00:00 is comfortable; bump it if you crank NUM_WAVELENGTHS or
+#      NUM_TIMES into the hundreds of thousands.
+#============================================================================
+
+#PBS -P mk27                                    
+#PBS -q gpuvolta                                
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=90GB
+#PBS -l walltime=04:00:00
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/y89+gdata/y89+scratch/mk27   
+#PBS -l wd
+#PBS -N tz_fornacis_lc
+#PBS -j oe
+#PBS -m ae
+#PBS -M maja.jablonska@anu.edu.au
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# 1) Environment
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.7        
+# If your JAX install relies on system CUDA (rather than the pip cuda12 plugin
+# wheels), uncomment and pin to whatever the env was built against:
+# module load cuda/12.6.2 cudnn/9.5.0-cuda12
+
+PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
+
+# Let JAX pick up the GPU — SPICE only pins to CPU on macOS, so unsetting
+# JAX_PLATFORMS here is enough. XLA gets its own (non-preallocated) GPU
+# allocation so other things on the node still see free memory.
+unset JAX_PLATFORMS
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+export TF_CPP_MIN_LOG_LEVEL=2
+
+# Host-side BLAS threads for the small numpy / orbit-grid bits — match the
+# cores PBS gave us.
+export OMP_NUM_THREADS=${PBS_NCPUS:-12}
+export MKL_NUM_THREADS=${PBS_NCPUS:-12}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-12}
+
+# Hugging Face cache for the pretrained intensity emulator. Gadi compute
+# nodes have no internet, so pre-populate this on a login node:
+#   export HF_HOME=/scratch/y89/$USER/hf-cache
+#   python -c "from spice.spectrum.aemu_spectrum_emulator import \
+#       IntensityPretrainedAemuSpectrumEmulator; \
+#       IntensityPretrainedAemuSpectrumEmulator('RozanskiT/TPayne-spice-harps')"
+export HF_HOME="${HF_HOME:-/scratch/y89/$USER/hf-cache}"
+
+# ---------------------------------------------------------------------------
+# 2) Knobs (override with `qsub -v NAME=value,...`)
+# ---------------------------------------------------------------------------
+MODE="${MODE:-both}"                            # general | eclipse | both
+NUM_TIMES="${NUM_TIMES:-150}"
+NUM_ECLIPSE_TIMES="${NUM_ECLIPSE_TIMES:-80}"
+NUM_WAVELENGTHS="${NUM_WAVELENGTHS:-40000}"
+WL_MIN="${WL_MIN:-3000}"
+WL_MAX="${WL_MAX:-10000}"
+ORBIT_CHUNK="${ORBIT_CHUNK:-15}"
+MODEL="${MODEL:-RozanskiT/TPayne-spice-harps}"
+FORCE="${FORCE:-0}"
+
+# Output directory — sits next to the existing data/ dir in tz_fornacis_spectra.ipynb.
+PROJECT="$(echo "${PBS_O_WORKDIR}" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="scratch"){print $(i+1); exit}}')"
+PROJECT="${PROJECT:-y89}"
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${PROJECT}/${USER}/tz_fornacis_lightcurves}"
+mkdir -p "${OUTPUT_DIR}"
+
+ARGS=(
+    --mode               "$MODE"
+    --num-times          "$NUM_TIMES"
+    --num-eclipse-times  "$NUM_ECLIPSE_TIMES"
+    --num-wavelengths    "$NUM_WAVELENGTHS"
+    --wl-min             "$WL_MIN"
+    --wl-max             "$WL_MAX"
+    --orbit-chunk        "$ORBIT_CHUNK"
+    --output-dir         "$OUTPUT_DIR"
+    --model              "$MODEL"
+)
+[ "$FORCE" = "1" ] && ARGS+=( --force )
+
+SPICE_REPO="$(cd "${PBS_O_WORKDIR}" && pwd)"
+SCRIPT="${SPICE_REPO}/tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.py"
+
+echo "==============================================================="
+echo "Job:        ${PBS_JOBID:-<interactive>}"
+echo "Node:       $(hostname)"
+echo "CPUs/GPUs:  ${PBS_NCPUS:-?} / ${PBS_NGPUS:-?}"
+echo "Python:     ${PYTHON_BIN}"
+echo "HF_HOME:    ${HF_HOME}"
+echo "Mode:       ${MODE}"
+echo "Output:     ${OUTPUT_DIR}"
+echo "Args:       ${ARGS[*]}"
+echo "==============================================================="
+nvidia-smi || true
+"${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, '| devices:', jax.devices())" || true
+
+# ---------------------------------------------------------------------------
+# 3) Run
+# ---------------------------------------------------------------------------
+cd "${PBS_O_WORKDIR}"
+
+if "${PYTHON_BIN}" -u "${SCRIPT}" "${ARGS[@]}"; then
+    echo "[$(date '+%F %T')] done — outputs in ${OUTPUT_DIR}"
+else
+    rc=$?
+    echo "ABORTED (rc=${rc}). Partial outputs preserved in ${OUTPUT_DIR}." >&2
+    echo "Resubmit after the fix — finished per-mode pickles will be skipped." >&2
+    exit "${rc}"
+fi
