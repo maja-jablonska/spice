@@ -63,7 +63,7 @@ ECC = 0.0
 INCL_DEG = 85.68
 PER0_DEG = 65.99           # argument of periastron
 LONG_AN_DEG = 269.0        # longitude of ascending node
-N_MESH = 500               # icosphere subdivisions per body
+N_MESH = 5000               # icosphere subdivisions per body
 
 
 def _check_constants_in_sync():
