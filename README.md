@@ -168,6 +168,33 @@ spectrum = simulate_observed_flux(intensity_function, pb, wavelengths)
 - **Efficient mesh operations** with optimized occlusion algorithms
 - **Memory-efficient** spectral synthesis for time-series data
 
+## Known internals caveat
+
+### Mesh area conventions (slated for cleanup)
+
+`MeshModel` currently exposes two area arrays that **follow different unit
+conventions**:
+
+| Property | Convention | Sum over the mesh |
+|---|---|---|
+| `m.areas` / `m.base_areas` | unit-sphere normalised | ≈ 4π for any R |
+| `m.cast_areas` / `m.visible_cast_areas` | physical R⊙² | ≈ 4π R² / ≈ π R² |
+
+Any code that integrates over the stellar surface must apply the matching
+cgs prefactor:
+
+- `simulate_observed_flux` integrates `m.visible_cast_areas` (already in
+  R⊙²) and applies only the dimensionless dilution `(R⊙ / pc)² / d_pc²`.
+- `simulate_monochromatic_luminosity` integrates `m.areas` (unit-sphere) and
+  applies `R² × R⊙²[cm²]` to convert to cgs.
+
+If you add a new integrator over either array, mirror the matching pattern.
+This convention asymmetry is a known maintainability hazard and is slated
+for future cleanup: once `m.areas` is normalised the same way as
+`m.visible_cast_areas`, the cgs prefactor in
+`simulate_monochromatic_luminosity` should be reduced to `R⊙²[cm²]` only,
+matching the structure of `simulate_observed_flux`.
+
 ## Citation
 
 If you use stellar-spice in your research, please cite:
