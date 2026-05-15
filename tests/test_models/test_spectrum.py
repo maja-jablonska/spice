@@ -208,3 +208,102 @@ class TestSpectrumFunctions:
                                                        chunk_size=int(test_mesh.parameters.shape[0]),
                                                        wavelengths_chunk_size=int(test_log_wavelengths.shape[0]))
             chex.assert_shape(mono_lum, (50, 2))
+
+    def test_simulate_observed_flux_scales_as_r_squared_over_d_squared(self):
+        """Observed flux must scale as (R / d)^2.
+
+        Regression for the spurious ``m.radius**2`` factor that scaled the
+        output as R^4 instead of R^2 (fixed in the commit that introduced
+        this test). Also defends against any future R^N-or-d^M scaling
+        regression: comparing the *ratio* of two configs at matching mesh
+        resolution removes the icosphere discretisation error, leaving only
+        a small per-radius float artifact from the ``volume_scale``
+        correction in ``IcosphereModel.construct`` (~3e-7 between R=1 and
+        R=5). Tolerance is set to ``1e-6`` to absorb that while still being
+        7+ orders of magnitude tighter than what any R^N!=2 regression
+        would produce (the original bug gave R=5 ratio of 625 vs 25).
+
+        The previous tests in this module all use ``default_icosphere()`` at
+        ``R = 1`` where the buggy R^2 prefactor was identically 1, which is
+        why the original bug was invisible to CI.
+        """
+        log_wavelengths = jnp.log10(jnp.logspace(3, 4, 32))
+
+        def mock_intensity(wavelengths, mu, params):
+            return jnp.ones((wavelengths.shape[0], 2))
+
+        # --- Radius scaling at fixed distance ---
+        flux_by_r = {}
+        for radius in [1.0, 2.0, 5.0]:
+            mesh = default_icosphere(radius=radius)
+            flux_by_r[radius] = simulate_observed_flux(
+                mock_intensity, mesh, log_wavelengths, distance=10.0,
+                disable_doppler_shift=True,
+            )
+
+        baseline_r = flux_by_r[1.0]
+        assert jnp.all(baseline_r > 0), "baseline flux at R=1 must be positive"
+        for radius, flux in flux_by_r.items():
+            ratio = flux / baseline_r
+            expected = radius ** 2
+            assert jnp.allclose(ratio, expected, rtol=1e-6), (
+                f"R={radius} R_sun: observed-flux ratio vs R=1 was "
+                f"{float(jnp.mean(ratio)):.6e}, expected R^2={expected}"
+            )
+
+        # --- Distance scaling at fixed radius. Same mesh across all d, so
+        # the volume_scale artifact cancels exactly and we can tighten this
+        # one to round-off precision.
+        mesh = default_icosphere(radius=1.0)
+        flux_by_d = {}
+        for distance in [10.0, 50.0, 100.0]:
+            flux_by_d[distance] = simulate_observed_flux(
+                mock_intensity, mesh, log_wavelengths, distance=distance,
+                disable_doppler_shift=True,
+            )
+
+        baseline_d = flux_by_d[10.0]
+        for distance, flux in flux_by_d.items():
+            ratio = flux / baseline_d
+            expected = (10.0 / distance) ** 2
+            assert jnp.allclose(ratio, expected, rtol=1e-12), (
+                f"d={distance} pc: observed-flux ratio vs d=10 was "
+                f"{float(jnp.mean(ratio)):.6e}, expected (10/d)^2={expected}"
+            )
+
+    def test_simulate_monochromatic_luminosity_scales_as_r_squared(self):
+        """Monochromatic luminosity must scale as R^2.
+
+        Defensive regression for the parallel ``m.radius**2`` prefactor in
+        ``simulate_monochromatic_luminosity``: that factor is *correct*
+        because the integrand uses ``m.areas`` (unit-sphere normalised),
+        unlike ``simulate_observed_flux`` which uses ``m.visible_cast_areas``
+        (already in R_sun^2). If a future change normalises ``m.areas`` to
+        physical units without dropping the prefactor, this test will catch
+        the resulting R^4 scaling.
+        """
+        log_wavelengths = jnp.log10(jnp.logspace(3, 4, 32))
+
+        def mock_flux(wavelengths, params):
+            return jnp.ones((wavelengths.shape[0], 2))
+
+        lum_by_r = {}
+        for radius in [1.0, 2.0, 5.0]:
+            mesh = default_icosphere(radius=radius)
+            lum_by_r[radius] = simulate_monochromatic_luminosity(
+                mock_flux, mesh, log_wavelengths, disable_doppler_shift=True,
+            )
+
+        baseline = lum_by_r[1.0]
+        assert jnp.all(baseline > 0), "baseline luminosity at R=1 must be positive"
+        for radius, lum in lum_by_r.items():
+            ratio = lum / baseline
+            expected = radius ** 2
+            # Slightly looser tolerance than the observed-flux test: m.areas
+            # carries a per-radius `volume_scale` correction in
+            # IcosphereModel.construct that varies at the ~1e-7 level across
+            # radii, unlike cast_areas which scales exactly as R^2.
+            assert jnp.allclose(ratio, expected, rtol=1e-6), (
+                f"R={radius} R_sun: monochromatic luminosity ratio vs R=1 "
+                f"was {float(jnp.mean(ratio)):.6e}, expected R^2={expected}"
+            )
