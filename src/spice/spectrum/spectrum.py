@@ -194,6 +194,9 @@ def _simulate_observed_flux_impl(intensity_fn,
                                  chunk_size: int,
                                  wavelengths_chunk_size: int,
                                  disable_doppler_shift: bool):
+    # `visible_cast_areas` is already in R_sun^2 (cast_vertices come from
+    # `vertices * radius` with no later normalisation), so the prefactor below
+    # is just the dimensionless solid-angle dilution (R_sun/pc)^2 / d_pc^2.
     return jnp.nan_to_num(__spectrum_flash_sum_with_padding(intensity_fn,
                                                log_wavelengths,
                                                _adjust_dim(m.visible_cast_areas, chunk_size),
@@ -202,8 +205,7 @@ def _simulate_observed_flux_impl(intensity_fn,
                                                _adjust_dim(m.parameters, chunk_size),
                                                chunk_size,
                                                wavelengths_chunk_size,
-                                               disable_doppler_shift) * jnp.power(m.radius,
-                                                                                  2) * 5.08326693599739e-16 / (
+                                               disable_doppler_shift) * 5.08326693599739e-16 / (
                                       distance ** 2))[:len(log_wavelengths), :]
 
 
