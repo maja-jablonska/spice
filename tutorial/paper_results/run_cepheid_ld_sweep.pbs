@@ -1,0 +1,105 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS array job — run only the linear-LD coefficient sweep for the
+#  Cepheid grid. This is the heavy fan-out: one zarr `flux_no_ld` bundle
+#  per Cepheid, then 20 synthesis calls (LD_COEFFS = linspace(0, 1, 20)
+#  in build_cepheid_grid.py) bound at call time.
+#
+#  Companion to run_cepheid_grid.pbs, which builds the remaining bundle
+#  variants (intensity, harps, iron_line). Outputs land in a separate
+#  OUT_DIR by default so the two jobs do not overwrite each other's
+#  per-Cepheid pickles -- both write <name>_bundles.pkl and
+#  <name>_spectra.pkl, but only contain the bundle variants their job
+#  built.
+#
+#  USAGE
+#    cd tutorial/paper_results
+#    qsub -J 0-$(( $(wc -l < cepheid_grid.csv) - 2 )) run_cepheid_ld_sweep.pbs
+#    # custom output dir:
+#    qsub -J 0-5 -v OUT_DIR=/scratch/y89/$USER/cepheid_ld_sweep run_cepheid_ld_sweep.pbs
+#
+#  Monitor:  qstat -fx <jobid>  ;  tail -f cepheid_ld_sweep.o<jobid>.*
+#  Restart:  re-submit; per-Cepheid outputs that already exist are skipped
+#            (add `--force` in the python invocation to rebuild).
+#
+#  WALLTIME SIZING
+#    Synthesis is ~1-2 min per LD variant × 20 variants ≈ 25-45 min per
+#    Cepheid, plus ~3 min for the flux zarr emulator load and bundle
+#    build. 04:00:00 covers it with margin; bump if you increase
+#    LD_COEFFS or WL_STEPS in build_cepheid_grid.py.
+#============================================================================
+
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l walltime=04:00:00
+#PBS -l ncpus=8
+#PBS -l mem=32GB
+#PBS -l jobfs=50GB
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -J 0-5
+#PBS -N cepheid_ld_sweep
+#PBS -j oe
+#PBS -m a
+#PBS -M maja.jablonska@anu.edu.au
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# 1) Cepheid grid — same CSV as run_cepheid_grid.pbs; names from column 1.
+# ---------------------------------------------------------------------------
+CONFIG="${CONFIG:-$PBS_O_WORKDIR/cepheid_grid.csv}"
+if [ ! -f "$CONFIG" ]; then
+    echo "ERROR: CSV not found at $CONFIG (set CONFIG=... or place cepheid_grid.csv beside this script)"
+    exit 4
+fi
+mapfile -t GRID_NAMES < <(tail -n +2 "$CONFIG" | cut -d',' -f1 | sed '/^$/d')
+
+# ---------------------------------------------------------------------------
+# 2) Environment
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.7    # nearest available; check `module avail python3`
+
+# JAX & BLAS thread parallelism — match what PBS gave us.
+export JAX_PLATFORMS=cpu
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
+export OMP_NUM_THREADS=${PBS_NCPUS:-8}
+export MKL_NUM_THREADS=${PBS_NCPUS:-8}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
+export TF_CPP_MIN_LOG_LEVEL=2
+export PYTHON_BIN=${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}
+
+# ---------------------------------------------------------------------------
+# 3) Pick this task's Cepheid
+# ---------------------------------------------------------------------------
+idx=${PBS_ARRAY_INDEX:-0}
+if [ "$idx" -ge "${#GRID_NAMES[@]}" ]; then
+    echo "ERROR: PBS_ARRAY_INDEX=$idx out of range (have ${#GRID_NAMES[@]} names)"
+    exit 3
+fi
+NAME="${GRID_NAMES[$idx]}"
+
+echo "[$(date '+%F %T')] host=$(hostname)  task=$idx  name=$NAME  cpus=${PBS_NCPUS:-?}"
+nvidia-smi 2>/dev/null || true   # harmless if no GPU
+
+# ---------------------------------------------------------------------------
+# 4) Run the per-Cepheid LD+flux sweep only. Write to a separate output dir
+#    by default so run_cepheid_grid.pbs's pickles (intensity/harps/iron_line)
+#    are not overwritten. `--skip-aemu` is implied by `--bundles flux_no_ld`
+#    but pass it explicitly to avoid an unnecessary aemu import.
+# ---------------------------------------------------------------------------
+cd "$PBS_O_WORKDIR"
+
+OUT_DIR="${OUT_DIR:-$PBS_O_WORKDIR/cepheid_ld_sweep}"
+mkdir -p "$OUT_DIR"
+
+"${PYTHON_BIN}" -u build_cepheid_grid.py \
+    --config "$CONFIG" \
+    --names "$NAME" \
+    --out-dir "$OUT_DIR" \
+    --bundles flux_no_ld \
+    --skip-aemu \
+    --continue-on-error
+
+echo "[$(date '+%F %T')] finished $NAME"

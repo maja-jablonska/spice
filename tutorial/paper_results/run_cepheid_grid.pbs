@@ -2,12 +2,19 @@
 #============================================================================
 #  Gadi PBS array job — build a grid of Cepheid datasets in parallel.
 #
-#  Each array task runs `build_cepheid_grid.py --names <one-cepheid-name>`,
-#  so N tasks cover N Cepheids concurrently. Per-Cepheid output pickles do
-#  not collide (the Python script writes <name>_bundles.pkl and
-#  <name>_spectra.pkl), and each task is restartable on its own.
+#  Each array task runs `build_cepheid_grid.py --names <one-cepheid-name>`
+#  for the intensity, harps, and iron_line bundle variants (3 spectrum
+#  variants per Cepheid). The 20-point linear-LD coefficient sweep on the
+#  zarr `flux_no_ld` bundle is split into a sibling job — see
+#  run_cepheid_ld_sweep.pbs — so the two halves can be sized and queued
+#  independently. Per-Cepheid output pickles do not collide between
+#  array tasks here (the Python script writes <name>_bundles.pkl and
+#  <name>_spectra.pkl per Cepheid), and each task is restartable on its
+#  own.
 #
 #  USAGE
+#    GPU (e.g. δ Cep rot + norot): see run_cepheid_grid_gpu.pbs
+#         qsub -J 1-2 run_cepheid_grid_gpu.pbs
 #    1. Edit the "EDIT" lines below: project code, storage, env, CSV path.
 #    2. Edit cepheid_grid.csv (or supply your own) — names come from column 1.
 #       Optional per-row columns include `rotation_velocity` (km/s, default 0)
@@ -20,16 +27,16 @@
 #                 (add `--force` in the python invocation to rebuild).
 #
 #  WALLTIME SIZING
-#    With LD_COEFFS = linspace(0,1,20) and WL_STEPS = 2000 (the
-#    cepheid_build_vmicro.ipynb defaults), synthesis is ~1-2 min per LD
-#    variant × 21 variants ≈ 30-45 min per Cepheid, plus ~5 min for emulator
-#    load and bundle build. 02:00:00 covers it with margin; bump to 04:00:00
-#    if you increase LD_COEFFS or WL_STEPS.
+#    With WL_STEPS = 2000 (the cepheid_build_vmicro.ipynb default),
+#    synthesis is ~1-2 min per variant × 3 variants ≈ 5-10 min per
+#    Cepheid, plus ~5 min for emulator load and bundle build.
+#    02:00:00 leaves plenty of margin for slow aemu downloads on first
+#    use. The LD coefficient sweep lives in run_cepheid_ld_sweep.pbs.
 #============================================================================
 
 #PBS -P mk27                            
 #PBS -q rsaa
-#PBS -l walltime=12:00:00
+#PBS -l walltime=02:00:00
 #PBS -l ncpus=8                        
 #PBS -l mem=32GB
 #PBS -l jobfs=50GB
@@ -95,6 +102,7 @@ mkdir -p "$OUT_DIR"
     --config "$CONFIG" \
     --names "$NAME" \
     --out-dir "$OUT_DIR" \
+    --bundles intensity harps iron_line \
     --continue-on-error
 
 echo "[$(date '+%F %T')] finished $NAME"
