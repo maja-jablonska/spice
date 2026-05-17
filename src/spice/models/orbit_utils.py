@@ -115,16 +115,19 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     
     Parameters:
       time  : JAX array of times at which to evaluate the orbit.
-      m1    : Mass of body 1 (in kg).
-      m2    : Mass of body 2 (in kg).
-      P     : Orbital period (in seconds, or consistent time units).
+      m1    : Mass of body 1 in solar masses (same convention as ``add_orbit``).
+      m2    : Mass of body 2 in solar masses.
+      P     : Orbital period in **years** (same as ``Binary.P`` / ``add_orbit``).
       ecc   : Orbital eccentricity.
-      T     : Time of periastron passage (in same units as time).
+      T     : Time of periastron passage in **years** (same clock as ``time``).
       i     : Inclination (radians).
       omega : Argument of periastron (radians).
       Omega : Longitude of ascending node (radians).
-      mean_anomaly : Mean anomaly at reference time (radians).
-      reference_time : Reference time (in same units as time).
+      mean_anomaly : Mean anomaly at ``reference_time`` (radians).
+      reference_time : Reference epoch in **years**.
+      vgamma : Systemic velocity along +z in **km/s** (PHOEBE / ``vgamma@binary`` units).
+               Subtracted from line-of-sight velocities before conversion to km/s in the
+               returned orbit array.
     
     Returns:
       An array containing positions and velocities with shape (6, len(time), 3).
@@ -158,8 +161,11 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     # Mean motion.
     n = 2 * jnp.pi / P
 
-    # Mean anomaly.
-    M_anom = n * time + mean_anomaly 
+    # Mean anomaly M(t).  Reference epoch and periastron time are honored:
+    #   M = M_ref + n * (t - t_ref) + n * (t_ref - T) = M_ref + n * (t - T)
+    # with M_ref = mean_anomaly at t_ref = reference_time (radians).
+    # When reference_time = T = 0 this matches the legacy ``n*t + mean_anomaly``.
+    M_anom = (mean_anomaly + n * (time - reference_time) + n * (reference_time - T))
 
     # Solve Kepler's equation for the eccentric anomaly E.
     E, theta = true_anomaly(M_anom, ecc)
@@ -212,9 +218,11 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     vy_primary = sin_longan * vx_primary_ + cos_longan * vy_primary_ * cos_incl
     vz_primary = sin_incl * vy_primary_
     
-    # # Apply systemic velocity correction
-    vz_primary = vz_primary - vgamma
-    z_primary = z_primary - vgamma * (time - reference_time)
+    # Systemic RV along +z.  ``vgamma`` is in km/s (PHOEBE convention); velocities
+    # here are still in m/s before the final ``/1e3`` stack below.
+    vgamma_si = vgamma * 1.0e3
+    vz_primary = vz_primary - vgamma_si
+    z_primary = z_primary - vgamma_si * (time - reference_time)
     
     # --- SECONDARY COMPONENT CALCULATIONS ---
     
@@ -238,9 +246,8 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     vy_secondary = sin_longan * vx_secondary_ + cos_longan * vy_secondary_ * cos_incl
     vz_secondary = sin_incl * vy_secondary_
     
-    # # Apply systemic velocity correction
-    vz_secondary = vz_secondary - vgamma
-    z_secondary = z_secondary - vgamma * (time - reference_time)
+    vz_secondary = vz_secondary - vgamma_si
+    z_secondary = z_secondary - vgamma_si * (time - reference_time)
     
     # --- BARYCENTER CALCULATIONS ---
     

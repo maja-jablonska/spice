@@ -69,12 +69,29 @@ SECONDARY_MASS = 1.958     # Msun
 SECONDARY_RADIUS = 3.94    # Rsun
 SECONDARY_TEFF = 6650      # K
 SECONDARY_LOGG = 3.35      # cgs
-PERIOD_DAYS = 75.6
+PERIOD_DAYS = 75.66647     # Gallenne et al. 2016 (A&A 586, A35), Table 4
 ECC = 0.0
 INCL_DEG = 85.68
 PER0_DEG = 65.99           # argument of periastron
 LONG_AN_DEG = 269.0        # longitude of ascending node
+DISTANCE_PC = 182.8        # pc (Gaia); must match tz_fornacis_spectra.py
 N_MESH = 500               # icosphere subdivisions per body
+
+# --- Systemic velocity & spectroscopic ephemeris (Gallenne et al. 2016, Table 4)
+GAMMA1_KMS = 17.99         # primary systemic velocity
+GAMMA2_KMS = 18.35         # secondary systemic velocity
+GAMMA_KMS = (PRIMARY_MASS * GAMMA1_KMS + SECONDARY_MASS * GAMMA2_KMS) \
+            / (PRIMARY_MASS + SECONDARY_MASS)                       # ~+18.16
+T_P_HJD = 2452599.29040    # HJD of spectroscopic conjunction (Tp)
+
+# Mean anomaly at SPICE time t=0 so the first synthetic sample matches the same
+# orbital phase as the first HARPS exposure (sorted ADP ingestion order in
+# `harps_read.ipynb`).  Override the reference BJD with TZ_FOR_FIRST_BJD if your
+# FITS set starts on a different night.
+_FIRST_BJD = float(os.environ.get("TZ_FOR_FIRST_BJD", "2454887.5473123"))
+_MEAN_ANOMALY_T0 = (
+    ((_FIRST_BJD - T_P_HJD) % PERIOD_DAYS) / PERIOD_DAYS * (2.0 * np.pi)
+)
 
 
 def _build_binary_and_eclipses(em):
@@ -109,13 +126,14 @@ def _build_binary_and_eclipses(em):
         override_log_g=False,
     )
     binary = Binary.from_bodies(body1, body2)
-    # add_orbit signature (positional):
-    #   P, ecc, T(=Tperi), i, omega, Omega, mean_anomaly, reference_time,
-    #   vgamma, orbit_resolution_points
+    # add_orbit(..., mean_anomaly, reference_time, vgamma, orbit_resolution_points)
+    # ``vgamma`` / ``mean_anomaly`` / ``T`` follow ``get_orbit_jax`` (km/s; rad;
+    # periastron time in years).  Phase zero of the time grid is matched to
+    # ``_FIRST_BJD`` via ``_MEAN_ANOMALY_T0`` and Gallenne's ``T_P_HJD``.
     binary = add_orbit(
         binary, period_yr, ECC, 0.,
         incl_rad, per0_rad, long_an_rad,
-        0., 0., 0., 15,
+        float(_MEAN_ANOMALY_T0), 0., float(GAMMA_KMS), 15,
     )
 
     (_, t1_p, _, _, t4_p,
@@ -164,8 +182,14 @@ def _synthesize_spectra(em, vws, pb1, pb2):
     from spice.spectrum import simulate_observed_flux
 
     log_vws = jnp.log10(vws)
-    spectra_body1 = [simulate_observed_flux(em.intensity, _pb, log_vws) for _pb in tqdm(pb1, desc="primary")]
-    spectra_body2 = [simulate_observed_flux(em.intensity, _pb, log_vws) for _pb in tqdm(pb2, desc="secondary")]
+    spectra_body1 = [
+        simulate_observed_flux(em.intensity, _pb, log_vws, distance=DISTANCE_PC)
+        for _pb in tqdm(pb1, desc="primary")
+    ]
+    spectra_body2 = [
+        simulate_observed_flux(em.intensity, _pb, log_vws, distance=DISTANCE_PC)
+        for _pb in tqdm(pb2, desc="secondary")
+    ]
     return np.asarray(spectra_body1), np.asarray(spectra_body2)
 
 
@@ -195,6 +219,14 @@ def _binary_params_dict():
         "inclination_deg": INCL_DEG, "per0_deg": PER0_DEG,
         "long_an_deg": LONG_AN_DEG, "ecc": ECC,
         "period_days": PERIOD_DAYS, "n_mesh": N_MESH,
+        "gamma1_kms": GAMMA1_KMS, "gamma2_kms": GAMMA2_KMS,
+        "gamma_kms": GAMMA_KMS, "t_p_hjd": T_P_HJD,
+        "first_bjd_phase_ref": _FIRST_BJD,
+        "mean_anomaly_at_t0_rad": float(_MEAN_ANOMALY_T0),
+        "reference_time_yr": 0.0,
+        "gamma_applied_in_spice": True,
+        "t_p_applied_in_spice": True,
+        "distance_pc": DISTANCE_PC,
     }
 
 
@@ -228,6 +260,7 @@ def main(mode, num_times, num_eclipse_times, num_wavelengths, wl_min, wl_max,
 
     binary, period_yr, primary_window, secondary_window = _build_binary_and_eclipses(em)
     yr_to_day = (1 * u.year).to(u.day).value
+    print(f"Distance [pc]:               {DISTANCE_PC}")
     print(f"Period [days]:               {period_yr * yr_to_day:.4f}")
     print(f"Primary eclipse [days]:      {primary_window[0]*yr_to_day:.4f} -> {primary_window[1]*yr_to_day:.4f}")
     print(f"Secondary eclipse [days]:    {secondary_window[0]*yr_to_day:.4f} -> {secondary_window[1]*yr_to_day:.4f}")

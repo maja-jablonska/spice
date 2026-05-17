@@ -219,6 +219,8 @@ def add_orbit(binary: Binary,
         Omega (float): Longitude of the ascending node in radians.
         mean_anomaly (float): Mean anomaly at reference time in radians.
         reference_time (float): Reference time in years.
+        vgamma (float): Systemic line-of-sight velocity in **km/s** (same units as
+            PHOEBE ``vgamma@binary``). Converted to SI inside ``get_orbit_jax``.
         orbit_resolution_points (int): Number of points to use for orbit resolution.
 
     Returns:

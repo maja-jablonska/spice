@@ -235,17 +235,14 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, n_mesh_elements,
         binary,
         P=b.get_parameter('period@binary@component').value * DAYS_TO_YR,
         ecc=b.get_parameter('ecc@binary@component').value,
-        # `T` (periastron-passage time) is required by add_orbit's signature
-        # but is currently a no-op inside get_orbit_jax — orbit phase is set
-        # entirely by `mean_anomaly`, treated as M at t=0. PHOEBE's mean_anom
-        # is M(t=t0_ref); for default_binary t0_ref=0 the two coincide.
+        # ``T`` and ``t0_ref`` / ``mean_anom`` follow :func:`get_orbit_jax`
+        # (periastron time, reference epoch, mean anomaly at reference).
         T=0.0,
         i=jnp.deg2rad(b.get_parameter('incl@binary@component').value),
         omega=b.get_parameter('per0@binary@component').value * DEG_TO_RAD,
         Omega=b.get_parameter('long_an@binary@component').value * DEG_TO_RAD,
-        # PHOEBE stores vgamma in km/s; SPICE's get_orbit_jax integrates in SI
-        # (z in m, time in s after *c.yr), so convert to m/s.
-        vgamma=b.get_parameter('vgamma').value * 1000.0,
+        # PHOEBE vgamma is km/s; ``get_orbit_jax`` converts to m/s internally.
+        vgamma=b.get_parameter('vgamma').value,
         reference_time=b.get_parameter('t0_ref@binary@component').value * DAYS_TO_YR,
         mean_anomaly=b.get_parameter('mean_anom@binary@component').value * DEG_TO_RAD,
         # SPICE's add_orbit precomputes positions on a uniform [0, P] grid, then

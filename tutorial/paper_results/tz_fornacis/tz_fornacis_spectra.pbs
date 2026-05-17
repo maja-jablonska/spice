@@ -1,0 +1,108 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS job — synthesize TZ Fornacis spectra (merged general+eclipse grid)
+#  on one GPU.
+#
+#  Runs `tz_fornacis_spectra.py`, which writes a single pickle:
+#      <OUTPUT_DIR>/tz_fornacis_data_<NW>.pkl
+#  with `time_origin` tags for general / primary_eclipse / secondary_eclipse.
+#
+#  USAGE
+#    qsub tutorial/paper_results/tz_fornacis/tz_fornacis_spectra.pbs
+#    qsub -v NUM_WAVELENGTHS=100000,WL_MIN=4800,WL_MAX=6800,FORCE=1 \
+#         tutorial/paper_results/tz_fornacis/tz_fornacis_spectra.pbs
+#
+#  RESOURCE NOTES
+#    Uses N_MESH=5000 (vs 500 in lightcurves) — budget more walltime than
+#    tz_fornacis_lightcurves.pbs for the same NUM_WAVELENGTHS / time count.
+#============================================================================
+
+#PBS -P mk27
+#PBS -q gpuvolta
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=90GB
+#PBS -l walltime=12:00:00
+#PBS -l jobfs=20GB
+#PBS -l storage=scratch/y89+gdata/y89+scratch/mk27
+#PBS -l wd
+#PBS -N tz_fornacis_sp
+#PBS -j oe
+#PBS -m ae
+#PBS -M maja.jablonska@anu.edu.au
+
+set -euo pipefail
+
+module purge
+module load python3/3.11.7
+
+PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
+
+unset JAX_PLATFORMS
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+export TF_CPP_MIN_LOG_LEVEL=2
+export OMP_NUM_THREADS=${PBS_NCPUS:-12}
+export MKL_NUM_THREADS=${PBS_NCPUS:-12}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-12}
+export HF_HOME="${HF_HOME:-/scratch/y89/$USER/hf-cache}"
+
+NUM_TIMES="${NUM_TIMES:-150}"
+NUM_ECLIPSE_TIMES="${NUM_ECLIPSE_TIMES:-80}"
+NUM_WAVELENGTHS="${NUM_WAVELENGTHS:-40000}"
+WL_MIN="${WL_MIN:-3000}"
+WL_MAX="${WL_MAX:-10000}"
+ORBIT_CHUNK="${ORBIT_CHUNK:-15}"
+MODEL="${MODEL:-RozanskiT/TPayne-spice-harps}"
+FORCE="${FORCE:-0}"
+
+PROJECT="$(echo "${PBS_O_WORKDIR}" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="scratch"){print $(i+1); exit}}')"
+PROJECT="${PROJECT:-y89}"
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${PROJECT}/${USER}/tz_fornacis_spectra}"
+mkdir -p "${OUTPUT_DIR}"
+
+ARGS=(
+    --num-times          "$NUM_TIMES"
+    --num-eclipse-times  "$NUM_ECLIPSE_TIMES"
+    --num-wavelengths    "$NUM_WAVELENGTHS"
+    --wl-min             "$WL_MIN"
+    --wl-max             "$WL_MAX"
+    --orbit-chunk        "$ORBIT_CHUNK"
+    --output-dir         "$OUTPUT_DIR"
+    --model              "$MODEL"
+)
+[ "$FORCE" = "1" ] && ARGS+=( --force )
+
+if [[ -f "${PBS_O_WORKDIR}/tutorial/paper_results/tz_fornacis/tz_fornacis_spectra.py" ]]; then
+    SCRIPT="${PBS_O_WORKDIR}/tutorial/paper_results/tz_fornacis/tz_fornacis_spectra.py"
+elif [[ -f "${PBS_O_WORKDIR}/tz_fornacis_spectra.py" ]]; then
+    SCRIPT="${PBS_O_WORKDIR}/tz_fornacis_spectra.py"
+else
+    echo "Cannot find tz_fornacis_spectra.py under PBS_O_WORKDIR=${PBS_O_WORKDIR}" >&2
+    exit 1
+fi
+
+echo "==============================================================="
+echo "Job:        ${PBS_JOBID:-<interactive>}"
+echo "Node:       $(hostname)"
+echo "CPUs/GPUs:  ${PBS_NCPUS:-?} / ${PBS_NGPUS:-?}"
+echo "Python:     ${PYTHON_BIN}"
+echo "HF_HOME:    ${HF_HOME}"
+echo "Output:     ${OUTPUT_DIR}"
+echo "WL range:   ${WL_MIN} - ${WL_MAX} A  (${NUM_WAVELENGTHS} points)"
+echo "Times:      general=${NUM_TIMES}  eclipse=${NUM_ECLIPSE_TIMES}"
+echo "Script:     ${SCRIPT}"
+echo "Args:       ${ARGS[*]}"
+echo "==============================================================="
+nvidia-smi || true
+"${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, '| devices:', jax.devices())" || true
+
+cd "${PBS_O_WORKDIR}"
+
+if "${PYTHON_BIN}" -u "${SCRIPT}" "${ARGS[@]}"; then
+    echo "[$(date '+%F %T')] done — outputs in ${OUTPUT_DIR}"
+else
+    rc=$?
+    echo "ABORTED (rc=${rc}). Partial outputs preserved in ${OUTPUT_DIR}." >&2
+    exit "${rc}"
+fi
