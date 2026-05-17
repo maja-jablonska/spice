@@ -95,7 +95,7 @@ ORBIT_CHUNK="${ORBIT_CHUNK:-15}"
 MODEL="${MODEL:-RozanskiT/TPayne-spice-harps}"
 FORCE="${FORCE:-0}"
 
-# Output directory — sits next to the existing data/ dir in tz_fornacis_spectra.ipynb.
+# Output directory on scratch (override with qsub -v OUTPUT_DIR=...).
 PROJECT="$(echo "${PBS_O_WORKDIR}" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="scratch"){print $(i+1); exit}}')"
 PROJECT="${PROJECT:-y89}"
 OUTPUT_DIR="${OUTPUT_DIR:-/scratch/${PROJECT}/${USER}/tz_fornacis_lightcurves}"
@@ -114,8 +114,14 @@ ARGS=(
 )
 [ "$FORCE" = "1" ] && ARGS+=( --force )
 
-SPICE_REPO="$(cd "${PBS_O_WORKDIR}" && pwd)"
-SCRIPT="${SPICE_REPO}/tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.py"
+if [[ -f "${PBS_O_WORKDIR}/tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.py" ]]; then
+    SCRIPT="${PBS_O_WORKDIR}/tutorial/paper_results/tz_fornacis/tz_fornacis_lightcurves.py"
+elif [[ -f "${PBS_O_WORKDIR}/tz_fornacis_lightcurves.py" ]]; then
+    SCRIPT="${PBS_O_WORKDIR}/tz_fornacis_lightcurves.py"
+else
+    echo "Cannot find tz_fornacis_lightcurves.py under PBS_O_WORKDIR=${PBS_O_WORKDIR}" >&2
+    exit 1
+fi
 
 echo "==============================================================="
 echo "Job:        ${PBS_JOBID:-<interactive>}"
@@ -125,6 +131,8 @@ echo "Python:     ${PYTHON_BIN}"
 echo "HF_HOME:    ${HF_HOME}"
 echo "Mode:       ${MODE}"
 echo "Output:     ${OUTPUT_DIR}"
+echo "WL range:   ${WL_MIN} - ${WL_MAX} A  (${NUM_WAVELENGTHS} points)"
+echo "Script:     ${SCRIPT}"
 echo "Args:       ${ARGS[*]}"
 echo "==============================================================="
 nvidia-smi || true
