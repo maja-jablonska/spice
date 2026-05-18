@@ -21,7 +21,11 @@ For each entry in the configured Cepheid grid this script:
      skip that modifier.
   4. Synthesises 5000-5020 Å spectra for ``with_ld`` (zarr intensity bundle)
      plus a 20-point linear LD coefficient sweep on the zarr flux bundle,
-     plus one variant per aemu bundle.
+     plus one variant per aemu bundle. The optional ``intensity_mu1``
+     bundle (opt-in via ``--bundles``) runs the same 20-point linear-LD
+     sweep but uses the line intensity grid evaluated at μ=1 in place of
+     the flux grid, so the disc-centre specific intensity is rescaled by
+     the same flux-conservation linear LD applied to ``flux_linear_<u>``.
   5. Pickles ``<name>_bundles.pkl`` and ``<name>_spectra.pkl`` to ``--out-dir``.
 
 The default grid spans the classical-Cepheid period range (3-30 d) using the
@@ -50,8 +54,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-# CPU-only on macOS, matches src/spice/__init__.py
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
+# CPU-only on macOS, matches src/spice/__init__.py (Linux/Gadi: use GPU if available)
+if sys.platform == "darwin" and "JAX_PLATFORMS" not in os.environ:
+    os.environ["JAX_PLATFORMS"] = "cpu"
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE.parents[1] / "src"
@@ -66,6 +71,7 @@ from astropy.table import Table
 from scipy import optimize
 from scipy.interpolate import interp1d
 
+from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
 from spice.spectrum.lazy_zarr_interpolator import (
     IntensityLazyZarrInterpolator,
     FluxLazyZarrInterpolator,
@@ -75,6 +81,7 @@ from cepheid_bundles import (  # noqa: E402  (sys.path patched above)
     LineSpectra,
     build_bundle,
     apply_phase_params,
+    load_pickle,
     simulate_line_spectra,
     save_pickle,
 )
@@ -93,8 +100,17 @@ DEFAULT_IRON_AEMU  = "RozanskiT/TPayne-spice-small-random"
 
 # Bundle variant keys that this script knows how to build. Used by `--bundles`
 # / `--skip-aemu` / `--skip-zarr`. Order is the build order.
+#
+# ``intensity_mu1`` is opt-in: it shares the line intensity zarr with
+# ``intensity`` but at synthesis time evaluates the grid only at μ=1 and
+# rescales by a flux-conservation linear LD, mirroring the ``flux_no_ld``
+# sweep against the line intensity grid instead of the disc-integrated
+# flux grid. Selecting it requires ``--bundles`` (it is not part of the
+# default ``ALL_BUNDLES``).
 ALL_BUNDLES = ("intensity", "flux_no_ld", "harps", "iron_line")
-ZARR_BUNDLES = ("intensity", "flux_no_ld")
+OPTIONAL_BUNDLES = ("intensity_mu1",)
+BUILDABLE_BUNDLES = ALL_BUNDLES + OPTIONAL_BUNDLES
+ZARR_BUNDLES = ("intensity", "flux_no_ld", "intensity_mu1")
 AEMU_BUNDLES = ("harps", "iron_line")
 
 INTENSITY_PARAMS = ["teff", "logg", "[Fe/H]", "vmicro", "[a/Fe]",
@@ -110,6 +126,59 @@ SOLAR_FLUX      = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 LD_COEFFS = np.linspace(0.0, 1.0, 20)
 LD_FMT = ".3f"
 DEFAULT_PULSATION_FITS = HERE / "delta_cep.fits"
+
+
+class _IntensityAtDiscCentre:
+    """Intensity callable that queries the line intensity grid at μ=1 only
+    and applies a flux-conservation LD law as a function of the cell's μ.
+
+    Backs the ``intensity_mu1`` variant: instead of evaluating the
+    :class:`IntensityLazyZarrInterpolator` at each cell's μ (where μ is a
+    grid axis already carrying the atmosphere's own limb darkening), we
+    take the disc-centre specific intensity ``I(μ=1, params)`` as a flux
+    template and rescale it to ``I(μ)`` via the same
+    :func:`apply_flux_limb_darkening` path that ``FluxLazyZarrInterpolator``
+    uses. The resulting spectra are directly comparable to
+    ``flux_linear_<u>`` at the same coefficient, but sourced from the
+    line intensity grid rather than the disc-integrated flux grid.
+
+    ``ld_law`` / ``ld_coeffs`` are bound per call by
+    :class:`spice.spectrum.flux_limb_darkening.LdBoundIntensity` inside
+    ``simulate_observed_flux``; the LD sweep therefore reuses one adapter
+    instance across all coefficients without rebuilding it.
+
+    Made hashable by ``(intensity_emulator, "intensity_mu1")`` so the
+    enclosing :class:`LdBoundIntensity` hashes stably across calls and
+    the jit cache is keyed on the LD coefficients rather than adapter
+    identity.
+    """
+
+    __slots__ = ("intensity_emulator",)
+
+    def __init__(self, intensity_emulator):
+        self.intensity_emulator = intensity_emulator
+
+    def __call__(self, log_wavelengths, mu, parameters,
+                 *, ld_law="linear", ld_coeffs=None):
+        mu_arr = jnp.asarray(mu)
+        one_mu = jnp.ones_like(jnp.atleast_1d(mu_arr))
+        i_disc = self.intensity_emulator.intensity(
+            log_wavelengths, one_mu, parameters,
+        )
+        flux = apply_flux_limb_darkening(i_disc[..., 0], mu_arr, ld_law, ld_coeffs)
+        cont = apply_flux_limb_darkening(i_disc[..., 1], mu_arr, ld_law, ld_coeffs)
+        return jnp.stack([flux, cont], axis=-1)
+
+    def __hash__(self) -> int:
+        return hash((id(self.intensity_emulator), "intensity_mu1"))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, _IntensityAtDiscCentre):
+            return False
+        return self.intensity_emulator is other.intensity_emulator
+
+    def __repr__(self) -> str:
+        return f"_IntensityAtDiscCentre({type(self.intensity_emulator).__name__})"
 
 # δ Cep projected rotation used in cepheid_grid.csv / cepheid_analysis.ipynb.
 DELTA_CEP_ROTATION_KMS = 12.0
@@ -335,18 +404,25 @@ def build_emulators(
 ) -> dict[str, Any]:
     """Build the emulator backing each requested bundle variant.
 
-    Returns ``{bundle_name: emulator}`` for every key in ``wanted`` (subset of
-    :data:`ALL_BUNDLES`). LD coefficients for the ``flux_no_ld`` variant are
-    passed per call to ``simulate_observed_flux`` at synthesis time, so we
-    don't need a separate flux emulator per coefficient.
+    Returns ``{bundle_name: emulator}`` for every key in ``wanted`` (subset
+    of :data:`BUILDABLE_BUNDLES`). LD coefficients for the ``flux_no_ld``
+    and ``intensity_mu1`` variants are passed per call to
+    ``simulate_observed_flux`` at synthesis time, so we don't need a
+    separate emulator per coefficient. ``intensity`` and ``intensity_mu1``
+    share one :class:`IntensityLazyZarrInterpolator` instance so the line
+    intensity zarr is opened once even when both variants are selected.
     """
     out: dict[str, Any] = {}
-    if "intensity" in wanted:
+    if "intensity" in wanted or "intensity_mu1" in wanted:
         print(f"Loading intensity grid: {intensity_path}")
-        out["intensity"] = IntensityLazyZarrInterpolator(
+        intensity_em = IntensityLazyZarrInterpolator(
             intensity_path, params=INTENSITY_PARAMS, solar_parameters=SOLAR_INTENSITY,
             sparse=True, in_memory=False,
         )
+        if "intensity" in wanted:
+            out["intensity"] = intensity_em
+        if "intensity_mu1" in wanted:
+            out["intensity_mu1"] = intensity_em
     if "flux_no_ld" in wanted:
         print(f"Loading flux grid:      {flux_path}")
         out["flux_no_ld"] = FluxLazyZarrInterpolator(
@@ -391,6 +467,61 @@ def _phase_modifiers_for(emulator, teff_at, logg_at, vmicro_at):
 # ---------------------------------------------------------------------------
 # Per-Cepheid build
 # ---------------------------------------------------------------------------
+def spectrum_variant_names(wanted: Sequence[str]) -> frozenset[str]:
+    """Spectrum keys this run will write for the requested bundle variants."""
+    names: list[str] = []
+    if "intensity" in wanted:
+        names.append("with_ld")
+    if "flux_no_ld" in wanted:
+        names.extend(f"flux_linear_{c:{LD_FMT}}" for c in LD_COEFFS)
+    if "intensity_mu1" in wanted:
+        names.extend(f"intensity_mu1_linear_{c:{LD_FMT}}" for c in LD_COEFFS)
+    for name in AEMU_BUNDLES:
+        if name in wanted:
+            names.append(name)
+    return frozenset(names)
+
+
+def cepheid_outputs_complete(
+    out_dir: Path,
+    name: str,
+    wanted_bundles: Sequence[str],
+    *,
+    skip_spectra: bool,
+) -> bool:
+    """True when ``out_dir`` already holds every bundle/spectrum key this run would add."""
+    bundles_path = out_dir / f"{name}_bundles.pkl"
+    if not bundles_path.exists():
+        return False
+    existing_b = load_pickle(str(bundles_path))
+    if not isinstance(existing_b, dict):
+        return False
+    if set(wanted_bundles) - set(existing_b.keys()):
+        return False
+    if skip_spectra:
+        return True
+    spectra_path = out_dir / f"{name}_spectra.pkl"
+    if not spectra_path.exists():
+        return False
+    existing_s = load_pickle(str(spectra_path))
+    if not isinstance(existing_s, dict):
+        return False
+    need = spectrum_variant_names(wanted_bundles)
+    return need <= set(existing_s.keys())
+
+
+def _merge_pickle_dict(path: Path, new_obj: dict) -> dict:
+    """Update an on-disk dict pickle with ``new_obj`` (shallow merge of top-level keys)."""
+    if path.exists():
+        prev = load_pickle(str(path))
+        if not isinstance(prev, dict):
+            raise TypeError(f"{path} is not a dict pickle (got {type(prev).__name__})")
+        merged = dict(prev)
+        merged.update(new_obj)
+        return merged
+    return new_obj
+
+
 def build_one(
     config: CepheidConfig,
     emulators: dict[str, Any],
@@ -424,13 +555,23 @@ def build_one(
 
     timeseries = jnp.linspace(0, config.period, N_PHASES)
 
-    # 1) Build one bundle per emulator. Each emulator has its own parameter
-    # ordering; ``build_bundle`` reads ``stellar_parameter_names`` and stores
-    # parameters on the mesh in that emulator's order.
+    # 1) Build one bundle per *unique* emulator. Each emulator has its own
+    # parameter ordering; ``build_bundle`` reads ``stellar_parameter_names``
+    # and stores parameters on the mesh in that emulator's order. Variants
+    # that share an emulator instance (e.g. ``intensity`` and
+    # ``intensity_mu1`` both back onto the same line intensity zarr) share
+    # the same built bundle: dedup by ``id(emul)`` so we don't pay the
+    # icosphere + per-phase pulsation evaluation cost twice.
     bundles: dict[str, CepheidBundle] = {}
+    base_cache: dict[int, CepheidBundle] = {}
     for name, emul in emulators.items():
+        eid = id(emul)
+        if eid in base_cache:
+            bundles[name] = base_cache[eid]
+            print(f"  reusing built bundle for {name} (shared emulator)")
+            continue
         print(f"  building {name}…")
-        bundles[name] = build_bundle(
+        bundles[name] = base_cache[eid] = build_bundle(
             emul, emul.to_parameters(sp),
             fourier_params=fourier,
             period=config.period, timeseries=timeseries,
@@ -443,26 +584,37 @@ def build_one(
     # 2) Phase-dependent Teff, logg, and vmicro. Modifier indices are looked
     # up by name in each emulator's ``stellar_parameter_names``; aemu bundles
     # that lack a particular parameter (e.g. vmicro) silently skip it.
+    # Variants sharing an emulator instance get identical phase modifiers,
+    # so dedup on ``id(emul)`` again to apply them once.
     phases_per_snapshot = [(t % config.period) / config.period for t in timeseries]
+    phased_cache: dict[int, CepheidBundle] = {}
     for name, bundle in bundles.items():
+        eid = id(emulators[name])
+        if eid in phased_cache:
+            bundles[name] = phased_cache[eid]
+            continue
         modifiers = _phase_modifiers_for(
             emulators[name], teff_at, logg_at, vmicro_at,
         )
-        bundles[name] = apply_phase_params(
+        bundles[name] = phased_cache[eid] = apply_phase_params(
             bundle, phases_per_snapshot, modifiers=modifiers,
         )
 
+    bundles = _merge_pickle_dict(bundles_path, bundles)
     save_pickle(bundles, str(bundles_path))
-    print(f"  → saved {bundles_path.name}")
+    print(f"  → saved {bundles_path.name} ({len(bundles)} bundle key(s))")
 
     if skip_spectra:
         print("  (skip-spectra: leaving spectra unbuilt)")
         return
 
     # 3) Spectrum synthesis. The intensity/aemu bundles each get a single
-    # variant; the zarr flux bundle additionally fans out into a 20-point
-    # linear-LD coefficient sweep (different ``ld_coeffs`` per call, no
-    # rebuild required).
+    # variant; the zarr flux bundle and the optional ``intensity_mu1``
+    # bundle each additionally fan out into a 20-point linear-LD
+    # coefficient sweep (different ``ld_coeffs`` per call, no rebuild
+    # required). For ``intensity_mu1`` the LD law is applied to the
+    # disc-centre intensity I(μ=1) via the same flux-conservation path
+    # as the flux variant.
     line_center = 0.5 * (WL_MIN + WL_MAX)
     line_width = 0.5 * (WL_MAX - WL_MIN)
 
@@ -480,6 +632,18 @@ def build_one(
                 f"flux_linear_{c:{LD_FMT}}",
                 emulators["flux_no_ld"].intensity,
                 bundles["flux_no_ld"],
+                jnp.array([float(c), 0.0, 0.0, 0.0]),
+            ))
+    if "intensity_mu1" in bundles:
+        # One adapter reused across the 20 coefficient calls so the
+        # surrounding ``LdBoundIntensity`` hashes stably and jit only
+        # recompiles for new coefficients.
+        intensity_mu1_fn = _IntensityAtDiscCentre(emulators["intensity_mu1"])
+        for c in LD_COEFFS:
+            spectrum_variants.append((
+                f"intensity_mu1_linear_{c:{LD_FMT}}",
+                intensity_mu1_fn,
+                bundles["intensity_mu1"],
                 jnp.array([float(c), 0.0, 0.0, 0.0]),
             ))
     for name in ("harps", "iron_line"):
@@ -501,8 +665,9 @@ def build_one(
         )
         print(f"    {name:>20s}: {time.perf_counter() - t0:6.1f} s")
 
+    spectra = _merge_pickle_dict(spectra_path, spectra)
     save_pickle(spectra, str(spectra_path))
-    print(f"  → saved {spectra_path.name}")
+    print(f"  → saved {spectra_path.name} ({len(spectra)} spectrum variant(s))")
 
 
 # ---------------------------------------------------------------------------
@@ -535,9 +700,10 @@ def parse_args():
     p.add_argument("--skip-zarr", action="store_true",
                    help="Skip the zarr intensity/flux bundles (only build the aemu ones).")
     p.add_argument("--bundles", nargs="+", default=None,
-                   choices=list(ALL_BUNDLES),
+                   choices=list(BUILDABLE_BUNDLES),
                    help="Explicit subset of bundle variants to build "
                         f"(default: all of {list(ALL_BUNDLES)}; "
+                        f"opt-in extras: {list(OPTIONAL_BUNDLES)}; "
                         "overrides --skip-aemu / --skip-zarr).")
     p.add_argument("--n-mesh", type=int, default=5000,
                    help="Icosphere mesh resolution.")
@@ -552,9 +718,14 @@ def parse_args():
 
 def _resolve_bundle_set(args) -> tuple[str, ...]:
     """Combine ``--bundles`` / ``--skip-aemu`` / ``--skip-zarr`` into a final
-    ordered tuple of bundle keys to build."""
+    ordered tuple of bundle keys to build.
+
+    Default (no ``--bundles`` given) is :data:`ALL_BUNDLES`; opt-in extras
+    in :data:`OPTIONAL_BUNDLES` are only built when explicitly listed via
+    ``--bundles``.
+    """
     if args.bundles:
-        wanted = tuple(b for b in ALL_BUNDLES if b in set(args.bundles))
+        wanted = tuple(b for b in BUILDABLE_BUNDLES if b in set(args.bundles))
     else:
         wanted = ALL_BUNDLES
     if args.skip_aemu:
@@ -576,26 +747,28 @@ def main() -> int:
         if missing:
             print(f"warning: --names entries not in grid: {sorted(missing)}", file=sys.stderr)
 
-    # Skip already-built stars (unless --force).
+    wanted_bundles = _resolve_bundle_set(args)
+    if not wanted_bundles:
+        print("No bundle variants selected (check --bundles / --skip-aemu / --skip-zarr).",
+              file=sys.stderr)
+        return 1
+
+    # Skip stars that already have every bundle/spectrum key this run would add.
     pending = []
     for cfg in grid:
-        b = args.out_dir / f"{cfg.name}_bundles.pkl"
-        s = args.out_dir / f"{cfg.name}_spectra.pkl"
-        already = b.exists() and (args.skip_spectra or s.exists())
-        if already and not args.force:
-            print(f"skip {cfg.name}: outputs already exist (use --force to rebuild)")
+        if (
+            not args.force
+            and cepheid_outputs_complete(
+                args.out_dir, cfg.name, wanted_bundles, skip_spectra=args.skip_spectra,
+            )
+        ):
+            print(f"skip {cfg.name}: all requested outputs present (use --force to rebuild)")
             continue
         pending.append(cfg)
 
     if not pending:
         print("Nothing to do.")
         return 0
-
-    wanted_bundles = _resolve_bundle_set(args)
-    if not wanted_bundles:
-        print("No bundle variants selected (check --bundles / --skip-aemu / --skip-zarr).",
-              file=sys.stderr)
-        return 1
 
     print(f"Will build {len(pending)} Cepheid(s) → {args.out_dir.resolve()}")
     print(f"Bundle variants: {list(wanted_bundles)}")
