@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import pickle
 import sys
 import time
 import traceback
@@ -482,6 +483,29 @@ def spectrum_variant_names(wanted: Sequence[str]) -> frozenset[str]:
     return frozenset(names)
 
 
+def _load_pickle_dict_or_none(path: Path) -> Optional[dict]:
+    """Load a dict pickle, or return None if missing/empty/truncated/non-dict.
+
+    A previous run killed mid-``save_pickle`` (pre-atomic-write) could leave a
+    zero-byte or truncated ``.pkl`` on disk. We treat any such file as "no
+    usable prior data" so the resume path rebuilds it instead of crashing.
+    """
+    if not path.exists():
+        return None
+    try:
+        obj = load_pickle(str(path))
+    except (EOFError, pickle.UnpicklingError, OSError) as exc:
+        print(f"  [resume] discarding unreadable {path.name}: {exc}", flush=True)
+        return None
+    if not isinstance(obj, dict):
+        print(
+            f"  [resume] discarding {path.name}: expected dict, got {type(obj).__name__}",
+            flush=True,
+        )
+        return None
+    return obj
+
+
 def cepheid_outputs_complete(
     out_dir: Path,
     name: str,
@@ -490,21 +514,15 @@ def cepheid_outputs_complete(
     skip_spectra: bool,
 ) -> bool:
     """True when ``out_dir`` already holds every bundle/spectrum key this run would add."""
-    bundles_path = out_dir / f"{name}_bundles.pkl"
-    if not bundles_path.exists():
-        return False
-    existing_b = load_pickle(str(bundles_path))
-    if not isinstance(existing_b, dict):
+    existing_b = _load_pickle_dict_or_none(out_dir / f"{name}_bundles.pkl")
+    if existing_b is None:
         return False
     if set(wanted_bundles) - set(existing_b.keys()):
         return False
     if skip_spectra:
         return True
-    spectra_path = out_dir / f"{name}_spectra.pkl"
-    if not spectra_path.exists():
-        return False
-    existing_s = load_pickle(str(spectra_path))
-    if not isinstance(existing_s, dict):
+    existing_s = _load_pickle_dict_or_none(out_dir / f"{name}_spectra.pkl")
+    if existing_s is None:
         return False
     need = spectrum_variant_names(wanted_bundles)
     return need <= set(existing_s.keys())
@@ -512,14 +530,12 @@ def cepheid_outputs_complete(
 
 def _merge_pickle_dict(path: Path, new_obj: dict) -> dict:
     """Update an on-disk dict pickle with ``new_obj`` (shallow merge of top-level keys)."""
-    if path.exists():
-        prev = load_pickle(str(path))
-        if not isinstance(prev, dict):
-            raise TypeError(f"{path} is not a dict pickle (got {type(prev).__name__})")
-        merged = dict(prev)
-        merged.update(new_obj)
-        return merged
-    return new_obj
+    prev = _load_pickle_dict_or_none(path)
+    if prev is None:
+        return new_obj
+    merged = dict(prev)
+    merged.update(new_obj)
+    return merged
 
 
 def build_one(

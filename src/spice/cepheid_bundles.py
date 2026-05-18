@@ -18,6 +18,7 @@ Public API:
 """
 from __future__ import annotations
 
+import os
 import pickle
 from typing import Any, Callable, NamedTuple, Optional, Sequence
 
@@ -173,8 +174,17 @@ def simulate_line_spectra(
 # Pickle helpers (one-call round-trip)
 # ---------------------------------------------------------------------------
 def save_pickle(obj, path: str) -> None:
-    with open(path, "wb") as f:
+    # Atomic write: tmp + fsync + os.replace so a SIGKILL/OOM/node crash
+    # mid-dump can't leave a truncated .pkl that future resume runs would
+    # either mistake for complete or crash on at load time. The tmp filename
+    # includes the pid so concurrent workers writing different paths can't
+    # collide on the tmp slot.
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    with open(tmp_path, "wb") as f:
         pickle.dump(obj, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
 
 
 def load_pickle(path: str):
