@@ -73,9 +73,39 @@ INCL_DEG = 85.68
 PER0_DEG = 65.99           # argument of periastron
 LONG_AN_DEG = 269.0        # longitude of ascending node
 DISTANCE_PC = 182.8        # pc (Gaia); must match tz_fornacis_lightcurves.py
-WL_MIN = 3000.0            # Angstrom; default wavelength grid lower edge
-WL_MAX = 10000.0           # Angstrom; default wavelength grid upper edge
+# Wavelength grid: defaults trimmed to a HARPS metal-band window with fine
+# sampling (Δλ ~ 0.01 Å → native R ≳ 5e5 at 5500 Å) so that downstream R = 80k
+# convolution is honest for both HARPS and SPICE. Pass --wl-min/--wl-max to
+# widen for paper figures that need bluer / redder coverage.
+WL_MIN = 4800.0            # Angstrom; default wavelength grid lower edge
+WL_MAX = 6800.0            # Angstrom; default wavelength grid upper edge
 N_MESH = 5000              # icosphere subdivisions per body (spectra use finer mesh)
+
+# Stellar atmosphere parameters (per body) beyond teff/log g. Names match the
+# common Payne/TPayne bundle channels; ``em.to_parameters`` silently falls back
+# to SOLAR_PARAMETERS for any key the bundle doesn't expose, so unknown channels
+# are harmless. [Fe/H] from Andersen et al. 1991 (A&A 246, 99); vmic for
+# evolved stars at TZ For's metallicity is the standard ~1.5 km/s.
+PRIMARY_FEH = -0.30        # dex; both components share TZ For's metallicity
+SECONDARY_FEH = -0.30
+PRIMARY_VMIC = 1.5         # km/s; K-giant standard microturbulence
+SECONDARY_VMIC = 1.5       # km/s; F subgiant — close enough to the primary
+PRIMARY_AFE = 0.0          # [α/Fe]; mildly metal-poor TZ For is not particularly α-enhanced
+SECONDARY_AFE = 0.0
+
+# Rotation broadening (km/s, equatorial velocity).
+# Primary: assumed tidally synchronized at P_orb. v_eq = 2π R / P_orb evaluates
+# to ~5.5 km/s for R = 8.28 R☉ and P = 75.66 d; literature vsini ≈ 6 km/s.
+# Secondary: Andersen+1991 reports vsini ≈ 38 km/s — NOT synchronized.
+PRIMARY_VROT_KMS = 5.5
+SECONDARY_VROT_KMS = 38.0
+
+# Macroturbulent velocity (km/s, FWHM of the Gaussian kernel applied to each
+# body's spectrum after synthesis). TPayne emulators carry thermal + micro
+# broadening only; macroturbulence is added post-emulator. Typical values for
+# late-type giants / subgiants are 4–7 km/s.
+PRIMARY_VMACRO_KMS = 5.0   # K-giant
+SECONDARY_VMACRO_KMS = 6.0  # F subgiant runs a bit hotter
 
 # Ephemeris / vgamma — must match tz_fornacis_lightcurves.py
 T_P_HJD = 2452599.29040
@@ -134,6 +164,7 @@ def _build_binary_and_eclipses(em):
     """Build the TZ For binary and predict eclipse windows (aemu parameter convention)."""
     from spice.models.binary import Binary, add_orbit
     from spice.models.mesh_model import IcosphereModel
+    from spice.models.mesh_transform import add_rotation
     from spice.models.orbit_utils import eclipse_timestamps_kepler
 
     period_yr = (PERIOD_DAYS * u.d).to(u.year).value
@@ -141,18 +172,31 @@ def _build_binary_and_eclipses(em):
     per0_rad = jnp.deg2rad(PER0_DEG)
     long_an_rad = jnp.deg2rad(LONG_AN_DEG)
 
+    primary_params = dict(
+        teff=PRIMARY_TEFF, logg=PRIMARY_LOGG,
+        feh=PRIMARY_FEH, vmic=PRIMARY_VMIC, afe=PRIMARY_AFE,
+    )
+    secondary_params = dict(
+        teff=SECONDARY_TEFF, logg=SECONDARY_LOGG,
+        feh=SECONDARY_FEH, vmic=SECONDARY_VMIC, afe=SECONDARY_AFE,
+    )
     body1 = IcosphereModel.construct(
         N_MESH, PRIMARY_RADIUS, PRIMARY_MASS,
-        em.to_parameters(dict(teff=PRIMARY_TEFF, logg=PRIMARY_LOGG)),
+        em.to_parameters(primary_params),
         em.stellar_parameter_names,
         override_log_g=False,
     )
     body2 = IcosphereModel.construct(
         N_MESH, SECONDARY_RADIUS, SECONDARY_MASS,
-        em.to_parameters(dict(teff=SECONDARY_TEFF, logg=SECONDARY_LOGG)),
+        em.to_parameters(secondary_params),
         em.stellar_parameter_names,
         override_log_g=False,
     )
+    # Axial rotation: gives each component its rotational broadening kernel via
+    # mesh-element-level Doppler. The primary is tidally synchronized to the
+    # orbit; the secondary spins much faster than synchronous (Andersen+1991).
+    body1 = add_rotation(body1, rotation_velocity=PRIMARY_VROT_KMS)
+    body2 = add_rotation(body2, rotation_velocity=SECONDARY_VROT_KMS)
     binary = Binary.from_bodies(body1, body2)
     binary = add_orbit(
         binary, period_yr, ECC, 0.,
@@ -213,8 +257,36 @@ def _evaluate_orbit_chunked(binary, times, chunk_size):
     return pb1, pb2
 
 
+_C_KMS = 299_792.458
+
+
+def _apply_macroturbulence(spectra, log_vws, vmacro_kms):
+    """Convolve each (n_wavelengths, 2) per-time spectrum with a Gaussian
+    macroturbulent kernel of FWHM ``vmacro_kms``.
+
+    Implementation: ``apply_spectral_resolution`` is a Gaussian convolution on
+    a uniform log10(λ) grid with FWHM in velocity units = c / R, so we set
+    ``R = c / vmacro_kms`` to get the desired macroturbulent kernel. Applied
+    to both line and continuum channels so the s[:, 0] / s[:, 1] ratio used
+    downstream stays well-defined (continuum is already smooth so the
+    convolution barely touches it).
+    """
+    from spice.spectrum import apply_spectral_resolution
+
+    if vmacro_kms <= 0.0:
+        return spectra
+    R_macro = _C_KMS / vmacro_kms
+    out = []
+    for s in spectra:
+        line = apply_spectral_resolution(log_vws, jnp.asarray(s[:, 0]), R_macro)
+        cont = apply_spectral_resolution(log_vws, jnp.asarray(s[:, 1]), R_macro)
+        out.append(np.stack([np.asarray(line), np.asarray(cont)], axis=-1))
+    return np.asarray(out)
+
+
 def _synthesize_spectra(em, vws, pb1, pb2):
-    """Run simulate_observed_flux per time-point for each body."""
+    """Run simulate_observed_flux per time-point for each body, then apply
+    per-component macroturbulent broadening."""
     from spice.spectrum import simulate_observed_flux
 
     log_vws = jnp.log10(vws)
@@ -226,6 +298,10 @@ def _synthesize_spectra(em, vws, pb1, pb2):
         simulate_observed_flux(em.intensity, _pb, log_vws, distance=DISTANCE_PC)
         for _pb in tqdm(pb2, desc="secondary")
     ]
+    print(f"Applying macroturbulence: primary={PRIMARY_VMACRO_KMS} km/s, "
+          f"secondary={SECONDARY_VMACRO_KMS} km/s")
+    spectra_body1 = _apply_macroturbulence(spectra_body1, log_vws, PRIMARY_VMACRO_KMS)
+    spectra_body2 = _apply_macroturbulence(spectra_body2, log_vws, SECONDARY_VMACRO_KMS)
     return np.asarray(spectra_body1), np.asarray(spectra_body2)
 
 
@@ -236,6 +312,12 @@ def _binary_params_dict(*, wl_min: float, wl_max: float):
         "primary_radius": PRIMARY_RADIUS, "secondary_radius": SECONDARY_RADIUS,
         "primary_teff": PRIMARY_TEFF, "primary_logg": PRIMARY_LOGG,
         "secondary_teff": SECONDARY_TEFF, "secondary_logg": SECONDARY_LOGG,
+        "primary_feh": PRIMARY_FEH, "secondary_feh": SECONDARY_FEH,
+        "primary_vmic_kms": PRIMARY_VMIC, "secondary_vmic_kms": SECONDARY_VMIC,
+        "primary_afe": PRIMARY_AFE, "secondary_afe": SECONDARY_AFE,
+        "primary_vrot_kms": PRIMARY_VROT_KMS, "secondary_vrot_kms": SECONDARY_VROT_KMS,
+        "primary_vmacro_kms": PRIMARY_VMACRO_KMS,
+        "secondary_vmacro_kms": SECONDARY_VMACRO_KMS,
         "inclination_deg": INCL_DEG, "per0_deg": PER0_DEG,
         "long_an_deg": LONG_AN_DEG, "ecc": ECC,
         "period_days": PERIOD_DAYS, "n_mesh": N_MESH,
@@ -244,6 +326,10 @@ def _binary_params_dict(*, wl_min: float, wl_max: float):
         "first_bjd_phase_ref": _FIRST_BJD,
         "mean_anomaly_at_t0_rad": float(_MEAN_ANOMALY_T0),
         "reference_time_yr": 0.0,
+        # γ now reaches the spectrum via orbit_utils.get_orbit_jax applying it
+        # once on the barycenter along the -y axis (matches mesh_model default
+        # los_vector = [0, 1, 0]). Pre-fix pickles had this flag set to True but
+        # γ was double-applied along +z (invisible to the spectrum).
         "gamma_applied_in_spice": True,
         "t_p_applied_in_spice": True,
         "distance_pc": DISTANCE_PC,
@@ -258,8 +344,10 @@ def _binary_params_dict(*, wl_min: float, wl_max: float):
 @click.option("--num-eclipse-times", default=80, show_default=True,
               help="Total samples within eclipse windows (split evenly between "
                    "primary and secondary).")
-@click.option("--num-wavelengths", default=40000, show_default=True,
-              help="Wavelength grid resolution.")
+@click.option("--num-wavelengths", default=200000, show_default=True,
+              help="Wavelength grid resolution. Default gives Δλ ≈ 0.01 Å across "
+                   "4800–6800 Å so a downstream R = 80k convolution is honest "
+                   "for both HARPS and SPICE.")
 @click.option("--wl-min", default=WL_MIN, show_default=True,
               help="Wavelength grid minimum [Angstrom].")
 @click.option("--wl-max", default=WL_MAX, show_default=True,
