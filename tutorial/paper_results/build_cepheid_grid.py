@@ -512,6 +512,9 @@ def cepheid_outputs_complete(
     wanted_bundles: Sequence[str],
     *,
     skip_spectra: bool,
+    wl_min: float = WL_MIN,
+    wl_max: float = WL_MAX,
+    wl_steps: int = WL_STEPS,
 ) -> bool:
     """True when ``out_dir`` already holds every bundle/spectrum key this run would add."""
     existing_b = _load_pickle_dict_or_none(out_dir / f"{name}_bundles.pkl")
@@ -525,7 +528,27 @@ def cepheid_outputs_complete(
     if existing_s is None:
         return False
     need = spectrum_variant_names(wanted_bundles)
-    return need <= set(existing_s.keys())
+    if not (need <= set(existing_s.keys())):
+        return False
+
+    # Verify wavelength range matches requested window.
+    # Take any available spectrum variant to check the common WL axis.
+    sample_key = next(iter(existing_s.keys()))
+    sample_spectra_dict = existing_s[sample_key]
+    if not sample_spectra_dict:
+        return False
+    # Each variant is {line_center: LineSpectra}
+    sample_lc = next(iter(sample_spectra_dict.keys()))
+    ls = sample_spectra_dict[sample_lc]
+
+    if len(ls.wavelengths) != wl_steps:
+        return False
+    if not np.isclose(ls.wavelengths[0], wl_min):
+        return False
+    if not np.isclose(ls.wavelengths[-1], wl_max):
+        return False
+
+    return True
 
 
 def _merge_pickle_dict(path: Path, new_obj: dict) -> dict:
@@ -545,6 +568,9 @@ def build_one(
     *,
     skip_spectra: bool = False,
     n_mesh: int = 5000,
+    wl_min: float = WL_MIN,
+    wl_max: float = WL_MAX,
+    wl_steps: int = WL_STEPS,
 ) -> None:
     bundles_path = out_dir / f"{config.name}_bundles.pkl"
     spectra_path = out_dir / f"{config.name}_spectra.pkl"
@@ -631,8 +657,8 @@ def build_one(
     # required). For ``intensity_mu1`` the LD law is applied to the
     # disc-centre intensity I(μ=1) via the same flux-conservation path
     # as the flux variant.
-    line_center = 0.5 * (WL_MIN + WL_MAX)
-    line_width = 0.5 * (WL_MAX - WL_MIN)
+    line_center = 0.5 * (wl_min + wl_max)
+    line_width = 0.5 * (wl_max - wl_min)
 
     # Gate each variant on BOTH the bundle existing AND the emulator being
     # loaded in this invocation. ``bundles`` is post-merge with the on-disk
@@ -682,7 +708,7 @@ def build_one(
         t0 = time.perf_counter()
         spectra[name] = simulate_line_spectra(
             bundle.snapshots, bundle.snapshots[0], intensity_fn, (line_center,),
-            line_width=line_width, steps=WL_STEPS,
+            line_width=line_width, steps=wl_steps,
             ld_coeffs=ld_coeffs,
         )
         print(f"    {name:>20s}: {time.perf_counter() - t0:6.1f} s")
@@ -729,6 +755,13 @@ def parse_args():
                         "overrides --skip-aemu / --skip-zarr).")
     p.add_argument("--n-mesh", type=int, default=5000,
                    help="Icosphere mesh resolution.")
+    p.add_argument("--wl-min", type=float, default=WL_MIN,
+                   help=f"Spectrum window lower bound in Å (default: {WL_MIN}).")
+    p.add_argument("--wl-max", type=float, default=WL_MAX,
+                   help=f"Spectrum window upper bound in Å (default: {WL_MAX}).")
+    p.add_argument("--wl-steps", type=int, default=WL_STEPS,
+                   help=f"Number of wavelength samples across the window "
+                        f"(default: {WL_STEPS}).")
     p.add_argument("--force", action="store_true",
                    help="Re-build even if output pickles already exist.")
     p.add_argument("--skip-spectra", action="store_true",
@@ -782,6 +815,7 @@ def main() -> int:
             not args.force
             and cepheid_outputs_complete(
                 args.out_dir, cfg.name, wanted_bundles, skip_spectra=args.skip_spectra,
+                wl_min=args.wl_min, wl_max=args.wl_max, wl_steps=args.wl_steps,
             )
         ):
             print(f"skip {cfg.name}: all requested outputs present (use --force to rebuild)")
@@ -809,6 +843,9 @@ def main() -> int:
                 cfg, emulators, args.out_dir,
                 skip_spectra=args.skip_spectra,
                 n_mesh=args.n_mesh,
+                wl_min=args.wl_min,
+                wl_max=args.wl_max,
+                wl_steps=args.wl_steps,
             )
         except Exception as exc:
             failures.append((cfg.name, exc))
