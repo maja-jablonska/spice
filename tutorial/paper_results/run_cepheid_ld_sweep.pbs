@@ -80,7 +80,12 @@ module load python3/3.11.7    # nearest available; check `module avail python3`
 
 # JAX & BLAS thread parallelism — match what PBS gave us.
 export JAX_PLATFORMS=cpu
-export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
+# `--xla_gpu_enable_cudnn_frontend=false` is dormant here (CPU-only), but kept
+# so cloning this PBS to GPU doesn't trip CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED
+# on Gadi nodes whose cuDNN 9 install is missing
+# libcudnn_engines_runtime_compiled.so.9 (seen on the tz_fornacis_spectra
+# macroturbulence convolution).
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8} --xla_gpu_enable_cudnn_frontend=false"
 export OMP_NUM_THREADS=${PBS_NCPUS:-8}
 export MKL_NUM_THREADS=${PBS_NCPUS:-8}
 export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
