@@ -49,9 +49,12 @@ export HF_HOME="${HF_HOME:-/scratch/y89/$USER/hf-cache}"
 
 NUM_TIMES="${NUM_TIMES:-150}"
 NUM_ECLIPSE_TIMES="${NUM_ECLIPSE_TIMES:-80}"
-NUM_WAVELENGTHS="${NUM_WAVELENGTHS:-40000}"
-WL_MIN="${WL_MIN:-3000}"
-WL_MAX="${WL_MAX:-10000}"
+# Trimmed HARPS metal-band default at high sampling so the downstream R = 80k
+# convolution is honest on both sides (Δλ ≈ 0.01 Å). Override env vars to
+# widen the band or coarsen the grid for survey-style figures.
+NUM_WAVELENGTHS="${NUM_WAVELENGTHS:-200000}"
+WL_MIN="${WL_MIN:-4800}"
+WL_MAX="${WL_MAX:-6800}"
 ORBIT_CHUNK="${ORBIT_CHUNK:-15}"
 MODEL="${MODEL:-RozanskiT/TPayne-spice-harps}"
 FORCE="${FORCE:-0}"

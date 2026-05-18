@@ -16,13 +16,20 @@ from spice.models.mesh_view import construct_points_in_circles, construct_triang
 
 import jaxkd as jk
 
-# Make PHOEBE-related imports optional
+# Make PHOEBE-related imports optional. When phoebe is absent we still need
+# `PhoebeConfig` etc. to resolve as names — they only appear in type
+# annotations / default args on PhoebeBinary, never instantiated unless
+# PHOEBE_AVAILABLE is True.
 try:
     from spice.models.phoebe_model import DAY_TO_S, PhoebeModel
     from spice.models.phoebe_utils import Component, PhoebeConfig
     PHOEBE_AVAILABLE = True
 except Exception:
     PHOEBE_AVAILABLE = False
+    PhoebeConfig = Any   # type stub
+    PhoebeModel = None
+    Component = None
+    DAY_TO_S = 86400.0
 
 YEAR_TO_SECONDS = 3.154e7
 DAY_TO_YEAR = 0.0027378507871321013

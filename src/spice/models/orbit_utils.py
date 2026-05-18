@@ -125,9 +125,11 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
       Omega : Longitude of ascending node (radians).
       mean_anomaly : Mean anomaly at ``reference_time`` (radians).
       reference_time : Reference epoch in **years**.
-      vgamma : Systemic velocity along +z in **km/s** (PHOEBE / ``vgamma@binary`` units).
-               Subtracted from line-of-sight velocities before conversion to km/s in the
-               returned orbit array.
+      vgamma : Systemic radial velocity in **km/s** (PHOEBE / ``vgamma@binary`` units).
+               Added to the barycenter velocity only (not the per-body velocities),
+               along the -y axis so that mesh_model's default los_vector=[0, 1, 0]
+               sees γ via mesh_model.los_velocities; receding γ > 0 then redshifts
+               the spectrum (consistent with spectrum.apply_vrad_log's sign).
     
     Returns:
       An array containing positions and velocities with shape (6, len(time), 3).
@@ -217,13 +219,8 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     vx_primary = cos_longan * vx_primary_ - sin_longan * vy_primary_ * cos_incl
     vy_primary = sin_longan * vx_primary_ + cos_longan * vy_primary_ * cos_incl
     vz_primary = sin_incl * vy_primary_
-    
-    # Systemic RV along +z.  ``vgamma`` is in km/s (PHOEBE convention); velocities
-    # here are still in m/s before the final ``/1e3`` stack below.
-    vgamma_si = vgamma * 1.0e3
-    vz_primary = vz_primary - vgamma_si
-    z_primary = z_primary - vgamma_si * (time - reference_time)
-    
+
+
     # --- SECONDARY COMPONENT CALCULATIONS ---
     
     # Adjust for secondary component (half an orbit away) and argument of periastron
@@ -245,22 +242,29 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     vx_secondary = cos_longan * vx_secondary_ - sin_longan * vy_secondary_ * cos_incl
     vy_secondary = sin_longan * vx_secondary_ + cos_longan * vy_secondary_ * cos_incl
     vz_secondary = sin_incl * vy_secondary_
-    
-    vz_secondary = vz_secondary - vgamma_si
-    z_secondary = z_secondary - vgamma_si * (time - reference_time)
-    
+
     # --- BARYCENTER CALCULATIONS ---
-    
+
     # Calculate barycenter positions
     bary_x = (m1_ * x_primary + m2_ * x_secondary) / total_mass
     bary_y = (m1_ * y_primary + m2_ * y_secondary) / total_mass
     bary_z = (m1_ * z_primary + m2_ * z_secondary) / total_mass
-    
+
     # Calculate barycenter velocities
     bary_vx = (m1_ * vx_primary + m2_ * vx_secondary) / total_mass
     bary_vy = (m1_ * vy_primary + m2_ * vy_secondary) / total_mass
     bary_vz = (m1_ * vz_primary + m2_ * vz_secondary) / total_mass
-    
+
+    # Systemic radial velocity (km/s; PHOEBE convention: vgamma > 0 = receding).
+    # Applied ONLY to the barycenter so that _add_orbit's `body{1,2}_velocities =
+    # barycenter_vel + body_vel` carries γ exactly once. Applied along -y to match
+    # mesh_model._default_los_vector() = [0, 1, 0] and the sign convention in
+    # mesh_model.los_velocities / spectrum.apply_vrad_log (where vrad < 0 produces
+    # the redshift expected of a receding source).
+    vgamma_si = vgamma * 1.0e3
+    bary_vy = bary_vy - vgamma_si
+    bary_y = bary_y - vgamma_si * (time - reference_time)
+
     # Organize position and velocity tuples
     primary_pos = jnp.stack([x_primary, y_primary, z_primary], axis=1)
     primary_vel = jnp.stack([vx_primary, vy_primary, vz_primary], axis=1)
