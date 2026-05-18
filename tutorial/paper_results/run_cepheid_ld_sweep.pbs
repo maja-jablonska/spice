@@ -22,14 +22,15 @@
 #  preserved, and `intensity_mu1` + `intensity_mu1_linear_<u>` are added.
 #
 #  USAGE
-#    cd tutorial/paper_results
+#    cd <spice repo root>
 #
 #    # Full CSV (6 Cepheids, indices 0–5):
-#    qsub -J 0-$(( $(wc -l < cepheid_grid.csv) - 2 )) run_cepheid_ld_sweep.pbs
+#    qsub -J 0-$(( $(wc -l < tutorial/paper_results/cepheid_grid.csv) - 2 )) \
+#        tutorial/paper_results/run_cepheid_ld_sweep.pbs
 #
 #    # δ Cep rotating + non-rot only (CSV rows 1–2):
 #    qsub -J 1-2 -v OUT_DIR=/home/100/mj8805/scr_y89/spice/cepheid_grid \
-#        run_cepheid_ld_sweep.pbs
+#        tutorial/paper_results/run_cepheid_ld_sweep.pbs
 #
 #    # If LD sweep was written elsewhere, merge once on a login node:
 #    python merge_cepheid_pickles.py --dst .../cepheid_grid --src .../cepheid_ld_sweep \
@@ -40,24 +41,26 @@
 #            (add `--force` in the python invocation to rebuild).
 #
 #  WALLTIME SIZING
-#    Synthesis is ~1-2 min per LD variant × 20 variants ≈ 25-45 min per
-#    Cepheid, plus ~3 min for the intensity zarr emulator load and bundle
-#    build. 04:00:00 covers it with margin; bump if you increase
+#    Synthesis on one V100 is ~30-60 s per LD variant × 20 variants ≈ 10-20 min
+#    per Cepheid, plus ~3 min for the intensity zarr emulator load and bundle
+#    build. 10:00:00 covers it with generous margin; bump if you increase
 #    LD_COEFFS or WL_STEPS in build_cepheid_grid.py.
 #============================================================================
 
-#PBS -P mk27
-#PBS -q rsaa
-#PBS -l walltime=04:00:00
-#PBS -l ncpus=8
-#PBS -l mem=32GB
-#PBS -l jobfs=50GB
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l walltime=10:00:00
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=200GB
+#PBS -l jobfs=200GB
 #PBS -l storage=scratch/y89+gdata/y89
 #PBS -l wd
 #PBS -J 0-5
 #PBS -N cepheid_ld_sweep
+#PBS -r y
 #PBS -j oe
-#PBS -m a
+#PBS -m bae
 #PBS -M maja.jablonska@anu.edu.au
 
 set -euo pipefail
@@ -77,15 +80,13 @@ mapfile -t GRID_NAMES < <(tail -n +2 "$CONFIG" | cut -d',' -f1 | sed '/^$/d')
 # ---------------------------------------------------------------------------
 module purge
 module load python3/3.11.7    # nearest available; check `module avail python3`
+module load cuda/12.9.0
+module load cudnn/9.5.0-cuda12
 
-# JAX & BLAS thread parallelism — match what PBS gave us.
-export JAX_PLATFORMS=cpu
-# `--xla_gpu_enable_cudnn_frontend=false` is dormant here (CPU-only), but kept
-# so cloning this PBS to GPU doesn't trip CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED
-# on Gadi nodes whose cuDNN 9 install is missing
-# libcudnn_engines_runtime_compiled.so.9 (seen on the tz_fornacis_spectra
-# macroturbulence convolution).
-export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8} --xla_gpu_enable_cudnn_frontend=false"
+# JAX & BLAS thread parallelism — match what PBS gave us. The XLA flags only
+# affect CPU-side ops (host setup, small kernels); JAX itself runs on cuda.
+export JAX_PLATFORMS=cuda
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
 export OMP_NUM_THREADS=${PBS_NCPUS:-8}
 export MKL_NUM_THREADS=${PBS_NCPUS:-8}
 export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
@@ -116,10 +117,10 @@ cd "$PBS_O_WORKDIR"
 
 # Same directory as the main grid build so pickles merge (see build_cepheid_grid.py).
 OUT_DIR="${OUT_DIR:-$PBS_O_WORKDIR/cepheid_grid}"
-INTENSITY_ZARR="${INTENSITY_ZARR:-/g/data/y89/mj8805/fe_regular_nlte_big.zarr}"
+INTENSITY_ZARR="${INTENSITY_ZARR:-/g/data/y89/mj8805/PAPER/regular_fe.zarr}"
 mkdir -p "$OUT_DIR"
 
-"${PYTHON_BIN}" -u build_cepheid_grid.py \
+"${PYTHON_BIN}" -u tutorial/paper_results/build_cepheid_grid.py \
     --config "$CONFIG" \
     --names "$NAME" \
     --out-dir "$OUT_DIR" \

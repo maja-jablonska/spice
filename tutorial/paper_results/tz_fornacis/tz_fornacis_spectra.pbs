@@ -41,11 +41,6 @@ PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
 unset JAX_PLATFORMS
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export XLA_PYTHON_CLIENT_ALLOCATOR=platform
-# Bypass cuDNN's runtime-compiled engines on Gadi GPU nodes whose cuDNN 9
-# install is missing libcudnn_engines_runtime_compiled.so.9 (otherwise the
-# macroturbulence Gaussian convolution in apply_spectral_resolution trips
-# CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED).
-export XLA_FLAGS="${XLA_FLAGS:-} --xla_gpu_enable_cudnn_frontend=false"
 export TF_CPP_MIN_LOG_LEVEL=2
 export OMP_NUM_THREADS=${PBS_NCPUS:-12}
 export MKL_NUM_THREADS=${PBS_NCPUS:-12}
