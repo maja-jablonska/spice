@@ -276,10 +276,20 @@ def _apply_macroturbulence(spectra, log_vws, vmacro_kms):
     if vmacro_kms <= 0.0:
         return spectra
     R_macro = _C_KMS / vmacro_kms
+    # Pin the 1-D Gaussian convolution to CPU: it routes through
+    # jax.lax.conv_general_dilated, which dispatches to cuDNN on GPU, and some
+    # Gadi cuDNN 9 installs are missing libcudnn_engines_runtime_compiled.so.9
+    # (CUDNN_STATUS_SUBLIBRARY_LOADING_FAILED). The op is tiny — there's no
+    # GPU win to fight for — and forcing it to CPU avoids cuDNN entirely.
+    cpu = jax.devices("cpu")[0]
+    log_vws_cpu = jax.device_put(log_vws, cpu)
     out = []
     for s in spectra:
-        line = apply_spectral_resolution(log_vws, jnp.asarray(s[:, 0]), R_macro)
-        cont = apply_spectral_resolution(log_vws, jnp.asarray(s[:, 1]), R_macro)
+        s0_cpu = jax.device_put(jnp.asarray(s[:, 0]), cpu)
+        s1_cpu = jax.device_put(jnp.asarray(s[:, 1]), cpu)
+        with jax.default_device(cpu):
+            line = apply_spectral_resolution(log_vws_cpu, s0_cpu, R_macro)
+            cont = apply_spectral_resolution(log_vws_cpu, s1_cpu, R_macro)
         out.append(np.stack([np.asarray(line), np.asarray(cont)], axis=-1))
     return np.asarray(out)
 

@@ -41,6 +41,7 @@ if mp.get_start_method(allow_none=True) is None:
 import argparse
 import csv
 import gc
+import os
 import pickle
 import sys
 import time
@@ -265,7 +266,13 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, n_mesh_elements,
         bol_lum.append(AB_passband_luminosity(bol, vws, spec1[:, 0] + spec2[:, 0]))
     bol_lum = np.array(bol_lum)
 
-    with open(out_pkl, 'wb') as f:
+    # Atomic write so a SIGKILL / node crash / OOM mid-dump can never leave a
+    # truncated `.pkl` behind that the resume logic would then mistake for a
+    # completed task (`out_pkl.exists()` is the skip predicate at the top of
+    # this function). The tmp filename includes pid so concurrent workers
+    # producing different out_pkls can't collide on the tmp slot either.
+    out_pkl_tmp = out_pkl.with_name(f"{out_pkl.name}.tmp.{os.getpid()}")
+    with open(out_pkl_tmp, 'wb') as f:
         pickle.dump({
             'phoebe_binary': b,
             'spice_body1': pb1,
@@ -283,6 +290,9 @@ def run_one(inclination, period, q, ecc, n_times, primary_mass, n_mesh_elements,
             'ecc': ecc,
             'n_mesh_elements': n_mesh_elements,
         }, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(out_pkl_tmp, out_pkl)
 
     # Bound JAX cache + Python heap growth across many tasks per worker
     gc.collect()

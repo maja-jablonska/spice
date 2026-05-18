@@ -618,15 +618,21 @@ def build_one(
     line_center = 0.5 * (WL_MIN + WL_MAX)
     line_width = 0.5 * (WL_MAX - WL_MIN)
 
+    # Gate each variant on BOTH the bundle existing AND the emulator being
+    # loaded in this invocation. ``bundles`` is post-merge with the on-disk
+    # pickle, so it can carry variants from earlier runs (e.g. ``intensity``
+    # / ``harps`` from the main grid build) whose emulators weren't requested
+    # this time. Their spectra remain on disk via the merge at the end of
+    # this function — we just don't try to re-synthesize them here.
     spectrum_variants: list[tuple[str, Any, CepheidBundle, Optional[Any]]] = []
-    if "intensity" in bundles:
+    if "intensity" in bundles and "intensity" in emulators:
         spectrum_variants.append((
             "with_ld",
             emulators["intensity"].intensity,
             bundles["intensity"],
             None,
         ))
-    if "flux_no_ld" in bundles:
+    if "flux_no_ld" in bundles and "flux_no_ld" in emulators:
         for c in LD_COEFFS:
             spectrum_variants.append((
                 f"flux_linear_{c:{LD_FMT}}",
@@ -634,7 +640,7 @@ def build_one(
                 bundles["flux_no_ld"],
                 jnp.array([float(c), 0.0, 0.0, 0.0]),
             ))
-    if "intensity_mu1" in bundles:
+    if "intensity_mu1" in bundles and "intensity_mu1" in emulators:
         # One adapter reused across the 20 coefficient calls so the
         # surrounding ``LdBoundIntensity`` hashes stably and jit only
         # recompiles for new coefficients.
@@ -647,7 +653,7 @@ def build_one(
                 jnp.array([float(c), 0.0, 0.0, 0.0]),
             ))
     for name in ("harps", "iron_line"):
-        if name in bundles:
+        if name in bundles and name in emulators:
             spectrum_variants.append((
                 name,
                 emulators[name].intensity,
