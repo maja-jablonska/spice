@@ -1,0 +1,117 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS job — synthesise HARPS-resolution spectra for the rotating
+#  δ Cep Cepheid using the transformer (TPayne) aemu intensity bundle.
+#
+#  Builds bundles[harps] and spectra["harps"] for `cep_DeltaCep`
+#  (12 km/s rotation, row 1 of cepheid_grid.csv) only. No zarr / LD-sweep
+#  variants — only the transformer model at HARPS resolution.
+#
+#  USAGE
+#    cd <spice repo root>
+#    qsub tutorial/paper_results/run_cepheid_harps_rotating.pbs
+#
+#    # Override defaults via -v:
+#    qsub -v NAME=cep_DeltaCep,OUT_DIR=/path/to/out,\
+#HARPS_AEMU=RozanskiT/TPayne-spice-harps,HF_HOME=/scratch/y89/$USER/hf-cache \
+#        tutorial/paper_results/run_cepheid_harps_rotating.pbs
+#
+#  Monitor:  qstat -fx <jobid>  ;  tail -f cepheid_harps_rot.o<jobid>
+#  Restart:  re-submit. Per-Cepheid pickles in OUT_DIR are merged: if a
+#            previous run already wrote the `harps` bundle + `harps`
+#            spectrum, the resume check skips this Cepheid (use --force
+#            in the python invocation below to rebuild from scratch).
+#            Atomic save_pickle + tolerant resume-load mean a SIGKILL or
+#            OOM mid-write no longer leaves a truncated .pkl behind.
+#
+#  WALLTIME SIZING
+#    Aemu load (HF download + JAX init): ~3-5 min on first run, ~30 s
+#    when HF_HOME is already populated.
+#    Bundle build + per-phase Teff/logg modifier pass: ~1-2 min.
+#    Synthesis on one V100: ~1-2 min for the single `harps` variant
+#    (one wavelength grid covering the aemu's native HARPS span).
+#    Total ~5-10 min cold; 2 h walltime gives ample margin for the first
+#    HF download and any unexpected slowdown.
+#============================================================================
+
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l walltime=02:00:00
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=200GB
+#PBS -l jobfs=200GB
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N cepheid_harps_rot
+#PBS -r y
+#PBS -j oe
+#PBS -m bae
+#PBS -M maja.jablonska@anu.edu.au
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# 1) Inputs — single rotating Cepheid + HARPS transformer bundle.
+# ---------------------------------------------------------------------------
+CONFIG="${CONFIG:-$PBS_O_WORKDIR/cepheid_grid.csv}"
+NAME="${NAME:-cep_DeltaCep}"          # rotating δ Cep (12 km/s); use cep_DeltaCep_norot for the non-rotating row
+HARPS_AEMU="${HARPS_AEMU:-RozanskiT/TPayne-spice-harps}"
+OUT_DIR="${OUT_DIR:-$PBS_O_WORKDIR/cepheid_harps_rotating}"
+
+if [ ! -f "$CONFIG" ]; then
+    echo "ERROR: CSV not found at $CONFIG (set CONFIG=... or place cepheid_grid.csv beside this script)"
+    exit 4
+fi
+mkdir -p "$OUT_DIR"
+
+# ---------------------------------------------------------------------------
+# 2) Environment — same modules / JAX flags as run_cepheid_ld_sweep.pbs.
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.7
+module load cuda/12.9.0
+module load cudnn/9.5.0-cuda12
+
+# GPU primary, CPU available for jax.pure_callback dispatch + small kernels.
+export JAX_PLATFORMS=cuda,cpu
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+export OMP_NUM_THREADS=${PBS_NCPUS:-8}
+export MKL_NUM_THREADS=${PBS_NCPUS:-8}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
+export TF_CPP_MIN_LOG_LEVEL=2
+
+# Hugging Face cache on scratch — $HOME on Gadi is too small for the
+# transformer weights and the cache is reusable across jobs.
+export HF_HOME="${HF_HOME:-/scratch/y89/${USER}/hf-cache}"
+mkdir -p "$HF_HOME"
+
+export PYTHON_BIN=${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}
+
+echo "[$(date '+%F %T')] host=$(hostname)  name=$NAME  ngpus=${PBS_NGPUS:-?}  cpus=${PBS_NCPUS:-?}"
+echo "  CONFIG:      $CONFIG"
+echo "  OUT_DIR:     $OUT_DIR"
+echo "  HARPS_AEMU:  $HARPS_AEMU"
+echo "  HF_HOME:     $HF_HOME"
+nvidia-smi -L 2>/dev/null || true
+"${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
+
+# ---------------------------------------------------------------------------
+# 3) Run the per-Cepheid HARPS-only build.
+#    --bundles harps   -> only the TPayne transformer aemu (skips zarr/LD).
+#    --skip-aemu is NOT passed (we *want* the aemu); the iron_line bundle
+#    is dropped because --bundles is an explicit allowlist.
+# ---------------------------------------------------------------------------
+cd "$PBS_O_WORKDIR"
+
+"${PYTHON_BIN}" -u tutorial/paper_results/build_cepheid_grid.py \
+    --config "$CONFIG" \
+    --names "$NAME" \
+    --out-dir "$OUT_DIR" \
+    --bundles harps \
+    --harps-aemu "$HARPS_AEMU" \
+    --continue-on-error
+
+echo "[$(date '+%F %T')] finished $NAME"
