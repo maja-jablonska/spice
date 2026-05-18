@@ -85,7 +85,10 @@ module load cudnn/9.5.0-cuda12
 
 # JAX & BLAS thread parallelism — match what PBS gave us. The XLA flags only
 # affect CPU-side ops (host setup, small kernels); JAX itself runs on cuda.
-export JAX_PLATFORMS=cuda
+# `cuda,cpu` initializes both backends — GPU stays primary, CPU is needed for
+# jax.pure_callback dispatch (used by LazyZarrInterpolator) and for the
+# macroturbulence convolution that's CPU-pinned in tz_fornacis_spectra.py.
+export JAX_PLATFORMS=cuda,cpu
 export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
 export OMP_NUM_THREADS=${PBS_NCPUS:-8}
 export MKL_NUM_THREADS=${PBS_NCPUS:-8}
