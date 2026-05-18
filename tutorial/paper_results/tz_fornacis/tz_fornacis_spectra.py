@@ -7,7 +7,7 @@ Single sweep, single output pickle. The time array is the union of:
   * ``num-eclipse-times`` samples split evenly between the primary and
     secondary eclipse windows predicted by
     :func:`spice.models.orbit_utils.eclipse_timestamps_kepler`
-    (line-of-sight ``[0, 0, -1]``, matching ``check_phoebe_eclipses.py``).
+    (same line-of-sight as synthesis/occlusion: ``[0, 1, 0]``).
 
 The merged array is sorted; each time-point carries a ``time_origin`` tag
 (``'general'`` / ``'primary_eclipse'`` / ``'secondary_eclipse'``) so
@@ -119,6 +119,15 @@ _MEAN_ANOMALY_T0 = (
     ((_FIRST_BJD - T_P_HJD) % PERIOD_DAYS) / PERIOD_DAYS * (2.0 * np.pi)
 )
 
+# Keplerian orbit precomputation for add_orbit / linear interpolation at evaluate_orbit.
+# 15 points smears eclipse geometry (~2% of P fits in one interpolation segment);
+# use a dense grid (see check_phoebe_eclipses.py). Override via TZ_FOR_ORBIT_RESOLUTION.
+ORBIT_RESOLUTION_POINTS = int(os.environ.get("TZ_FOR_ORBIT_RESOLUTION", "5000"))
+
+# Line of sight for eclipse timing, visibility (mus), occlusion, and flux synthesis.
+# Must match mesh_model._default_los_vector() = [0, 1, 0] (not [0, 0, -1]).
+LOS_VECTOR = jnp.array([0., 1., 0.])
+
 
 def _check_constants_in_sync():
     """Abort if literature constants drifted from tz_fornacis_lightcurves.py."""
@@ -140,6 +149,7 @@ def _check_constants_in_sync():
         "INCL_DEG": INCL_DEG, "PER0_DEG": PER0_DEG, "LONG_AN_DEG": LONG_AN_DEG,
         "GAMMA_KMS": GAMMA_KMS, "T_P_HJD": T_P_HJD,
         "DISTANCE_PC": DISTANCE_PC,
+        "ORBIT_RESOLUTION_POINTS": ORBIT_RESOLUTION_POINTS,
     }
     drifted = []
     for name, value in here.items():
@@ -165,6 +175,7 @@ def _build_binary_and_eclipses(em):
     from spice.models.binary import Binary, add_orbit
     from spice.models.mesh_model import IcosphereModel
     from spice.models.mesh_transform import add_rotation
+    from spice.models.mesh_view import get_mesh_view
     from spice.models.orbit_utils import eclipse_timestamps_kepler
 
     period_yr = (PERIOD_DAYS * u.d).to(u.year).value
@@ -197,11 +208,13 @@ def _build_binary_and_eclipses(em):
     # orbit; the secondary spins much faster than synchronous (Andersen+1991).
     body1 = add_rotation(body1, rotation_velocity=PRIMARY_VROT_KMS)
     body2 = add_rotation(body2, rotation_velocity=SECONDARY_VROT_KMS)
+    body1 = get_mesh_view(body1, LOS_VECTOR)
+    body2 = get_mesh_view(body2, LOS_VECTOR)
     binary = Binary.from_bodies(body1, body2)
     binary = add_orbit(
         binary, period_yr, ECC, 0.,
         incl_rad, per0_rad, long_an_rad,
-        float(_MEAN_ANOMALY_T0), 0., float(GAMMA_KMS), 15,
+        float(_MEAN_ANOMALY_T0), 0., float(GAMMA_KMS), ORBIT_RESOLUTION_POINTS,
     )
 
     (_, t1_p, _, _, t4_p,
@@ -211,7 +224,7 @@ def _build_binary_and_eclipses(em):
         incl_rad, per0_rad, long_an_rad,
         PRIMARY_RADIUS, SECONDARY_RADIUS,
         pad=1.1,
-        los_vector=jnp.array([0., 0., -1.]),
+        los_vector=LOS_VECTOR,
     )
     primary_window = (float(t1_p), float(t4_p))
     secondary_window = (float(t1_s), float(t4_s))
@@ -336,10 +349,12 @@ def _binary_params_dict(*, wl_min: float, wl_max: float):
         "first_bjd_phase_ref": _FIRST_BJD,
         "mean_anomaly_at_t0_rad": float(_MEAN_ANOMALY_T0),
         "reference_time_yr": 0.0,
+        "orbit_resolution_points": ORBIT_RESOLUTION_POINTS,
+        "los_vector": [float(x) for x in LOS_VECTOR],
         # γ now reaches the spectrum via orbit_utils.get_orbit_jax applying it
-        # once on the barycenter along the -y axis (matches mesh_model default
-        # los_vector = [0, 1, 0]). Pre-fix pickles had this flag set to True but
-        # γ was double-applied along +z (invisible to the spectrum).
+        # once on the barycenter along the -y axis (matches LOS_VECTOR).
+        # Pre-fix pickles had this flag set to True but γ was double-applied
+        # along +z (invisible to the spectrum).
         "gamma_applied_in_spice": True,
         "t_p_applied_in_spice": True,
         "distance_pc": DISTANCE_PC,
