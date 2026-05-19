@@ -12,7 +12,7 @@
 #    qsub tutorial/paper_results/run_cepheid_harps_rotating.pbs
 #
 #    # Override defaults via -v:
-#    qsub -v NAME=cep_DeltaCep,OUT_DIR=/path/to/out,\
+#    qsub -v NAME=cep_DeltaCep,OUT_DIR=/path/to/out,N_PHASES=30,N_MESH=2000,\
 #HARPS_AEMU=RozanskiT/TPayne-spice-harps,HF_HOME=/scratch/y89/$USER/hf-cache \
 #        tutorial/paper_results/run_cepheid_harps_rotating.pbs
 #
@@ -68,6 +68,16 @@ WL_MIN="${WL_MIN:-5000}"
 WL_MAX="${WL_MAX:-6000}"
 WL_STEPS="${WL_STEPS:-10000}"
 
+# Number of pulsation-phase samples (timestamps). Default 100 matches the
+# Python script; drop to e.g. 20-30 for a quick smoke test (runtime scales
+# linearly with N_PHASES).
+N_PHASES="${N_PHASES:-30}"
+
+# Icosphere mesh resolution (number of vertices). Default 5000 matches the
+# Python script; per-snapshot surface-element cost scales with N_MESH, so
+# lowering it (e.g. 1000-2000) is the fastest knob for smoke tests.
+N_MESH="${N_MESH:-5000}"
+
 if [ ! -f "$CONFIG" ]; then
     echo "ERROR: CSV not found at $CONFIG (set CONFIG=... or place cepheid_grid.csv beside this script)"
     exit 4
@@ -105,6 +115,8 @@ echo "  OUT_DIR:     $OUT_DIR"
 echo "  HARPS_AEMU:  $HARPS_AEMU"
 echo "  HF_HOME:     $HF_HOME"
 echo "  WL window:   ${WL_MIN}-${WL_MAX} Å in ${WL_STEPS} samples"
+echo "  N_PHASES:    ${N_PHASES}"
+echo "  N_MESH:      ${N_MESH}"
 nvidia-smi -L 2>/dev/null || true
 "${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
 
@@ -125,6 +137,8 @@ cd "$PBS_O_WORKDIR"
     --wl-min "$WL_MIN" \
     --wl-max "$WL_MAX" \
     --wl-steps "$WL_STEPS" \
+    --n-phases "$N_PHASES" \
+    --n-mesh "$N_MESH" \
     --continue-on-error
 
 echo "[$(date '+%F %T')] finished $NAME"

@@ -571,6 +571,7 @@ def build_one(
     wl_min: float = WL_MIN,
     wl_max: float = WL_MAX,
     wl_steps: int = WL_STEPS,
+    n_phases: int = N_PHASES,
 ) -> None:
     bundles_path = out_dir / f"{config.name}_bundles.pkl"
     spectra_path = out_dir / f"{config.name}_spectra.pkl"
@@ -595,7 +596,7 @@ def build_one(
     print(f"  vmicro (Luck 2018 δ Cep fit): "
           f"phase range [{min(vm_phase):.2f}, {max(vm_phase):.2f}] km/s")
 
-    timeseries = jnp.linspace(0, config.period, N_PHASES)
+    timeseries = jnp.linspace(0, config.period, n_phases)
 
     # 1) Build one bundle per *unique* emulator. Each emulator has its own
     # parameter ordering; ``build_bundle`` reads ``stellar_parameter_names``
@@ -762,6 +763,10 @@ def parse_args():
     p.add_argument("--wl-steps", type=int, default=WL_STEPS,
                    help=f"Number of wavelength samples across the window "
                         f"(default: {WL_STEPS}).")
+    p.add_argument("--n-phases", type=int, default=N_PHASES,
+                   help=f"Number of pulsation-phase samples (timestamps) per "
+                        f"Cepheid (default: {N_PHASES}). Lower values trade "
+                        f"phase resolution for shorter runtime.")
     p.add_argument("--force", action="store_true",
                    help="Re-build even if output pickles already exist.")
     p.add_argument("--skip-spectra", action="store_true",
@@ -846,6 +851,7 @@ def main() -> int:
                 wl_min=args.wl_min,
                 wl_max=args.wl_max,
                 wl_steps=args.wl_steps,
+                n_phases=args.n_phases,
             )
         except Exception as exc:
             failures.append((cfg.name, exc))
