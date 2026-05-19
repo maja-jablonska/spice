@@ -302,6 +302,18 @@ def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighb
     return body1, body2
 
 @partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2"))
+def v_evaluate_orbit_stacked(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[Model, Model]:
+    """Evaluate the orbit at multiple times, returning stacked-pytree models.
+
+    Each leaf of the returned models has a leading dimension of ``len(times)``.
+    This is the natural output of the underlying ``jax.vmap`` and is suitable
+    for further vmapping (e.g. batching ``simulate_observed_flux`` over time).
+    """
+    return jax.vmap(
+        lambda t: _evaluate_orbit(binary, t, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2)
+    )(times)
+
+
 def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[List[Model], List[Model]]:
     """Evaluate the orbit at multiple times.
 
@@ -313,20 +325,13 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neig
         Tuple[List[Model], List[Model]]: Lists of updated primary and secondary models at the specified times,
             where each element corresponds to a model at a specific time
     """
-    # Map the evaluation function over each time point
-    result_body1, result_body2 = jax.vmap(
-        lambda t: _evaluate_orbit(binary, t, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2)
-    )(times)
-    
-    # The issue is that jax.lax.map doesn't properly handle the nested structure
-    # when resolving occlusions. Using jax.vmap instead ensures proper vectorization.
-    
+    result_body1, result_body2 = v_evaluate_orbit_stacked(binary, times, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2)
+
     # Convert the results to lists for each component
     body1_list = jax.tree_util.tree_map(lambda x: list(x), result_body1)
     body2_list = jax.tree_util.tree_map(lambda x: list(x), result_body2)
-    
+
     # Transpose the tree structure to get a list of models
-    # The API changed in newer JAX versions - tree_transpose now takes trees as positional args
     return jax.tree_util.tree_transpose(
         outer_treedef=jax.tree_util.tree_structure(binary.body1),
         inner_treedef=jax.tree_util.tree_structure([0 for _ in range(len(times))]),
@@ -406,3 +411,35 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
         else:
             result = v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
     return result
+
+
+def evaluate_orbit_at_times_stacked(binary: Binary, times: ArrayLike) -> Tuple[Model, Model]:
+    """Evaluate the orbit at multiple times, returning stacked-pytree models.
+
+    Same as :func:`evaluate_orbit_at_times` but returns a pair of ``Model``
+    pytrees whose leaves carry a leading time axis of length ``len(times)``,
+    instead of Python lists. This preserves the device-side stacked layout
+    produced by ``jax.vmap`` so downstream code can vmap over the time axis
+    (e.g. ``jax.vmap(simulate_observed_flux, in_axes=(None, 0, ...))``)
+    without re-staging the result through host-side Python lists.
+
+    Not supported for :class:`PhoebeBinary` (PHOEBE meshes are constructed
+    per-time and don't share a uniform stacked layout).
+    """
+    if isinstance(binary, PhoebeBinary):
+        raise NotImplementedError(
+            "evaluate_orbit_at_times_stacked is not supported for PhoebeBinary; "
+            "use evaluate_orbit_at_times instead."
+        )
+
+    from spice.utils import log
+    n = len(times) if hasattr(times, '__len__') else times.shape[0]
+    with log.timed(
+        f"Evaluating binary orbit at {n} time steps (stacked)",
+        "Binary orbit evaluated in {elapsed:.1f} s",
+    ):
+        return v_evaluate_orbit_stacked(
+            binary, times,
+            n_neighbors1=int(binary.n_neighbours1),
+            n_neighbors2=int(binary.n_neighbours2),
+        )
