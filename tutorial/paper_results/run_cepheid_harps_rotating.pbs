@@ -16,6 +16,17 @@
 #HARPS_AEMU=RozanskiT/TPayne-spice-harps,HF_HOME=/scratch/y89/$USER/hf-cache \
 #        tutorial/paper_results/run_cepheid_harps_rotating.pbs
 #
+#    # Phase-chunked submission: 4 jobs covering N_PHASES=120 timestamps in
+#    # contiguous slices of 30 each (V-band photometry window 4500-7000 Å):
+#    for I in 0 1 2 3; do
+#      qsub -N cep_harps_rot_c${I} \
+#        -v PHASE_CHUNK_IDX=${I},PHASE_CHUNK_N=4,N_PHASES=120,\
+#WL_MIN=4500,WL_MAX=7000,WL_STEPS=25000,WL_CHUNK=512 \
+#        tutorial/paper_results/run_cepheid_harps_rotating.pbs
+#    done
+#    # Each chunk writes to <OUT_DIR>/chunk_<i>/, merge with:
+#    #   python tutorial/paper_results/merge_phase_chunks.py <OUT_DIR>
+#
 #  Monitor:  qstat -fx <jobid>  ;  tail -f cepheid_harps_rot.o<jobid>
 #  Restart:  re-submit. Per-Cepheid pickles in OUT_DIR are merged: if a
 #            previous run already wrote the `harps` bundle + `harps`
@@ -78,11 +89,32 @@ N_PHASES="${N_PHASES:-30}"
 # lowering it (e.g. 1000-2000) is the fastest knob for smoke tests.
 N_MESH="${N_MESH:-5000}"
 
+# Phase chunking. PHASE_CHUNK_N is the total number of jobs the
+# linspace(0, period, N_PHASES) timeseries is split across; PHASE_CHUNK_IDX
+# is this job's 0-indexed slice. Default 0/1 = single job, full range.
+PHASE_CHUNK_IDX="${PHASE_CHUNK_IDX:-0}"
+PHASE_CHUNK_N="${PHASE_CHUNK_N:-1}"
+
+# wavelengths_chunk_size passed to simulate_observed_flux. Default 1024 is
+# fine on a V100 16GB for WL_STEPS up to ~20000 with the HARPS transformer
+# aemu; drop to 512 (or 256) if you hit OOM on wider windows.
+WL_CHUNK="${WL_CHUNK:-1024}"
+
 if [ ! -f "$CONFIG" ]; then
     echo "ERROR: CSV not found at $CONFIG (set CONFIG=... or place cepheid_grid.csv beside this script)"
     exit 4
 fi
-mkdir -p "$OUT_DIR"
+
+# When chunking, route each job's pickles into its own subdirectory so the
+# `<name>_spectra.pkl` keys (which don't carry phase indices) from different
+# chunks don't clobber each other on save_pickle. merge_phase_chunks.py
+# stitches them back together in phase order.
+if [ "${PHASE_CHUNK_N}" -gt 1 ]; then
+    CHUNK_DIR="${OUT_DIR}/chunk_${PHASE_CHUNK_IDX}"
+else
+    CHUNK_DIR="${OUT_DIR}"
+fi
+mkdir -p "$CHUNK_DIR"
 
 # ---------------------------------------------------------------------------
 # 2) Environment — same modules / JAX flags as run_cepheid_ld_sweep.pbs.
@@ -112,10 +144,11 @@ export PYTHON_BIN=${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/pyt
 echo "[$(date '+%F %T')] host=$(hostname)  name=$NAME  ngpus=${PBS_NGPUS:-?}  cpus=${PBS_NCPUS:-?}"
 echo "  CONFIG:      $CONFIG"
 echo "  OUT_DIR:     $OUT_DIR"
+echo "  CHUNK_DIR:   $CHUNK_DIR"
 echo "  HARPS_AEMU:  $HARPS_AEMU"
 echo "  HF_HOME:     $HF_HOME"
-echo "  WL window:   ${WL_MIN}-${WL_MAX} Å in ${WL_STEPS} samples"
-echo "  N_PHASES:    ${N_PHASES}"
+echo "  WL window:   ${WL_MIN}-${WL_MAX} Å in ${WL_STEPS} samples (chunk=${WL_CHUNK})"
+echo "  N_PHASES:    ${N_PHASES}  (chunk ${PHASE_CHUNK_IDX}/${PHASE_CHUNK_N})"
 echo "  N_MESH:      ${N_MESH}"
 nvidia-smi -L 2>/dev/null || true
 "${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
@@ -131,7 +164,7 @@ cd "$PBS_O_WORKDIR"
 "${PYTHON_BIN}" -u tutorial/paper_results/build_cepheid_grid.py \
     --config "$CONFIG" \
     --names "$NAME" \
-    --out-dir "$OUT_DIR" \
+    --out-dir "$CHUNK_DIR" \
     --bundles harps \
     --harps-aemu "$HARPS_AEMU" \
     --wl-min "$WL_MIN" \
@@ -139,6 +172,8 @@ cd "$PBS_O_WORKDIR"
     --wl-steps "$WL_STEPS" \
     --n-phases "$N_PHASES" \
     --n-mesh "$N_MESH" \
+    --phase-chunk "${PHASE_CHUNK_IDX}/${PHASE_CHUNK_N}" \
+    --wl-chunk "$WL_CHUNK" \
     --continue-on-error
 
 echo "[$(date '+%F %T')] finished $NAME"

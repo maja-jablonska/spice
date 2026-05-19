@@ -144,6 +144,8 @@ def simulate_line_spectra(
     desc: str = "lines",
     ld_law: str | None = None,
     ld_coeffs=None,
+    chunk_size: int | None = None,
+    wavelengths_chunk_size: int | None = None,
 ) -> dict[float, LineSpectra]:
     """Synthesise spectra for each line center across all snapshots + a t=0 template.
 
@@ -151,6 +153,10 @@ def simulate_line_spectra(
     which binds them into ``intensity_fn`` (used with the flux emulator's
     ``intensity`` method to apply a flux-conservation limb-darkening law per
     call without rebuilding the bundle).
+
+    ``chunk_size`` / ``wavelengths_chunk_size`` (when set) override the
+    ``simulate_observed_flux`` defaults — useful for fitting the wavelength
+    scan into V100/A100 HBM when synthesising wide windows.
     """
     out: dict[float, LineSpectra] = {}
     extra = {}
@@ -158,6 +164,10 @@ def simulate_line_spectra(
         extra["ld_law"] = ld_law
     if ld_coeffs is not None:
         extra["ld_coeffs"] = ld_coeffs
+    if chunk_size is not None:
+        extra["chunk_size"] = chunk_size
+    if wavelengths_chunk_size is not None:
+        extra["wavelengths_chunk_size"] = wavelengths_chunk_size
     for lc in tqdm(line_centers, desc=desc):
         wl = jnp.linspace(lc - line_width, lc + line_width, steps)
         log_wl = jnp.log10(wl)

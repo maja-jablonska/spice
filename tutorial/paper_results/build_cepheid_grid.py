@@ -572,6 +572,9 @@ def build_one(
     wl_max: float = WL_MAX,
     wl_steps: int = WL_STEPS,
     n_phases: int = N_PHASES,
+    phase_chunk_idx: int = 0,
+    phase_chunk_n: int = 1,
+    wl_chunk: Optional[int] = None,
 ) -> None:
     bundles_path = out_dir / f"{config.name}_bundles.pkl"
     spectra_path = out_dir / f"{config.name}_spectra.pkl"
@@ -596,7 +599,29 @@ def build_one(
     print(f"  vmicro (Luck 2018 δ Cep fit): "
           f"phase range [{min(vm_phase):.2f}, {max(vm_phase):.2f}] km/s")
 
-    timeseries = jnp.linspace(0, config.period, n_phases)
+    # Phase chunking: split the full linspace(0, period, n_phases) into
+    # ``phase_chunk_n`` contiguous slices and keep only chunk ``phase_chunk_idx``.
+    # This lets us spread one star's pulsation phase across several PBS jobs,
+    # which can then be merged back together with merge_phase_chunks.py.
+    full_timeseries = jnp.linspace(0, config.period, n_phases)
+    if phase_chunk_n > 1:
+        if not 0 <= phase_chunk_idx < phase_chunk_n:
+            raise ValueError(
+                f"phase_chunk_idx={phase_chunk_idx} out of range for "
+                f"phase_chunk_n={phase_chunk_n}"
+            )
+        lo = (phase_chunk_idx * n_phases) // phase_chunk_n
+        hi = ((phase_chunk_idx + 1) * n_phases) // phase_chunk_n
+        timeseries = full_timeseries[lo:hi]
+        print(
+            f"  phase chunk {phase_chunk_idx}/{phase_chunk_n}: "
+            f"snapshots [{lo}:{hi}] of {n_phases} "
+            f"(t = {float(timeseries[0]):.4f} .. {float(timeseries[-1]):.4f} d, "
+            f"phase = {float(timeseries[0]) / config.period:.4f} .. "
+            f"{float(timeseries[-1]) / config.period:.4f})"
+        )
+    else:
+        timeseries = full_timeseries
 
     # 1) Build one bundle per *unique* emulator. Each emulator has its own
     # parameter ordering; ``build_bundle`` reads ``stellar_parameter_names``
@@ -705,12 +730,16 @@ def build_one(
             ))
 
     spectra: dict[str, dict[float, LineSpectra]] = {}
+    sim_kwargs: dict[str, Any] = {}
+    if wl_chunk is not None:
+        sim_kwargs["wavelengths_chunk_size"] = wl_chunk
     for name, intensity_fn, bundle, ld_coeffs in spectrum_variants:
         t0 = time.perf_counter()
         spectra[name] = simulate_line_spectra(
             bundle.snapshots, bundle.snapshots[0], intensity_fn, (line_center,),
             line_width=line_width, steps=wl_steps,
             ld_coeffs=ld_coeffs,
+            **sim_kwargs,
         )
         print(f"    {name:>20s}: {time.perf_counter() - t0:6.1f} s")
 
@@ -767,6 +796,17 @@ def parse_args():
                    help=f"Number of pulsation-phase samples (timestamps) per "
                         f"Cepheid (default: {N_PHASES}). Lower values trade "
                         f"phase resolution for shorter runtime.")
+    p.add_argument("--phase-chunk", type=str, default="0/1",
+                   help="i/N — synthesise only chunk i (0-indexed) out of N "
+                        "contiguous slices of the full --n-phases timeseries. "
+                        "Use to spread one star's phase scan across N PBS jobs; "
+                        "merge with merge_phase_chunks.py. Default '0/1' = no "
+                        "chunking.")
+    p.add_argument("--wl-chunk", type=int, default=None,
+                   help="wavelengths_chunk_size passed to simulate_observed_flux. "
+                        "Defaults to the library default (1024). On a V100 16GB "
+                        "with the HARPS transformer aemu, 1024 is fine for "
+                        "wl-steps up to ~20000; drop to 512 if you see OOM.")
     p.add_argument("--force", action="store_true",
                    help="Re-build even if output pickles already exist.")
     p.add_argument("--skip-spectra", action="store_true",
@@ -795,9 +835,21 @@ def _resolve_bundle_set(args) -> tuple[str, ...]:
     return wanted
 
 
+def _parse_phase_chunk(spec: str) -> tuple[int, int]:
+    try:
+        idx_s, n_s = spec.split("/", 1)
+        idx, n = int(idx_s), int(n_s)
+    except ValueError as exc:
+        raise SystemExit(f"--phase-chunk must be 'i/N' (got {spec!r}): {exc}")
+    if n < 1 or idx < 0 or idx >= n:
+        raise SystemExit(f"--phase-chunk i/N: need 0 <= i < N and N >= 1 (got {spec!r})")
+    return idx, n
+
+
 def main() -> int:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    phase_chunk_idx, phase_chunk_n = _parse_phase_chunk(args.phase_chunk)
 
     grid = load_grid_csv(args.config) if args.config else default_grid()
     if args.names:
@@ -852,6 +904,9 @@ def main() -> int:
                 wl_max=args.wl_max,
                 wl_steps=args.wl_steps,
                 n_phases=args.n_phases,
+                phase_chunk_idx=phase_chunk_idx,
+                phase_chunk_n=phase_chunk_n,
+                wl_chunk=args.wl_chunk,
             )
         except Exception as exc:
             failures.append((cfg.name, exc))
