@@ -125,8 +125,29 @@ _MEAN_ANOMALY_T0 = (
 ORBIT_RESOLUTION_POINTS = int(os.environ.get("TZ_FOR_ORBIT_RESOLUTION", "5000"))
 
 # Line of sight for eclipse timing, visibility (mus), occlusion, and flux synthesis.
-# Must match mesh_model._default_los_vector() = [0, 1, 0] (not [0, 0, -1]).
-LOS_VECTOR = jnp.array([0., 1., 0.])
+# Use the standard astronomical convention LOS = [0, 0, -1] — this is what
+# ``orbit_utils.get_orbit_jax`` / ``relative_pos_vel_at`` produce naturally
+# (orbit normal along +z at i=0; i is measured against +z), and what
+# ``tutorial/paper_results/phoebe_spice_comparison/single_eclipse_system.ipynb``
+# passes to ``eclipse_timestamps_kepler`` and ``get_mesh_view``. Earlier
+# versions used LOS = [0, 1, 0] (the mesh_model default), which silently
+# reinterpreted ``i`` as a tilt against +y and yielded a bogus 2 R☉ impact
+# parameter for TZ For (effective inclination 89° instead of 85.68°); the
+# blackbody primary minimum then bottomed out at Δb ≈ 0.83 mag instead of
+# the literature Δb ≈ 0.2 mag.
+LOS_VECTOR = jnp.array([0., 0., -1.])
+
+# add_orbit(..., T=0, mean_anomaly=M0, reference_time=0); eclipse_timestamps_kepler(..., Tperi=0).
+# Same mean anomaly requires M0 + n*t_spice = n*t_kepler  =>  t_spice = t_kepler - M0/(2π)*P.
+ORBIT_TPERI_YR = 0.0
+ORBIT_REFERENCE_TIME_YR = 0.0
+
+
+def _kepler_eclipse_times_to_spice(times_kepler_yr, period_yr, mean_anomaly_rad):
+    """Map eclipse_timestamps_kepler outputs (years since Tperi) to SPICE orbit times."""
+    shift = -(float(mean_anomaly_rad) / (2.0 * np.pi)) * float(period_yr)
+    t = np.asarray(times_kepler_yr, dtype=float) + shift
+    return t
 
 
 def _check_constants_in_sync():
@@ -226,14 +247,27 @@ def _build_binary_and_eclipses(em):
         pad=1.1,
         los_vector=LOS_VECTOR,
     )
-    primary_window = (float(t1_p), float(t4_p))
-    secondary_window = (float(t1_s), float(t4_s))
-    if not (np.all(np.isfinite(primary_window)) and np.all(np.isfinite(secondary_window))):
+    primary_kepler_yr = (float(t1_p), float(t4_p))
+    secondary_kepler_yr = (float(t1_s), float(t4_s))
+    if not (
+        np.all(np.isfinite(primary_kepler_yr))
+        and np.all(np.isfinite(secondary_kepler_yr))
+    ):
         raise RuntimeError(
             "eclipse_timestamps_kepler returned NaN: impact parameter exceeds "
             "(R1+R2)*pad at the requested geometry — no eclipse to sample."
         )
-    return binary, period_yr, primary_window, secondary_window
+    primary_window = tuple(_kepler_eclipse_times_to_spice(
+        primary_kepler_yr, period_yr, _MEAN_ANOMALY_T0,
+    ))
+    secondary_window = tuple(_kepler_eclipse_times_to_spice(
+        secondary_kepler_yr, period_yr, _MEAN_ANOMALY_T0,
+    ))
+    return (
+        binary, period_yr,
+        primary_window, secondary_window,
+        primary_kepler_yr, secondary_kepler_yr,
+    )
 
 
 def _build_merged_times(period_yr, primary_window, secondary_window,
@@ -351,10 +385,9 @@ def _binary_params_dict(*, wl_min: float, wl_max: float):
         "reference_time_yr": 0.0,
         "orbit_resolution_points": ORBIT_RESOLUTION_POINTS,
         "los_vector": [float(x) for x in LOS_VECTOR],
-        # γ now reaches the spectrum via orbit_utils.get_orbit_jax applying it
-        # once on the barycenter along the -y axis (matches LOS_VECTOR).
-        # Pre-fix pickles had this flag set to True but γ was double-applied
-        # along +z (invisible to the spectrum).
+        # γ reaches the spectrum via orbit_utils.get_orbit_jax applying it once
+        # on the barycenter along +LOS_VECTOR; +γ ⇒ +los_velocity ⇒ redshift,
+        # consistent with PHOEBE's vgamma > 0 = receding convention.
         "gamma_applied_in_spice": True,
         "t_p_applied_in_spice": True,
         "distance_pc": DISTANCE_PC,
@@ -408,13 +441,17 @@ def generate_tz_fornacis_spectra(num_times, num_eclipse_times, num_wavelengths,
 
     print("Building TZ For binary...")
     print(f"Distance [pc]:               {DISTANCE_PC}")
-    binary, period_yr, primary_window, secondary_window = _build_binary_and_eclipses(em)
+    (binary, period_yr, primary_window, secondary_window,
+     primary_kepler_yr, secondary_kepler_yr) = _build_binary_and_eclipses(em)
     yr_to_day = (1 * u.year).to(u.day).value
     print(f"Period [days]:               {period_yr * yr_to_day:.4f}")
-    print(f"Primary eclipse [days]:      "
+    print(f"Primary eclipse (SPICE t) [days]:   "
           f"{primary_window[0]*yr_to_day:.4f} -> {primary_window[1]*yr_to_day:.4f}")
-    print(f"Secondary eclipse [days]:    "
+    print(f"Secondary eclipse (SPICE t) [days]: "
           f"{secondary_window[0]*yr_to_day:.4f} -> {secondary_window[1]*yr_to_day:.4f}")
+    print(f"  (Kepler Tperi=0 windows [days]: primary "
+          f"{primary_kepler_yr[0]*yr_to_day:.2f}–{primary_kepler_yr[1]*yr_to_day:.2f}, "
+          f"secondary {secondary_kepler_yr[0]*yr_to_day:.2f}–{secondary_kepler_yr[1]*yr_to_day:.2f})")
 
     times_yr, time_origin = _build_merged_times(
         period_yr, primary_window, secondary_window,
@@ -453,6 +490,8 @@ def generate_tz_fornacis_spectra(num_times, num_eclipse_times, num_wavelengths,
             "period_yr": period_yr,
             "primary_eclipse_window_yr": primary_window,
             "secondary_eclipse_window_yr": secondary_window,
+            "primary_eclipse_window_kepler_yr": primary_kepler_yr,
+            "secondary_eclipse_window_kepler_yr": secondary_kepler_yr,
             "binary_params": _binary_params_dict(wl_min=wl_min, wl_max=wl_max),
             "model": model,
         }, f)

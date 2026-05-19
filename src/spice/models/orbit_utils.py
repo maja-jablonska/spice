@@ -108,11 +108,12 @@ def transform_orbit(x, v, elements):
     return M @ x, M @ v
 
 
-def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma=0.):
+def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
+                  reference_time, vgamma=0., los_vector=None):
     """
     Compute a Keplerian orbit for a binary system using JAX.
     Modified to match convention in dynamics() function.
-    
+
     Parameters:
       time  : JAX array of times at which to evaluate the orbit.
       m1    : Mass of body 1 in solar masses (same convention as ``add_orbit``).
@@ -126,11 +127,18 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
       mean_anomaly : Mean anomaly at ``reference_time`` (radians).
       reference_time : Reference epoch in **years**.
       vgamma : Systemic radial velocity in **km/s** (PHOEBE / ``vgamma@binary`` units).
-               Added to the barycenter velocity only (not the per-body velocities),
-               along the -y axis so that mesh_model's default los_vector=[0, 1, 0]
-               sees γ via mesh_model.los_velocities; receding γ > 0 then redshifts
-               the spectrum (consistent with spectrum.apply_vrad_log's sign).
-    
+               Added to the barycenter velocity only (not the per-body velocities).
+               Receding γ > 0 ⇒ the spectrum is redshifted; this is implemented by
+               adding ``vgamma`` along ``+los_vector`` so that
+               ``mesh.los_velocities = dot(velocities, los_vector)`` becomes
+               ``+vgamma`` for the barycenter, which ``apply_vrad`` then turns
+               into ``λ → λ·(1 + vgamma/c)``.
+      los_vector : 3-component line-of-sight unit vector along which to apply
+               ``vgamma``. Defaults to ``[0, 0, -1]`` — the standard astronomical
+               convention used by ``eclipse_timestamps_kepler`` and by the
+               PHOEBE comparison notebooks. Pass ``[0, 1, 0]`` if you are
+               using the mesh's legacy y-axis LOS.
+
     Returns:
       An array containing positions and velocities with shape (6, len(time), 3).
       orbit[0]: barycenter positions
@@ -197,48 +205,48 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     cos_longan = jnp.cos(Omega)
     cos_incl = jnp.cos(i)
     sin_incl = jnp.sin(-i)  # Note the negative inclination
-    
+
     # --- PRIMARY COMPONENT CALCULATIONS ---
-    
+
     # Adjust for argument of periastron
     theta_primary = theta + omega
-    
+
     # Precompute trigonometric functions
     sin_theta_primary = jnp.sin(theta_primary)
     cos_theta_primary = jnp.cos(theta_primary)
-    
+
     # Convert to Cartesian coordinates
     x_primary = r1 * (cos_longan * cos_theta_primary - sin_longan * sin_theta_primary * cos_incl)
     y_primary = r1 * (sin_longan * cos_theta_primary + cos_longan * sin_theta_primary * cos_incl)
     z_primary = r1 * (sin_theta_primary * sin_incl)
-    
+
     # Calculate velocity components
     vx_primary_ = cos_theta_primary * rdot1 - sin_theta_primary * r1 * thetadot1
     vy_primary_ = sin_theta_primary * rdot1 + cos_theta_primary * r1 * thetadot1
-    
+
     vx_primary = cos_longan * vx_primary_ - sin_longan * vy_primary_ * cos_incl
     vy_primary = sin_longan * vx_primary_ + cos_longan * vy_primary_ * cos_incl
     vz_primary = sin_incl * vy_primary_
 
 
     # --- SECONDARY COMPONENT CALCULATIONS ---
-    
+
     # Adjust for secondary component (half an orbit away) and argument of periastron
     theta_secondary = theta + jnp.pi + omega
-    
+
     # Precompute trigonometric functions
     sin_theta_secondary = jnp.sin(theta_secondary)
     cos_theta_secondary = jnp.cos(theta_secondary)
-    
+
     # Convert to Cartesian coordinates
     x_secondary = r2 * (cos_longan * cos_theta_secondary - sin_longan * sin_theta_secondary * cos_incl)
     y_secondary = r2 * (sin_longan * cos_theta_secondary + cos_longan * sin_theta_secondary * cos_incl)
     z_secondary = r2 * (sin_theta_secondary * sin_incl)
-    
+
     # Calculate velocity components
     vx_secondary_ = cos_theta_secondary * rdot2 - sin_theta_secondary * r2 * thetadot2
     vy_secondary_ = sin_theta_secondary * rdot2 + cos_theta_secondary * r2 * thetadot2
-    
+
     vx_secondary = cos_longan * vx_secondary_ - sin_longan * vy_secondary_ * cos_incl
     vy_secondary = sin_longan * vx_secondary_ + cos_longan * vy_secondary_ * cos_incl
     vz_secondary = sin_incl * vy_secondary_
@@ -256,14 +264,22 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly, refere
     bary_vz = (m1_ * vz_primary + m2_ * vz_secondary) / total_mass
 
     # Systemic radial velocity (km/s; PHOEBE convention: vgamma > 0 = receding).
-    # Applied ONLY to the barycenter so that _add_orbit's `body{1,2}_velocities =
-    # barycenter_vel + body_vel` carries γ exactly once. Applied along -y to match
-    # mesh_model._default_los_vector() = [0, 1, 0] and the sign convention in
-    # mesh_model.los_velocities / spectrum.apply_vrad_log (where vrad < 0 produces
-    # the redshift expected of a receding source).
+    # Applied ONLY to the barycenter so that _add_orbit's body velocities
+    # (= barycenter_vel + body_vel) carry γ exactly once. Applied along +los_vector
+    # so that mesh.los_velocities = dot(velocities, los_vector) sees +vgamma at
+    # the barycenter — which apply_vrad then translates into the expected
+    # redshift λ → λ·(1 + vgamma/c).
+    if los_vector is None:
+        los_vector = jnp.array([0.0, 0.0, -1.0])
+    los_unit = los_vector / (jnp.linalg.norm(los_vector) + 1e-30)
     vgamma_si = vgamma * 1.0e3
-    bary_vy = bary_vy - vgamma_si
-    bary_y = bary_y - vgamma_si * (time - reference_time)
+    bary_vx = bary_vx + vgamma_si * los_unit[0]
+    bary_vy = bary_vy + vgamma_si * los_unit[1]
+    bary_vz = bary_vz + vgamma_si * los_unit[2]
+    time_delta = time - reference_time
+    bary_x = bary_x + vgamma_si * time_delta * los_unit[0]
+    bary_y = bary_y + vgamma_si * time_delta * los_unit[1]
+    bary_z = bary_z + vgamma_si * time_delta * los_unit[2]
 
     # Organize position and velocity tuples
     primary_pos = jnp.stack([x_primary, y_primary, z_primary], axis=1)

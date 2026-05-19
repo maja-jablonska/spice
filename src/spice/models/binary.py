@@ -186,8 +186,12 @@ def _add_orbit(binary: Binary, P: float, ecc: float,
                T: float, i: float, omega: float, Omega: float, mean_anomaly: float,
                reference_time: float, vgamma: float, orbit_resolution_points: int) -> Binary:
     orbit_resolution_times = jnp.linspace(0, P, orbit_resolution_points)
+    # Apply γ along the body's chosen line of sight so that mesh.los_velocities
+    # picks it up with the correct sign regardless of which axis (y or z) the
+    # caller picked. Both bodies share the same LOS in normal usage.
     orbit = get_orbit_jax(orbit_resolution_times, binary.body1.mass, binary.body2.mass,
-                          P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma)
+                          P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma,
+                          los_vector=binary.body1.los_vector)
     
     new_body1_centers = (orbit[0, :, :]+orbit[2, :, :])/SOLAR_RAD_M
     new_body2_centers = (orbit[0, :, :]+orbit[4, :, :])/SOLAR_RAD_M
