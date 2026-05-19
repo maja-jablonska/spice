@@ -124,7 +124,7 @@ SOLAR_FLUX      = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 # 20-point LD sweep across [0, 1]; spacing is 1/19 ≈ 0.0526, so 3 decimals in
 # the formatted key keep every coefficient distinct.
-LD_COEFFS = np.linspace(0.0, 1.0, 20)
+LD_COEFFS = np.linspace(0.0, 1.0, 5)
 LD_FMT = ".3f"
 DEFAULT_PULSATION_FITS = HERE / "delta_cep.fits"
 
