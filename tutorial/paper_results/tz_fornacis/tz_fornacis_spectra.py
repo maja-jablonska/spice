@@ -115,9 +115,20 @@ GAMMA_KMS = (PRIMARY_MASS * GAMMA1_KMS + SECONDARY_MASS * GAMMA2_KMS) / (
     PRIMARY_MASS + SECONDARY_MASS
 )
 _FIRST_BJD = float(os.environ.get("TZ_FOR_FIRST_BJD", "2454887.5473123"))
+# IMPORTANT: T_P_HJD from Gallenne+2016 == Clausen+1991 photometric T0 + 98·P
+# (exact within 0.005 d / 1.5e-4 cycle). It is the time of the DEEPER minimum
+# (the F subgiant partially occulted by the K giant), NOT literal periastron.
+# For ECC=0 that event is at ν + ω = 3π/2, i.e. M_at_TP = (3π/2 − ω) mod 2π.
+# The mean-anomaly formula below treats T_P as the M=0 epoch (the simplest
+# baseline); downstream consumers (e.g. tz_fornacis_clausen_b_compare.ipynb)
+# must subtract phase_at_TP = M_at_TP / (2π) ≈ 0.567 when mapping SPICE phase
+# to HJD against Clausen's photometric ephemeris. ω is essentially degenerate
+# in this fit (Gallenne σ(ω) = 71°), so the literal value is kept only so it
+# matches the published spectroscopic-orbit solution.
 _MEAN_ANOMALY_T0 = (
     ((_FIRST_BJD - T_P_HJD) % PERIOD_DAYS) / PERIOD_DAYS * (2.0 * np.pi)
 )
+M_AT_T_P_RAD = float((1.5 * np.pi - np.deg2rad(PER0_DEG)) % (2.0 * np.pi))
 
 # Keplerian orbit precomputation for add_orbit / linear interpolation at evaluate_orbit.
 # 15 points smears eclipse geometry (~2% of P fits in one interpolation segment);
@@ -382,6 +393,9 @@ def _binary_params_dict(*, wl_min: float, wl_max: float):
         "gamma_kms": GAMMA_KMS, "t_p_hjd": T_P_HJD,
         "first_bjd_phase_ref": _FIRST_BJD,
         "mean_anomaly_at_t0_rad": float(_MEAN_ANOMALY_T0),
+        # M at HJD = t_p_hjd; subtract m_at_t_p_rad/(2π) from phase_spice to map
+        # SPICE phase onto Clausen photometric phase (see notebook).
+        "m_at_t_p_rad": M_AT_T_P_RAD,
         "reference_time_yr": 0.0,
         "orbit_resolution_points": ORBIT_RESOLUTION_POINTS,
         "los_vector": [float(x) for x in LOS_VECTOR],
