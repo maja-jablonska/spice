@@ -48,7 +48,7 @@
 
 #PBS -P dg97
 #PBS -q gpursaa
-#PBS -l walltime=02:00:00
+#PBS -l walltime=12:00:00
 #PBS -l ncpus=14
 #PBS -l ngpus=1
 #PBS -l mem=200GB
@@ -133,6 +133,7 @@ export OMP_NUM_THREADS=${PBS_NCPUS:-8}
 export MKL_NUM_THREADS=${PBS_NCPUS:-8}
 export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
 export TF_CPP_MIN_LOG_LEVEL=2
+export JAX_ENABLE_X64=1
 
 # Hugging Face cache on scratch — $HOME on Gadi is too small for the
 # transformer weights and the cache is reusable across jobs.
