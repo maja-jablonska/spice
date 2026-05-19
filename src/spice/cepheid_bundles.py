@@ -166,7 +166,11 @@ def simulate_line_spectra(
             for m in tqdm(snapshots, desc=f"line {lc:.2f}", leave=False)
         ]
         template = simulate_observed_flux(intensity_fn, template_snapshot, log_wl, **extra)
-        out[float(lc)] = LineSpectra(wavelengths=wl, spectra=per_snapshot, template=template)
+        out[float(lc)] = LineSpectra(
+            wavelengths=np.asarray(wl),
+            spectra=[np.asarray(s) for s in per_snapshot],
+            template=np.asarray(template),
+        )
     return out
 
 
@@ -184,7 +188,14 @@ def save_pickle(obj, path: str) -> None:
         pickle.dump(obj, f)
         f.flush()
         os.fsync(f.fileno())
+
+    size = os.path.getsize(tmp_path)
+    if size == 0:
+        os.remove(tmp_path)
+        raise IOError(f"Failed to save {path}: generated file is 0 bytes.")
+
     os.replace(tmp_path, path)
+    print(f"    [save] {os.path.basename(path)}: {size / 1024**2:.1f} MB")
 
 
 def load_pickle(path: str):
