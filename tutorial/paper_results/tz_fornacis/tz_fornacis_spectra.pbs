@@ -35,6 +35,8 @@ set -euo pipefail
 
 module purge
 module load python3/3.11.7
+module load cuda/12.9.0
+module load cudnn/9.5.0-cuda12
 
 PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
 

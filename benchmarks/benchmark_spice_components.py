@@ -9,8 +9,6 @@ Several intensity sources of increasing cost are compared, all driven through
   parameters and ``mu``.  Isolates the cost of SPICE's own machinery: mesh
   geometry, Doppler shifting, area/visibility weighting, the wavelength +
   mesh-element chunking, and the ``lax.scan`` accumulation.
-* ``gaussian``          – ``GaussianLineEmulator``: a small parametric emulator
-  (Planck continuum plus a handful of Gaussian absorption lines).
 * ``linear_grid``       – ``FluxLazyZarrInterpolator`` over a tiny synthetic
   zarr grid: multilinear interpolation in (Teff, logg), linear wavelength
   resampling, and a linear limb-darkening law.  A stand-in for a real
@@ -78,8 +76,12 @@ import jax.numpy as jnp
 
 from spice.models import IcosphereModel
 from spice.spectrum.spectrum import simulate_observed_flux
-from spice.spectrum.gaussian_line_emulator import GaussianLineEmulator
 from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
+
+
+def _resolve_precisions(value):
+    """``('x32',)`` / ``('x64',)`` / ``('x32', 'x64')`` for ``'x32'``/``'x64'``/``'both'``."""
+    return ("x32", "x64") if value == "both" else (value,)
 
 
 # --------------------------------------------------------------------------- #
@@ -90,11 +92,11 @@ AEMU_BUNDLES = {
     "aemu_harps": "RozanskiT/TPayne-spice-harps",
     "aemu_small_random": "RozanskiT/TPayne-spice-small-random",
 }
-LIGHTWEIGHT_SOURCES = ("static", "gaussian", "linear_grid")
+LIGHTWEIGHT_SOURCES = ("static", "linear_grid")
 SOURCES = LIGHTWEIGHT_SOURCES + tuple(AEMU_BUNDLES)   # everything selectable
 
-# Wavelength window used for every sweep (Angstrom).  Wide enough that the
-# Gaussian lines fall inside it and the synthetic grid brackets it.
+# Wavelength window used for every sweep (Angstrom).  Wide enough for the
+# synthetic spectral features and for the zarr grid axis range.
 WAVELENGTH_MIN = 4500.0
 WAVELENGTH_MAX = 6500.0
 
@@ -181,16 +183,6 @@ def build_static_spectrum():
     return StaticSpectrum(ref_w, flux, cont)
 
 
-def build_gaussian_emulator():
-    # A handful of lines spread across the benchmarking window.
-    centres = [4861.0, 5183.0, 5270.0, 5500.0, 5890.0, 6563.0]
-    return GaussianLineEmulator(
-        line_centers=centres,
-        line_widths=[0.3 + 0.05 * i for i in range(len(centres))],
-        line_depths=[0.45, 0.30, 0.25, 0.50, 0.55, 0.40],
-    )
-
-
 def _write_synthetic_grid(store_path):
     """Write a tiny (Teff, logg) zarr grid plus its ``index.parquet``."""
     import pandas as pd
@@ -262,8 +254,6 @@ def build_aemu_emulator(hf_name):
 def make_source(name, stack: ExitStack):
     if name == "static":
         return build_static_spectrum()
-    if name == "gaussian":
-        return build_gaussian_emulator()
     if name == "linear_grid":
         return build_linear_grid(stack)
     if name in AEMU_BUNDLES:
@@ -348,9 +338,9 @@ def time_run(source, mesh, log_wavelengths, chunk_size, wavelengths_chunk_size,
 # --------------------------------------------------------------------------- #
 # Sweeps                                                                       #
 # --------------------------------------------------------------------------- #
-CSV_FIELDS = ["sweep", "source", "n_vertices", "n_mesh_elements", "n_wavelengths",
-              "chunk_size", "wavelengths_chunk_size", "mean_time_s", "std_time_s",
-              "compile_time_s"]
+CSV_FIELDS = ["precision", "sweep", "source", "n_vertices", "n_mesh_elements",
+              "n_wavelengths", "chunk_size", "wavelengths_chunk_size",
+              "mean_time_s", "std_time_s", "compile_time_s"]
 
 
 class CsvSink:
@@ -361,12 +351,14 @@ class CsvSink:
     def __init__(self, path):
         self.path = path
         self.rows = []
+        self.precision = None  # set per pass; injected into every row
         self._fh = open(path, "w", newline="")
         self._writer = csv.DictWriter(self._fh, fieldnames=CSV_FIELDS)
         self._writer.writeheader()
         self._fh.flush()
 
     def add(self, row):
+        row = {"precision": self.precision, **row}
         self.rows.append(row)
         self._writer.writerow(row)
         self._fh.flush()
@@ -467,41 +459,52 @@ def make_plots(rows, path):
         print(f"(skipping plots: {exc})")
         return
 
-    sources = sorted({r["source"] for r in rows})
+    precs = sorted({r.get("precision") for r in rows}, key=lambda p: (p is None, p))
+    multi_prec = len(precs) > 1
+    # Series = (source, precision) so x32/x64 curves stay separate.
+    series = sorted({(r["source"], r.get("precision")) for r in rows},
+                    key=lambda sp: (sp[0], sp[1] is None, sp[1]))
+
+    def _label(src, prec):
+        return f"{src} [{prec}]" if multi_prec else src
+
     fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
 
     # Panel 1: scaling with #wavelengths.
     ax = axes[0]
-    for s in sources:
-        pts = sorted((r for r in rows if r["sweep"] == "wavelengths" and r["source"] == s),
+    for src, prec in series:
+        pts = sorted((r for r in rows if r["sweep"] == "wavelengths"
+                      and r["source"] == src and r.get("precision") == prec),
                      key=lambda r: r["n_wavelengths"])
         if pts:
             ax.errorbar([r["n_wavelengths"] for r in pts],
                         [r["mean_time_s"] * 1e3 for r in pts],
                         yerr=[r["std_time_s"] * 1e3 for r in pts],
-                        marker="o", capsize=3, label=s)
+                        marker="o", capsize=3, label=_label(src, prec))
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("number of wavelengths"); ax.set_ylabel("time per call [ms]")
     ax.set_title("Scaling with #wavelengths"); ax.legend(); ax.grid(True, alpha=0.3)
 
     # Panel 2: scaling with mesh size.
     ax = axes[1]
-    for s in sources:
-        pts = sorted((r for r in rows if r["sweep"] == "mesh" and r["source"] == s),
+    for src, prec in series:
+        pts = sorted((r for r in rows if r["sweep"] == "mesh"
+                      and r["source"] == src and r.get("precision") == prec),
                      key=lambda r: r["n_mesh_elements"])
         if pts:
             ax.errorbar([r["n_mesh_elements"] for r in pts],
                         [r["mean_time_s"] * 1e3 for r in pts],
                         yerr=[r["std_time_s"] * 1e3 for r in pts],
-                        marker="o", capsize=3, label=s)
+                        marker="o", capsize=3, label=_label(src, prec))
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("number of surface elements"); ax.set_ylabel("time per call [ms]")
     ax.set_title("Scaling with mesh size"); ax.legend(); ax.grid(True, alpha=0.3)
 
     # Panel 3: chunk-size heat-strip (one line per mesh-chunk value).
     ax = axes[2]
-    for s in sources:
-        cpts = [r for r in rows if r["sweep"] == "chunks" and r["source"] == s]
+    for src, prec in series:
+        cpts = [r for r in rows if r["sweep"] == "chunks"
+                and r["source"] == src and r.get("precision") == prec]
         if not cpts:
             continue
         for cs in sorted({r["chunk_size"] for r in cpts}):
@@ -509,7 +512,7 @@ def make_plots(rows, path):
                          key=lambda r: r["wavelengths_chunk_size"])
             ax.plot([r["wavelengths_chunk_size"] for r in pts],
                     [r["mean_time_s"] * 1e3 for r in pts],
-                    marker="o", label=f"{s} cs={cs}")
+                    marker="o", label=f"{_label(src, prec)} cs={cs}")
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("wavelength chunk size"); ax.set_ylabel("time per call [ms]")
     ax.set_title("Effect of chunk sizes"); ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
@@ -555,10 +558,15 @@ def parse_args(argv=None):
                    help="wavelength chunk size used by the (non-chunk) scaling sweeps")
     p.add_argument("--disable-doppler-shift", action="store_true",
                    help="skip the per-element Doppler shift in simulate_observed_flux")
-    p.add_argument("--no-x64", action="store_true",
-                   help="do not enable float64 (SPICE's tests run with x64 on)")
+    p.add_argument("--precision", choices=("x32", "x64", "both"), default="both",
+                   help="JAX float precision; 'both' runs every sweep in x32 and x64 "
+                        "(SPICE's tests run with x64 on; aemu_* sources are x64-only "
+                        "either way; default both)")
     p.add_argument("--output-prefix", default="spice_components_benchmark")
     p.add_argument("--no-plot", action="store_true")
+    p.add_argument("--skip-missing-sources", action="store_true",
+                   help="if a requested source cannot be loaded, print a warning and "
+                        "continue with the remaining sources (the default is to abort)")
     p.add_argument("--quick", action="store_true",
                    help="tiny sizes / 2 runs — for smoke-testing the script")
     return p.parse_args(argv)
@@ -598,15 +606,14 @@ def config_from_args(args):
 
 def main(argv=None):
     args = parse_args(argv)
-    if not args.no_x64:
-        jax.config.update("jax_enable_x64", True)
+    precisions = _resolve_precisions(args.precision)
 
     cfg = config_from_args(args)
 
     print("SPICE spectrum-synthesis benchmark")
     print("=" * 70)
     print(f"jax {jax.__version__} | backend {jax.default_backend()} | "
-          f"x64 {'on' if jax.config.read('jax_enable_x64') else 'off'}")
+          f"precision {', '.join(precisions)}")
     print(f"sources : {', '.join(args.sources)}")
     print(f"sweeps  : {', '.join(args.sweeps)}")
     print(f"wavelength window : {WAVELENGTH_MIN:.0f}-{WAVELENGTH_MAX:.0f} A")
@@ -620,20 +627,33 @@ def main(argv=None):
     skipped = []
     try:
         with ExitStack() as stack:
-            for name in args.sources:
-                print(f"\n========== source: {name} ==========")
-                try:
-                    src = make_source(name, stack)
-                except Exception as exc:  # noqa: BLE001 - keep going with the rest
-                    print(f"!! skipping source {name!r}: {exc}")
-                    skipped.append(name)
-                    continue
-                if "wavelengths" in args.sweeps:
-                    sweep_wavelengths(name, src, cfg, sink)
-                if "mesh" in args.sweeps:
-                    sweep_mesh(name, src, cfg, sink)
-                if "chunks" in args.sweeps:
-                    sweep_chunks(name, src, cfg, sink)
+            for precision in precisions:
+                jax.config.update("jax_enable_x64", precision == "x64")
+                sink.precision = precision
+                print(f"\n########## precision: {precision} "
+                      f"(jax_enable_x64={jax.config.read('jax_enable_x64')}) ##########")
+                for name in args.sources:
+                    if precision == "x32" and name in AEMU_BUNDLES:
+                        print(f"\n========== source: {name} ==========")
+                        print("  (skipping at x32 -- aemu runs x64 only)")
+                        continue
+                    print(f"\n========== source: {name} ==========")
+                    try:
+                        src = make_source(name, stack)
+                    except Exception as exc:
+                        if args.skip_missing_sources:
+                            print(f"!! skipping source {name!r}: {exc}")
+                            skipped.append(f"{name} ({precision})")
+                            continue
+                        print(f"!! failed to load source {name!r} ({precision}): {exc}",
+                              file=sys.stderr)
+                        raise SystemExit(1) from exc
+                    if "wavelengths" in args.sweeps:
+                        sweep_wavelengths(name, src, cfg, sink)
+                    if "mesh" in args.sweeps:
+                        sweep_mesh(name, src, cfg, sink)
+                    if "chunks" in args.sweeps:
+                        sweep_chunks(name, src, cfg, sink)
     finally:
         sink.close()
     all_rows = sink.rows
@@ -650,7 +670,8 @@ def main(argv=None):
             continue
         print(f"[{sweep}]")
         for r in sweep_rows:
-            print(f"  {r['source']:<18} n_mesh={r['n_mesh_elements']:>7d} "
+            print(f"  {str(r.get('precision') or ''):<4} {r['source']:<18} "
+                  f"n_mesh={r['n_mesh_elements']:>7d} "
                   f"n_wl={r['n_wavelengths']:>7d} cs={r['chunk_size']:>7d} "
                   f"wcs={r['wavelengths_chunk_size']:>7d}  "
                   f"{r['mean_time_s']*1e3:9.2f} ms")

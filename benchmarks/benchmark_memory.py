@@ -44,6 +44,7 @@ Examples
     python benchmark_memory.py --sources grid --node-counts 256 1024 4096 16384 \\
         --n-wavelengths 8000 --with-synthesis
     python benchmark_memory.py --sources aemu_harps aemu_small_random
+    python benchmark_memory.py --precision x32   # x32 only (default: both x32 and x64)
 """
 
 import argparse
@@ -72,7 +73,9 @@ import jax.numpy as jnp
 from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
 from spice.spectrum.gaussian_line_emulator import GaussianLineEmulator
 
-from benchmark_grid_loading import write_synthetic_grid, _planck_like  # noqa: E402
+from benchmark_grid_loading import (  # noqa: E402
+    write_synthetic_grid, _planck_like, _resolve_precisions,
+)
 
 try:
     import psutil
@@ -96,7 +99,7 @@ NODES_FOR_WL_SWEEP = 1024
 
 AEMU_BUNDLES = {
     "aemu_harps": "RozanskiT/TPayne-spice-harps",
-    "aemu_small_random": "RozanskiT/TPayne-spice-small-random",
+    "aemu_small_random": "/Users/mjablons/code/spice/data/new_fe_bundle",
 }
 
 # Small mesh / wavelength grid used only by --with-synthesis.
@@ -263,7 +266,7 @@ def _run_one_synthesis(source):
 # --------------------------------------------------------------------------- #
 # CSV                                                                          #
 # --------------------------------------------------------------------------- #
-CSV_FIELDS = ["source", "variant", "n_nodes", "n_wavelengths",
+CSV_FIELDS = ["precision", "source", "variant", "n_nodes", "n_wavelengths",
               "resident_device_mb", "predicted_data_mb", "lazy_store_mb",
               "rss_after_construct_mb", "synthesis_peak_increase_mb"]
 
@@ -272,6 +275,7 @@ class CsvSink:
     def __init__(self, path):
         self.path = path
         self.rows = []
+        self.precision = None  # set per pass; injected into every row
         self._fh = open(path, "w", newline="")
         self._w = csv.DictWriter(self._fh, fieldnames=CSV_FIELDS)
         self._w.writeheader()
@@ -279,6 +283,7 @@ class CsvSink:
 
     def add(self, row):
         full = {k: row.get(k, "") for k in CSV_FIELDS}
+        full["precision"] = self.precision
         self.rows.append(full)
         self._w.writerow(full)
         self._fh.flush()
@@ -456,13 +461,18 @@ def make_plot(rows, path):
                 label="resident = raw data")
     # Scatter (markers only): the node and wavelength sweeps can land on the same
     # raw-data size, so connecting lines would be misleading.
+    precs = sorted({r.get("precision") for r in grid_rows}, key=lambda p: (p is None, p))
     for variant, label, marker in (("in_memory", "in_memory=True (resident)", "o"),
                                    ("lazy", "in_memory=False (resident)", "s")):
-        pts = [r for r in grid_rows if r["variant"] == variant]
-        if pts:
+        for prec in precs:
+            pts = [r for r in grid_rows if r["variant"] == variant
+                   and r.get("precision") == prec]
+            if not pts:
+                continue
+            lbl = label + (f" [{prec}]" if len(precs) > 1 else "")
             ax.plot([_data_mb(r) for r in pts],
                     [float(r["resident_device_mb"]) for r in pts],
-                    marker=marker, linestyle="", markersize=8, label=label)
+                    marker=marker, linestyle="", markersize=8, label=lbl)
     ax.set_xscale("log"); ax.set_yscale("log")
     ax.set_xlabel("raw grid data size (flux + continuum, float32) [MB]")
     ax.set_ylabel("resident device bytes held by interpolator [MB]")
@@ -502,6 +512,9 @@ def build_parser():
                    help="fixed node count during the grid wavelength sweep")
     p.add_argument("--in-memory", type=_parse_in_memory, default=(False, True),
                    metavar="{true,false,both}", help="grid in_memory modes (default both)")
+    p.add_argument("--precision", choices=("x32", "x64", "both"), default="both",
+                   help="JAX float precision; 'both' measures every source in x32 and "
+                        "x64 (aemu_* sources are x64-only either way; default both)")
     p.add_argument("--with-synthesis", action="store_true",
                    help="also run one simulate_observed_flux call and report RSS afterwards")
     p.add_argument("--csv", default=os.path.join(_HERE, "memory_benchmark.csv"))
@@ -532,8 +545,10 @@ def main(argv=None):
     cfg.nodes_for_wl_sweep = args.nodes_for_wl_sweep
     cfg.in_memory_modes = args.in_memory
     cfg.with_synthesis = args.with_synthesis
+    precisions = _resolve_precisions(args.precision)
 
     print("Memory benchmark")
+    print(f"  precision       : {', '.join(precisions)}")
     print(f"  sources         : {list(cfg.sources)}")
     if "grid" in cfg.sources:
         print(f"  grid in_memory  : {cfg.in_memory_modes}")
@@ -541,13 +556,24 @@ def main(argv=None):
         print(f"  grid wl counts  : {list(cfg.n_wavelengths_sweep)}")
     print(f"  with_synthesis  : {cfg.with_synthesis}")
 
+    aemu_requested = [s for s in cfg.sources if s in AEMU_BUNDLES]
+
     sink = CsvSink(args.csv)
     tmp_root = tempfile.mkdtemp(prefix="spice_mem_bench_")
     try:
-        measure_simple_sources(cfg, sink)
-        if "grid" in cfg.sources:
-            sweep_grid(cfg, sink, tmp_root)
-        measure_aemu_sources(cfg, sink)
+        for precision in precisions:
+            jax.config.update("jax_enable_x64", precision == "x64")
+            sink.precision = precision
+            print(f"\n########## precision: {precision} "
+                  f"(jax_enable_x64={jax.config.read('jax_enable_x64')}) ##########")
+            measure_simple_sources(cfg, sink)
+            if "grid" in cfg.sources:
+                sweep_grid(cfg, sink, tmp_root)
+            if precision == "x64":
+                measure_aemu_sources(cfg, sink)
+            elif aemu_requested:
+                print(f"\n(skipping aemu sources {aemu_requested} at x32 -- "
+                      "aemu runs x64 only)")
     finally:
         sink.close()
         shutil.rmtree(tmp_root, ignore_errors=True)

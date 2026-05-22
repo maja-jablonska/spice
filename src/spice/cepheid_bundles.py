@@ -18,6 +18,7 @@ Public API:
 """
 from __future__ import annotations
 
+import os
 import pickle
 from typing import Any, Callable, NamedTuple, Optional, Sequence
 
@@ -143,6 +144,8 @@ def simulate_line_spectra(
     desc: str = "lines",
     ld_law: str | None = None,
     ld_coeffs=None,
+    chunk_size: int | None = None,
+    wavelengths_chunk_size: int | None = None,
 ) -> dict[float, LineSpectra]:
     """Synthesise spectra for each line center across all snapshots + a t=0 template.
 
@@ -150,6 +153,10 @@ def simulate_line_spectra(
     which binds them into ``intensity_fn`` (used with the flux emulator's
     ``intensity`` method to apply a flux-conservation limb-darkening law per
     call without rebuilding the bundle).
+
+    ``chunk_size`` / ``wavelengths_chunk_size`` (when set) override the
+    ``simulate_observed_flux`` defaults — useful for fitting the wavelength
+    scan into V100/A100 HBM when synthesising wide windows.
     """
     out: dict[float, LineSpectra] = {}
     extra = {}
@@ -157,6 +164,10 @@ def simulate_line_spectra(
         extra["ld_law"] = ld_law
     if ld_coeffs is not None:
         extra["ld_coeffs"] = ld_coeffs
+    if chunk_size is not None:
+        extra["chunk_size"] = chunk_size
+    if wavelengths_chunk_size is not None:
+        extra["wavelengths_chunk_size"] = wavelengths_chunk_size
     for lc in tqdm(line_centers, desc=desc):
         wl = jnp.linspace(lc - line_width, lc + line_width, steps)
         log_wl = jnp.log10(wl)
@@ -165,7 +176,11 @@ def simulate_line_spectra(
             for m in tqdm(snapshots, desc=f"line {lc:.2f}", leave=False)
         ]
         template = simulate_observed_flux(intensity_fn, template_snapshot, log_wl, **extra)
-        out[float(lc)] = LineSpectra(wavelengths=wl, spectra=per_snapshot, template=template)
+        out[float(lc)] = LineSpectra(
+            wavelengths=np.asarray(wl),
+            spectra=[np.asarray(s) for s in per_snapshot],
+            template=np.asarray(template),
+        )
     return out
 
 
@@ -173,8 +188,24 @@ def simulate_line_spectra(
 # Pickle helpers (one-call round-trip)
 # ---------------------------------------------------------------------------
 def save_pickle(obj, path: str) -> None:
-    with open(path, "wb") as f:
+    # Atomic write: tmp + fsync + os.replace so a SIGKILL/OOM/node crash
+    # mid-dump can't leave a truncated .pkl that future resume runs would
+    # either mistake for complete or crash on at load time. The tmp filename
+    # includes the pid so concurrent workers writing different paths can't
+    # collide on the tmp slot.
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    with open(tmp_path, "wb") as f:
         pickle.dump(obj, f)
+        f.flush()
+        os.fsync(f.fileno())
+
+    size = os.path.getsize(tmp_path)
+    if size == 0:
+        os.remove(tmp_path)
+        raise IOError(f"Failed to save {path}: generated file is 0 bytes.")
+
+    os.replace(tmp_path, path)
+    print(f"    [save] {os.path.basename(path)}: {size / 1024**2:.1f} MB")
 
 
 def load_pickle(path: str):

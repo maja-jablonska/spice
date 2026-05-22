@@ -46,11 +46,13 @@ jax.tree_util.register_pytree_node(
 
 
 def vertex_to_polar(v: Float[Array, "3"]) -> Float[Array, "2"]:
+    """Cartesian (x, y, z) -> (theta, phi) with theta = colatitude in [0, pi]
+    and phi = azimuth in [-pi, pi]."""
     v += 1e-5
-    r = jnp.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2) + 1e-5
+    xy = jnp.sqrt(v[0] ** 2 + v[1] ** 2) + 1e-5
     return jnp.nan_to_num(
         jnp.array([
-            jnp.arctan2(v[2], r),
+            jnp.arctan2(xy, v[2]),
             jnp.arctan2(v[1], v[0])
         ])
     )
@@ -193,8 +195,8 @@ def spherical_harmonic(m, n, coordinates):
     n_array = (n * jnp.ones_like(polar_coordinates[:, 1])).astype(int)
     return jax.scipy.special.sph_harm_y(n_array,
                                         m_array,
-                                        polar_coordinates[:, 1],  # polar angle (theta)
-                                        polar_coordinates[:, 0],  # azimuthal angle (phi)
+                                        polar_coordinates[:, 0],  # theta (colatitude)
+                                        polar_coordinates[:, 1],  # phi (azimuth)
                                         n_max=10).real
 
 

@@ -44,6 +44,7 @@ Examples
         --n-wavelengths 8000 --n-runs 5
     python benchmark_grid_loading.py --dims 1 2 3 4 5 --nodes-for-dim-sweep 4096
     python benchmark_grid_loading.py --in-memory true   # only the in-memory path
+    python benchmark_grid_loading.py --precision x64    # x64 only (default: both x32 and x64)
 """
 
 import argparse
@@ -69,7 +70,14 @@ _SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
 if os.path.isdir(os.path.join(_SRC, "spice")):
     sys.path.insert(0, _SRC)
 
+import jax
+
 from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
+
+
+def _resolve_precisions(value):
+    """``('x32',)`` / ``('x64',)`` / ``('x32', 'x64')`` for ``'x32'``/``'x64'``/``'both'``."""
+    return ("x32", "x64") if value == "both" else (value,)
 
 
 # --------------------------------------------------------------------------- #
@@ -251,7 +259,7 @@ def time_load(store_path, param_names, in_memory, n_runs, n_warmup):
 # --------------------------------------------------------------------------- #
 # CSV sink                                                                     #
 # --------------------------------------------------------------------------- #
-CSV_FIELDS = ["sweep", "in_memory", "n_dims", "axis_lengths", "n_nodes",
+CSV_FIELDS = ["precision", "sweep", "in_memory", "n_dims", "axis_lengths", "n_nodes",
               "n_wavelengths", "grid_bytes", "grid_mb",
               "mean_load_s", "std_load_s", "first_load_s"]
 
@@ -260,12 +268,14 @@ class CsvSink:
     def __init__(self, path):
         self.path = path
         self.rows = []
+        self.precision = None  # set per pass; injected into every row
         self._fh = open(path, "w", newline="")
         self._writer = csv.DictWriter(self._fh, fieldnames=CSV_FIELDS)
         self._writer.writeheader()
         self._fh.flush()
 
     def add(self, row):
+        row = {"precision": self.precision, **row}
         self.rows.append(row)
         self._writer.writerow(row)
         self._fh.flush()
@@ -342,15 +352,19 @@ def sweep_dims(cfg, sink, tmpdir):
 # --------------------------------------------------------------------------- #
 # Plot                                                                         #
 # --------------------------------------------------------------------------- #
-def _plot_panel(ax, rows, sweep, in_memory_modes, xkey, xlabel, title, logx=True):
+def _plot_panel(ax, rows, sweep, in_memory_modes, precisions, xkey, xlabel, title, logx=True):
     for im in in_memory_modes:
-        pts = sorted((r for r in rows if r["sweep"] == sweep and r["in_memory"] == im),
-                     key=lambda r: r[xkey])
-        if pts:
+        for prec in precisions:
+            pts = sorted((r for r in rows if r["sweep"] == sweep and r["in_memory"] == im
+                          and r.get("precision") == prec),
+                         key=lambda r: r[xkey])
+            if not pts:
+                continue
+            label = f"in_memory={im}" + (f", {prec}" if len(precisions) > 1 else "")
             ax.errorbar([r[xkey] for r in pts],
                         [r["mean_load_s"] * 1e3 for r in pts],
                         yerr=[r["std_load_s"] * 1e3 for r in pts],
-                        marker="o", capsize=3, label=f"in_memory={im}")
+                        marker="o", capsize=3, label=label)
     if logx:
         ax.set_xscale("log")
     ax.set_yscale("log")
@@ -375,20 +389,21 @@ def make_plots(rows, path):
     if not panels:
         return
     modes = sorted({r["in_memory"] for r in rows})
+    precs = sorted({r.get("precision") for r in rows}, key=lambda p: (p is None, p))
 
     fig, axes = plt.subplots(1, len(panels), figsize=(6.5 * len(panels), 5.5),
                              squeeze=False)
     axes = axes[0]
     for ax, sweep in zip(axes, panels):
         if sweep == "nodes":
-            _plot_panel(ax, rows, "nodes", modes, "n_nodes",
+            _plot_panel(ax, rows, "nodes", modes, precs, "n_nodes",
                         "number of grid nodes", "Load time vs #nodes")
         elif sweep == "wavelengths":
-            _plot_panel(ax, rows, "wavelengths", modes, "grid_mb",
+            _plot_panel(ax, rows, "wavelengths", modes, precs, "grid_mb",
                         "grid size (flux + continuum, uncompressed) [MB]",
                         "Load time vs grid size (#wavelengths sweep)")
         elif sweep == "dims":
-            _plot_panel(ax, rows, "dims", modes, "n_dims",
+            _plot_panel(ax, rows, "dims", modes, precs, "n_dims",
                         "number of parameter axes",
                         "Load time vs #parameter axes", logx=False)
 
@@ -435,6 +450,9 @@ def build_parser():
     p.add_argument("--in-memory", type=_parse_in_memory, default=(False, True),
                    metavar="{true,false,both}",
                    help="which FluxLazyZarrInterpolator(in_memory=...) modes to time (default both)")
+    p.add_argument("--precision", choices=("x32", "x64", "both"), default="both",
+                   help="JAX float precision; 'both' times every point in x32 and x64 "
+                        "(default both)")
     p.add_argument("--sweeps", nargs="+", choices=("nodes", "wavelengths", "dims"),
                    default=("nodes", "wavelengths", "dims"), help="which sweeps to run")
     p.add_argument("--n-runs", type=int, default=N_TIMING_RUNS,
@@ -475,8 +493,10 @@ def main(argv=None):
     cfg.nodes_for_dim_sweep = args.nodes_for_dim_sweep
     cfg.n_wl_for_dim_sweep = args.n_wl_for_dim_sweep
     cfg.in_memory_modes = args.in_memory
+    precisions = _resolve_precisions(args.precision)
 
     print("Grid-loading benchmark")
+    print(f"  precision        : {', '.join(precisions)}")
     print(f"  in_memory modes  : {cfg.in_memory_modes}")
     print(f"  node counts      : {list(cfg.node_counts)}")
     print(f"  wavelength counts: {list(cfg.n_wavelengths)}")
@@ -486,12 +506,17 @@ def main(argv=None):
     sink = CsvSink(args.csv)
     tmp_root = tempfile.mkdtemp(prefix="spice_grid_load_bench_")
     try:
-        if "nodes" in args.sweeps:
-            sweep_nodes(cfg, sink, tmp_root)
-        if "wavelengths" in args.sweeps:
-            sweep_wavelengths(cfg, sink, tmp_root)
-        if "dims" in args.sweeps:
-            sweep_dims(cfg, sink, tmp_root)
+        for precision in precisions:
+            jax.config.update("jax_enable_x64", precision == "x64")
+            sink.precision = precision
+            print(f"\n########## precision: {precision} "
+                  f"(jax_enable_x64={jax.config.read('jax_enable_x64')}) ##########")
+            if "nodes" in args.sweeps:
+                sweep_nodes(cfg, sink, tmp_root)
+            if "wavelengths" in args.sweeps:
+                sweep_wavelengths(cfg, sink, tmp_root)
+            if "dims" in args.sweeps:
+                sweep_dims(cfg, sink, tmp_root)
     finally:
         sink.close()
         if not args.keep_grids:

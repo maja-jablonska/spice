@@ -2,6 +2,17 @@
 Benchmark script to compare performance of grid-based and KD-tree-based occlusion detection.
 """
 
+import argparse
+import os
+import sys
+
+# Prefer the in-repo source tree when running from a checkout (mirrors the
+# other benchmark scripts).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
+if os.path.isdir(os.path.join(_SRC, "spice")):
+    sys.path.insert(0, _SRC)
+
 import jax.numpy as jnp
 import numpy as np
 import time
@@ -111,12 +122,13 @@ def benchmark_occlusion_methods(n_runs=5, resolutions=[162, 642, 2562]):
     return results
 
 
-def plot_benchmark_results(results):
+def plot_benchmark_results(results, filename='occlusion_benchmark_results.png'):
     """
     Plot benchmark results.
-    
+
     Args:
         results: Results dictionary from benchmark_occlusion_methods
+        filename: Path for the saved PNG.
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
@@ -139,26 +151,52 @@ def plot_benchmark_results(results):
     ax2.grid(True)
     
     plt.tight_layout()
-    plt.savefig('occlusion_benchmark_results.png', dpi=300)
-    plt.show()
+    plt.savefig(filename, dpi=300)
+    print(f"Wrote plot to {filename}")
+
+
+def _resolve_precisions(value):
+    """``('x32',)`` / ``('x64',)`` / ``('x32', 'x64')`` for ``'x32'``/``'x64'``/``'both'``."""
+    return ("x32", "x64") if value == "both" else (value,)
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(
+        description="Benchmark grid-based vs KD-tree-based occlusion detection.")
+    p.add_argument("--precision", choices=("x32", "x64", "both"), default="both",
+                   help="JAX float precision; 'both' runs the benchmark in x32 and x64 "
+                        "(default both)")
+    p.add_argument("--n-runs", type=int, default=5, help="runs to average per resolution")
+    p.add_argument("--resolutions", type=int, nargs="+", default=[162, 642, 2562],
+                   help="mesh resolutions (n_vertices) to test")
+    p.add_argument("--plot", default="occlusion_benchmark_results.png",
+                   help="output PNG path (precision is appended when running 'both')")
+    args = p.parse_args(argv)
+
+    precisions = _resolve_precisions(args.precision)
+    for precision in precisions:
+        jax.config.update("jax_enable_x64", precision == "x64")
+        print(f"\n########## precision: {precision} "
+              f"(jax_enable_x64={jax.config.read('jax_enable_x64')}) ##########")
+        print("Starting occlusion detection benchmark...")
+        results = benchmark_occlusion_methods(n_runs=args.n_runs, resolutions=args.resolutions)
+
+        print("\nBenchmark Results:")
+        print("-----------------")
+        print("Resolutions:", results['resolutions'])
+        print("Grid Times (s):", [f"{t:.4f}" for t in results['grid_times']])
+        print("KD-tree Times (s):", [f"{t:.4f}" for t in results['kdtree_times']])
+
+        speedup = np.array(results['grid_times']) / np.array(results['kdtree_times'])
+        print("Speedup (Grid/KD-tree):", [f"{s:.2f}x" for s in speedup])
+
+        if len(precisions) > 1:
+            root, ext = os.path.splitext(args.plot)
+            out = f"{root}_{precision}{ext or '.png'}"
+        else:
+            out = args.plot
+        plot_benchmark_results(results, out)
 
 
 if __name__ == "__main__":
-    # Set lower precision for faster benchmarks
-    jax.config.update("jax_enable_x64", False)
-    
-    print("Starting occlusion detection benchmark...")
-    results = benchmark_occlusion_methods()
-    
-    print("\nBenchmark Results:")
-    print("-----------------")
-    print("Resolutions:", results['resolutions'])
-    print("Grid Times (s):", [f"{t:.4f}" for t in results['grid_times']])
-    print("KD-tree Times (s):", [f"{t:.4f}" for t in results['kdtree_times']])
-    
-    # Calculate speedup
-    speedup = np.array(results['grid_times']) / np.array(results['kdtree_times'])
-    print("Speedup (Grid/KD-tree):", [f"{s:.2f}x" for s in speedup])
-    
-    # Plot results
-    plot_benchmark_results(results) 
+    main() 

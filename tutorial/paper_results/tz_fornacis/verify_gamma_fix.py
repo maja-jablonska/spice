@@ -5,10 +5,18 @@ returned barycenter / per-body velocity components. Bypasses the full Binary
 import (which transitively requires phoebe in some envs) so the test runs in
 a minimal SPICE install.
 
-Three checks:
-* With γ = 0: bary_vy ≈ 0 (Kepler-only) and per-body vy oscillates around 0.
-* With γ ≠ 0: bary_vy ≈ -γ (γ now lives on the barycenter, along -y).
-* Per-body velocities are UNCHANGED by γ (the double-count bug is gone).
+The current implementation applies γ along ``+los_vector`` so that
+``mesh.los_velocities = dot(velocities, los_vector)`` picks it up as
+``+vgamma`` for the barycenter, which then yields the expected redshift
+through ``apply_vrad``. With ``los_vector = [0, 0, -1]`` (the TZ For and
+PHOEBE convention) γ ends up on ``bary_v_z`` with sign -γ; with
+``los_vector = [0, 1, 0]`` (the legacy mesh default) γ ends up on
+``bary_v_y`` with sign +γ. This script checks both.
+
+Three checks per LOS:
+* With γ = 0: ``bary · los_vector ≈ 0`` (Kepler-only).
+* With γ ≠ 0: ``bary · los_vector ≈ +γ`` (redshift for γ > 0).
+* Per-body velocities are UNCHANGED by γ (the double-count bug stays gone).
 """
 import os
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
@@ -32,7 +40,7 @@ VGAMMA_KMS = 20.0
 N_PHASES = 40
 
 
-def _orbit(vgamma_kms):
+def _orbit(vgamma_kms, los_vector):
     times = jnp.linspace(0.0, PERIOD_YR, N_PHASES)
     return get_orbit_jax(
         times,
@@ -40,6 +48,7 @@ def _orbit(vgamma_kms):
         PERIOD_YR, 0.0, 0.0,
         INCL, PER0, LONG_AN,
         0.0, 0.0, float(vgamma_kms),
+        los_vector=jnp.asarray(los_vector, dtype=jnp.float64),
     )
 
 
@@ -52,67 +61,65 @@ def _vel_components(orbit):
     return bary_vel, primary_vel, secondary_vel
 
 
-def _summary(name, vel):
-    med_y = float(np.median(vel[:, 1]))
-    min_y, max_y = float(vel[:, 1].min()), float(vel[:, 1].max())
-    print(f"  {name:10s} v.y: median={med_y:+.4f}  range=[{min_y:+.3f},{max_y:+.3f}] km/s")
-    return med_y, (max_y - min_y) / 2.0
+def _los_vel(vel, los_unit):
+    """LOS-projected velocity = vel · los_unit (same sign as mesh.los_velocities)."""
+    return float(np.median(vel @ los_unit))
 
 
-def main():
-    print("Checking γ flow through get_orbit_jax (post-fix):")
-    print()
+def _summary(name, vel, los_unit):
+    los_med = _los_vel(vel, los_unit)
+    proj = vel @ los_unit
+    print(f"  {name:10s} v·LOS: median={los_med:+.4f}  range=[{float(proj.min()):+.3f},{float(proj.max()):+.3f}] km/s")
+    return los_med, (float(proj.max()) - float(proj.min())) / 2.0
+
+
+def _check_one(los_vector):
+    los = np.asarray(los_vector, dtype=float)
+    los_unit = los / np.linalg.norm(los)
+    print(f"--- LOS = {los_vector} ---")
 
     print("[vgamma = 0]")
-    o0 = _orbit(0.0)
+    o0 = _orbit(0.0, los_vector)
     b0, p0, s0 = _vel_components(o0)
-    med_b0, _ = _summary("bary", b0)
-    med_p0, K_p0 = _summary("primary", p0)
-    med_s0, K_s0 = _summary("secondary", s0)
-    print(f"  Inferred K1 = {K_p0:.2f}, K2 = {K_s0:.2f} (literature: ~38.7 / ~39.6)")
+    med_b0, _ = _summary("bary",      b0, los_unit)
+    med_p0, K_p0 = _summary("primary",   p0, los_unit)
+    med_s0, K_s0 = _summary("secondary", s0, los_unit)
+    print(f"  Inferred K1 = {K_p0:.2f}, K2 = {K_s0:.2f}")
     print()
 
     print(f"[vgamma = +{VGAMMA_KMS} km/s]")
-    og = _orbit(VGAMMA_KMS)
+    og = _orbit(VGAMMA_KMS, los_vector)
     bg, pg, sg = _vel_components(og)
-    med_bg, _ = _summary("bary", bg)
-    med_pg, K_pg = _summary("primary", pg)
-    med_sg, K_sg = _summary("secondary", sg)
+    med_bg, _ = _summary("bary",      bg, los_unit)
+    med_pg, K_pg = _summary("primary",   pg, los_unit)
+    med_sg, K_sg = _summary("secondary", sg, los_unit)
     print()
 
     # Per-body amplitudes should be unchanged (only barycenter carries γ)
-    print(f"K1 change with γ: {K_pg - K_p0:+.4f} km/s (should be ≈ 0)")
-    print(f"K2 change with γ: {K_sg - K_s0:+.4f} km/s (should be ≈ 0)")
-    print(f"Body 1 median v.y change with γ: {med_pg - med_p0:+.4f} (should be 0; per-body is γ-free)")
-    print(f"Body 2 median v.y change with γ: {med_sg - med_s0:+.4f} (should be 0; per-body is γ-free)")
-    print()
+    print(f"  K1 change with γ: {K_pg - K_p0:+.4f} km/s (should be ≈ 0)")
+    print(f"  K2 change with γ: {K_sg - K_s0:+.4f} km/s (should be ≈ 0)")
+    print(f"  Body 1 median v·LOS change with γ: {med_pg - med_p0:+.4f}  (should be 0)")
+    print(f"  Body 2 median v·LOS change with γ: {med_sg - med_s0:+.4f}  (should be 0)")
 
-    print(f"Expected bary v.y with γ = +{VGAMMA_KMS}: {-VGAMMA_KMS:+.1f} km/s")
-    print(f"Observed bary v.y median: {med_bg:+.3f} km/s")
     tol = 0.05
-    err = abs(med_bg - (-VGAMMA_KMS))
-    if err < tol:
-        # And per-body should be untouched
-        per_body_ok = (abs(med_pg - med_p0) < tol and abs(med_sg - med_s0) < tol
-                       and abs(K_pg - K_p0) < tol and abs(K_sg - K_s0) < tol)
-        if per_body_ok:
-            print("\nFIX OK: γ lives on the barycenter along -y exactly once; "
-                  "per-body Kepler motion is unchanged.")
-            print("Downstream _add_orbit will form body1_vel = bary_vel + primary_vel, "
-                  f"giving body 1's total y-component median ≈ {med_bg + med_p0:+.3f} km/s.")
-            return 0
-        else:
-            print("\nPER-BODY VELOCITY UNEXPECTEDLY CHANGED with γ — partial fix.")
-            return 1
-    elif abs(med_bg - (-2 * VGAMMA_KMS)) < tol:
-        print("\nSTILL DOUBLE-COUNTED on the barycenter (would have given -2γ).")
-        return 1
-    elif abs(med_bg) < tol:
-        print("\nγ DROPPED — barycenter is at 0 instead of -γ. Fix didn't apply.")
-        return 1
-    else:
-        print(f"\nUNEXPECTED bary v.y deviation: {med_bg - (-VGAMMA_KMS):+.3f} km/s.")
-        return 1
+    expected = +VGAMMA_KMS  # γ>0 means receding ⇒ +los_velocity ⇒ redshift
+    err = abs(med_bg - expected)
+    print(f"  bary v·LOS median: {med_bg:+.3f} km/s  (expected ≈ {expected:+.1f})")
+    if err < tol and all(abs(x) < tol for x in
+                          (med_pg - med_p0, med_sg - med_s0, K_pg - K_p0, K_sg - K_s0)):
+        print("  FIX OK: γ propagates as +γ along LOS at the barycenter; per-body unchanged.")
+        return 0
+    print("  FAIL")
+    return 1
+
+
+def main():
+    print("Checking γ flow through get_orbit_jax for both supported LOS axes:\n")
+    bad = 0
+    bad += _check_one([0.0, 0.0, -1.0])
+    print()
+    bad += _check_one([0.0, 1.0, 0.0])
+    return bad
 
 
 if __name__ == "__main__":

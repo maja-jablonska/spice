@@ -74,16 +74,15 @@ def construct_points_in_circles(grid_points, circle_radius=0.25):
 def find_triangle_counts(points_in_circles_mask, triangle_to_gridpts_mask):
     # triangle_to_gridpts_mask: (T, P)
     # points_in_circles_mask:   (C, P)
-
-    # For each (t, c), check if there exists a grid point p that is in both:
-    # (T, 1, P) & (1, C, P) -> (T, C, P) -> any over P -> (T, C)
-    intersects_TC = jnp.any(
-        triangle_to_gridpts_mask[:, None, :] & points_in_circles_mask[None, :, :],
-        axis=2
-    )  # bool (T, C)
-
-    # Count triangles per circle: sum over T
-    counts_C = jnp.sum(intersects_TC, axis=0).astype(jnp.int32)  # (C,)
+    # intersects_TC[t, c] = OR_p (ttg[t, p] & pic[c, p])
+    # Materializing the (T, C, P) intermediate via broadcasting OOMs at typical
+    # (T, P, C) ~ (5k, 2.5k, 2.5k) sizes (~30 GB of bool). The integer matmul
+    # (T, P) @ (P, C) -> (T, C) computes the same overlap count in one pass.
+    overlaps_TC = (
+        triangle_to_gridpts_mask.astype(jnp.int32)
+        @ points_in_circles_mask.astype(jnp.int32).T
+    )
+    counts_C = jnp.sum(overlaps_TC > 0, axis=0).astype(jnp.int32)  # (C,)
     return counts_C
 
 

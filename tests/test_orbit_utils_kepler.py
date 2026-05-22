@@ -10,23 +10,38 @@ from spice.models.orbit_utils import get_orbit_jax
 
 
 def test_vgamma_is_kilometers_per_second():
-    """``vgamma`` is in km/s; a +1 km/s offset lowers primary :math:`v_z` by 1 km/s."""
+    """``vgamma`` is in km/s and applied along ``+los_vector`` at the barycenter.
+
+    The contract: γ = +1 km/s adds +1 km/s to ``bary_vel · los_unit`` (so that
+    ``mesh.los_velocities`` picks it up as +1 km/s and ``apply_vrad`` produces
+    the expected redshift for a receding source). Default LOS is [0, 0, -1].
+    Per-body Keplerian velocities are unaffected by γ.
+    """
     m1 = m2 = 1.0
     P = 1.0
     time = jnp.array([0.0])
     ecc = T = 0.0
     i = omega = Omega = mean_anomaly = reference_time = 0.0
 
-    orb0 = get_orbit_jax(
-        time, m1, m2, P, ecc, T, i, omega, Omega,
-        mean_anomaly, reference_time, vgamma=0.0,
-    )
-    orb1 = get_orbit_jax(
-        time, m1, m2, P, ecc, T, i, omega, Omega,
-        mean_anomaly, reference_time, vgamma=1.0,
-    )
-    dvz = float(orb1[3, 0, 2] - orb0[3, 0, 2])
-    assert dvz == pytest.approx(-1.0, rel=0.0, abs=1e-9)
+    for los in (jnp.array([0.0, 0.0, -1.0]),
+                jnp.array([0.0, 1.0, 0.0])):
+        los_unit = los / jnp.linalg.norm(los)
+        orb0 = get_orbit_jax(
+            time, m1, m2, P, ecc, T, i, omega, Omega,
+            mean_anomaly, reference_time, vgamma=0.0, los_vector=los,
+        )
+        orb1 = get_orbit_jax(
+            time, m1, m2, P, ecc, T, i, omega, Omega,
+            mean_anomaly, reference_time, vgamma=1.0, los_vector=los,
+        )
+        # Δ(bary_vel · los) should equal +1 km/s exactly.
+        dvbary = float((orb1[1, 0] - orb0[1, 0]) @ los_unit)
+        assert dvbary == pytest.approx(1.0, rel=0.0, abs=1e-9), f"bary γ-shift wrong for LOS={los}"
+        # Per-body velocities are untouched by γ.
+        dvprim = float(jnp.linalg.norm(orb1[3, 0] - orb0[3, 0]))
+        dvsec  = float(jnp.linalg.norm(orb1[5, 0] - orb0[5, 0]))
+        assert dvprim == pytest.approx(0.0, abs=1e-9), f"primary γ-leak for LOS={los}"
+        assert dvsec  == pytest.approx(0.0, abs=1e-9), f"secondary γ-leak for LOS={los}"
 
 
 def test_mean_anomaly_reference_time_and_periastron():

@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import pickle
 import sys
 import time
 import traceback
@@ -123,7 +124,7 @@ SOLAR_FLUX      = np.array([5777, 4.44, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 # 20-point LD sweep across [0, 1]; spacing is 1/19 ≈ 0.0526, so 3 decimals in
 # the formatted key keep every coefficient distinct.
-LD_COEFFS = np.linspace(0.0, 1.0, 20)
+LD_COEFFS = np.linspace(0.0, 1.0, 5)
 LD_FMT = ".3f"
 DEFAULT_PULSATION_FITS = HERE / "delta_cep.fits"
 
@@ -482,44 +483,82 @@ def spectrum_variant_names(wanted: Sequence[str]) -> frozenset[str]:
     return frozenset(names)
 
 
+def _load_pickle_dict_or_none(path: Path) -> Optional[dict]:
+    """Load a dict pickle, or return None if missing/empty/truncated/non-dict.
+
+    A previous run killed mid-``save_pickle`` (pre-atomic-write) could leave a
+    zero-byte or truncated ``.pkl`` on disk. We treat any such file as "no
+    usable prior data" so the resume path rebuilds it instead of crashing.
+    """
+    if not path.exists():
+        return None
+    try:
+        obj = load_pickle(str(path))
+    except (EOFError, pickle.UnpicklingError, OSError) as exc:
+        print(f"  [resume] discarding unreadable {path.name}: {exc}", flush=True)
+        return None
+    if not isinstance(obj, dict):
+        print(
+            f"  [resume] discarding {path.name}: expected dict, got {type(obj).__name__}",
+            flush=True,
+        )
+        return None
+    return obj
+
+
 def cepheid_outputs_complete(
     out_dir: Path,
     name: str,
     wanted_bundles: Sequence[str],
     *,
     skip_spectra: bool,
+    wl_min: float = WL_MIN,
+    wl_max: float = WL_MAX,
+    wl_steps: int = WL_STEPS,
 ) -> bool:
     """True when ``out_dir`` already holds every bundle/spectrum key this run would add."""
-    bundles_path = out_dir / f"{name}_bundles.pkl"
-    if not bundles_path.exists():
-        return False
-    existing_b = load_pickle(str(bundles_path))
-    if not isinstance(existing_b, dict):
+    existing_b = _load_pickle_dict_or_none(out_dir / f"{name}_bundles.pkl")
+    if existing_b is None:
         return False
     if set(wanted_bundles) - set(existing_b.keys()):
         return False
     if skip_spectra:
         return True
-    spectra_path = out_dir / f"{name}_spectra.pkl"
-    if not spectra_path.exists():
-        return False
-    existing_s = load_pickle(str(spectra_path))
-    if not isinstance(existing_s, dict):
+    existing_s = _load_pickle_dict_or_none(out_dir / f"{name}_spectra.pkl")
+    if existing_s is None:
         return False
     need = spectrum_variant_names(wanted_bundles)
-    return need <= set(existing_s.keys())
+    if not (need <= set(existing_s.keys())):
+        return False
+
+    # Verify wavelength range matches requested window.
+    # Take any available spectrum variant to check the common WL axis.
+    sample_key = next(iter(existing_s.keys()))
+    sample_spectra_dict = existing_s[sample_key]
+    if not sample_spectra_dict:
+        return False
+    # Each variant is {line_center: LineSpectra}
+    sample_lc = next(iter(sample_spectra_dict.keys()))
+    ls = sample_spectra_dict[sample_lc]
+
+    if len(ls.wavelengths) != wl_steps:
+        return False
+    if not np.isclose(ls.wavelengths[0], wl_min):
+        return False
+    if not np.isclose(ls.wavelengths[-1], wl_max):
+        return False
+
+    return True
 
 
 def _merge_pickle_dict(path: Path, new_obj: dict) -> dict:
     """Update an on-disk dict pickle with ``new_obj`` (shallow merge of top-level keys)."""
-    if path.exists():
-        prev = load_pickle(str(path))
-        if not isinstance(prev, dict):
-            raise TypeError(f"{path} is not a dict pickle (got {type(prev).__name__})")
-        merged = dict(prev)
-        merged.update(new_obj)
-        return merged
-    return new_obj
+    prev = _load_pickle_dict_or_none(path)
+    if prev is None:
+        return new_obj
+    merged = dict(prev)
+    merged.update(new_obj)
+    return merged
 
 
 def build_one(
@@ -529,6 +568,13 @@ def build_one(
     *,
     skip_spectra: bool = False,
     n_mesh: int = 5000,
+    wl_min: float = WL_MIN,
+    wl_max: float = WL_MAX,
+    wl_steps: int = WL_STEPS,
+    n_phases: int = N_PHASES,
+    phase_chunk_idx: int = 0,
+    phase_chunk_n: int = 1,
+    wl_chunk: Optional[int] = None,
 ) -> None:
     bundles_path = out_dir / f"{config.name}_bundles.pkl"
     spectra_path = out_dir / f"{config.name}_spectra.pkl"
@@ -553,7 +599,29 @@ def build_one(
     print(f"  vmicro (Luck 2018 δ Cep fit): "
           f"phase range [{min(vm_phase):.2f}, {max(vm_phase):.2f}] km/s")
 
-    timeseries = jnp.linspace(0, config.period, N_PHASES)
+    # Phase chunking: split the full linspace(0, period, n_phases) into
+    # ``phase_chunk_n`` contiguous slices and keep only chunk ``phase_chunk_idx``.
+    # This lets us spread one star's pulsation phase across several PBS jobs,
+    # which can then be merged back together with merge_phase_chunks.py.
+    full_timeseries = jnp.linspace(0, config.period, n_phases)
+    if phase_chunk_n > 1:
+        if not 0 <= phase_chunk_idx < phase_chunk_n:
+            raise ValueError(
+                f"phase_chunk_idx={phase_chunk_idx} out of range for "
+                f"phase_chunk_n={phase_chunk_n}"
+            )
+        lo = (phase_chunk_idx * n_phases) // phase_chunk_n
+        hi = ((phase_chunk_idx + 1) * n_phases) // phase_chunk_n
+        timeseries = full_timeseries[lo:hi]
+        print(
+            f"  phase chunk {phase_chunk_idx}/{phase_chunk_n}: "
+            f"snapshots [{lo}:{hi}] of {n_phases} "
+            f"(t = {float(timeseries[0]):.4f} .. {float(timeseries[-1]):.4f} d, "
+            f"phase = {float(timeseries[0]) / config.period:.4f} .. "
+            f"{float(timeseries[-1]) / config.period:.4f})"
+        )
+    else:
+        timeseries = full_timeseries
 
     # 1) Build one bundle per *unique* emulator. Each emulator has its own
     # parameter ordering; ``build_bundle`` reads ``stellar_parameter_names``
@@ -615,8 +683,8 @@ def build_one(
     # required). For ``intensity_mu1`` the LD law is applied to the
     # disc-centre intensity I(μ=1) via the same flux-conservation path
     # as the flux variant.
-    line_center = 0.5 * (WL_MIN + WL_MAX)
-    line_width = 0.5 * (WL_MAX - WL_MIN)
+    line_center = 0.5 * (wl_min + wl_max)
+    line_width = 0.5 * (wl_max - wl_min)
 
     # Gate each variant on BOTH the bundle existing AND the emulator being
     # loaded in this invocation. ``bundles`` is post-merge with the on-disk
@@ -662,12 +730,16 @@ def build_one(
             ))
 
     spectra: dict[str, dict[float, LineSpectra]] = {}
+    sim_kwargs: dict[str, Any] = {}
+    if wl_chunk is not None:
+        sim_kwargs["wavelengths_chunk_size"] = wl_chunk
     for name, intensity_fn, bundle, ld_coeffs in spectrum_variants:
         t0 = time.perf_counter()
         spectra[name] = simulate_line_spectra(
             bundle.snapshots, bundle.snapshots[0], intensity_fn, (line_center,),
-            line_width=line_width, steps=WL_STEPS,
+            line_width=line_width, steps=wl_steps,
             ld_coeffs=ld_coeffs,
+            **sim_kwargs,
         )
         print(f"    {name:>20s}: {time.perf_counter() - t0:6.1f} s")
 
@@ -713,6 +785,28 @@ def parse_args():
                         "overrides --skip-aemu / --skip-zarr).")
     p.add_argument("--n-mesh", type=int, default=5000,
                    help="Icosphere mesh resolution.")
+    p.add_argument("--wl-min", type=float, default=WL_MIN,
+                   help=f"Spectrum window lower bound in Å (default: {WL_MIN}).")
+    p.add_argument("--wl-max", type=float, default=WL_MAX,
+                   help=f"Spectrum window upper bound in Å (default: {WL_MAX}).")
+    p.add_argument("--wl-steps", type=int, default=WL_STEPS,
+                   help=f"Number of wavelength samples across the window "
+                        f"(default: {WL_STEPS}).")
+    p.add_argument("--n-phases", type=int, default=N_PHASES,
+                   help=f"Number of pulsation-phase samples (timestamps) per "
+                        f"Cepheid (default: {N_PHASES}). Lower values trade "
+                        f"phase resolution for shorter runtime.")
+    p.add_argument("--phase-chunk", type=str, default="0/1",
+                   help="i/N — synthesise only chunk i (0-indexed) out of N "
+                        "contiguous slices of the full --n-phases timeseries. "
+                        "Use to spread one star's phase scan across N PBS jobs; "
+                        "merge with merge_phase_chunks.py. Default '0/1' = no "
+                        "chunking.")
+    p.add_argument("--wl-chunk", type=int, default=None,
+                   help="wavelengths_chunk_size passed to simulate_observed_flux. "
+                        "Defaults to the library default (1024). On a V100 16GB "
+                        "with the HARPS transformer aemu, 1024 is fine for "
+                        "wl-steps up to ~20000; drop to 512 if you see OOM.")
     p.add_argument("--force", action="store_true",
                    help="Re-build even if output pickles already exist.")
     p.add_argument("--skip-spectra", action="store_true",
@@ -741,9 +835,21 @@ def _resolve_bundle_set(args) -> tuple[str, ...]:
     return wanted
 
 
+def _parse_phase_chunk(spec: str) -> tuple[int, int]:
+    try:
+        idx_s, n_s = spec.split("/", 1)
+        idx, n = int(idx_s), int(n_s)
+    except ValueError as exc:
+        raise SystemExit(f"--phase-chunk must be 'i/N' (got {spec!r}): {exc}")
+    if n < 1 or idx < 0 or idx >= n:
+        raise SystemExit(f"--phase-chunk i/N: need 0 <= i < N and N >= 1 (got {spec!r})")
+    return idx, n
+
+
 def main() -> int:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    phase_chunk_idx, phase_chunk_n = _parse_phase_chunk(args.phase_chunk)
 
     grid = load_grid_csv(args.config) if args.config else default_grid()
     if args.names:
@@ -766,6 +872,7 @@ def main() -> int:
             not args.force
             and cepheid_outputs_complete(
                 args.out_dir, cfg.name, wanted_bundles, skip_spectra=args.skip_spectra,
+                wl_min=args.wl_min, wl_max=args.wl_max, wl_steps=args.wl_steps,
             )
         ):
             print(f"skip {cfg.name}: all requested outputs present (use --force to rebuild)")
@@ -793,6 +900,13 @@ def main() -> int:
                 cfg, emulators, args.out_dir,
                 skip_spectra=args.skip_spectra,
                 n_mesh=args.n_mesh,
+                wl_min=args.wl_min,
+                wl_max=args.wl_max,
+                wl_steps=args.wl_steps,
+                n_phases=args.n_phases,
+                phase_chunk_idx=phase_chunk_idx,
+                phase_chunk_n=phase_chunk_n,
+                wl_chunk=args.wl_chunk,
             )
         except Exception as exc:
             failures.append((cfg.name, exc))
