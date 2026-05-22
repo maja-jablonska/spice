@@ -1,0 +1,32 @@
+% Parameters of the spot configurations rendered in
+% spots_configurations.ipynb. Photospheric temperature T_base = 5800 K;
+% default contrast magnitude Delta T = 1500 K. Requires the booktabs package.
+\begin{table*}[ht]
+\centering
+\caption{Parameters of the spot configurations shown in the gallery
+(Fig.~\ref{fig:spots-configurations}): a smooth halo with a sharp umbra
+(panel a), a co-centred pair whose additive deltas form a hot annulus
+around a cool core (panel b), four well-separated spots spanning the
+full cool-to-hot contrast range (panel c), and a fully heterogeneous
+scatter (panel d). The unspotted photospheric temperature is
+$T_{\rm base}=5800$~K and the default contrast magnitude is
+$|\Delta T|=1500$~K. Latitudes and longitudes are in degrees with
+$\mathrm{lon}=0$ at the centre of the visible hemisphere; spot radii are
+angular sizes in degrees; the smoothness $s\in[0,1]$ controls the
+softness of the spot boundary. Per-spot deltas are additive on the
+mesh, so overlapping spots accumulate. Comma-separated lists give the
+per-spot value; a single value applies to all $N_{\rm spot}$ spots.}
+\label{tab:spots-configurations}
+\setlength{\tabcolsep}{3pt}
+\footnotesize
+\begin{tabular}{@{}cl c l l l l l@{}}
+\toprule
+Label & Description & $N_{\rm spot}$ & Lat~[$^\circ$] & Lon~[$^\circ$] & Radius~[$^\circ$] & $\Delta T$~[K] & $s$ \\
+\midrule
+a & Penumbra (overlap)     & 2 & $20$                            & $0$                              & $35,\,14$                   & $-750$                                              & $0.85,\,0$                          \\
+b & Hot ring, cool centre  & 2 & $0$                             & $0$                              & $30,\,12$                   & $+1500,\,-3000$                                     & $0.15,\,0$                          \\
+c & Graded temperatures    & 4 & $30,\,-10,\,-30,\,25$           & $-55,\,-15,\,25,\,50$            & $13$                        & $+1500,\,+600,\,-600,\,-1500$                       & $0.15$                              \\
+d & Mixed-contrast scatter & 6 & $40,\,10,\,-25,\,-50,\,25,\,-5$ & $-60,\,-20,\,30,\,-40,\,40,\,0$  & $10,\,14,\,9,\,12,\,11,\,8$ & $+1500,\,-1500,\,+900,\,-1500,\,-900,\,+1500$       & $0.4,\,0,\,0.6,\,0.2,\,0.5,\,0$     \\
+\bottomrule
+\end{tabular}
+\end{table*}

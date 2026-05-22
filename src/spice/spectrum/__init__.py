@@ -1,6 +1,7 @@
 def __getattr__(name):
     _lazy_imports = {
         # spectrum.py
+        "Blackbody": ".blackbody",
         "simulate_observed_flux": ".spectrum",
         "simulate_monochromatic_luminosity": ".spectrum",
         "luminosity": ".spectrum",
