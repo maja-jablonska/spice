@@ -73,9 +73,8 @@ import jax.numpy as jnp
 from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
 from spice.spectrum.gaussian_line_emulator import GaussianLineEmulator
 
-from benchmark_grid_loading import (  # noqa: E402
-    write_synthetic_grid, _planck_like, _resolve_precisions,
-)
+from benchmark_grid_loading import write_synthetic_grid  # noqa: E402
+from _bench_common import _planck_like, _resolve_precisions, _parse_in_memory
 
 try:
     import psutil
@@ -486,12 +485,6 @@ def make_plot(rows, path):
 # --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
-def _parse_in_memory(value):
-    return {"true": (True,), "false": (False,), "both": (False, True)}.get(
-        value, None) or (_ for _ in ()).throw(
-        argparse.ArgumentTypeError(f"expected true/false/both, got {value!r}"))
-
-
 ALL_SOURCES = ("static", "gaussian", "grid") + tuple(AEMU_BUNDLES)
 
 

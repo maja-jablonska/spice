@@ -22,7 +22,17 @@ import os
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import sys
-sys.path.insert(0, "/Users/mjablons/code/spice/src")
+from pathlib import Path
+
+from tzfor_constants import (
+    _repo_root,
+    PRIMARY_MASS, SECONDARY_MASS, PERIOD_YR,
+    INCL_DEG, PER0_DEG, LONG_AN_DEG,
+)
+
+SRC = _repo_root(Path(__file__).resolve()) / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 import numpy as np
 import jax.numpy as jnp
@@ -30,13 +40,10 @@ import jax.numpy as jnp
 from spice.models.orbit_utils import get_orbit_jax
 
 
-PRIMARY_MASS = 2.057
-SECONDARY_MASS = 1.958
-PERIOD_YR = 75.66647 / 365.25
-INCL = jnp.deg2rad(85.68)
-PER0 = jnp.deg2rad(65.99)
-LONG_AN = jnp.deg2rad(269.0)
-VGAMMA_KMS = 20.0
+INCL = jnp.deg2rad(INCL_DEG)
+PER0 = jnp.deg2rad(PER0_DEG)
+LONG_AN = jnp.deg2rad(LONG_AN_DEG)
+VGAMMA_KMS = 20.0          # test probe value, NOT the literature systemic gamma
 N_PHASES = 40
 
 

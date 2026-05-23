@@ -69,15 +69,13 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
 if os.path.isdir(os.path.join(_SRC, "spice")):
     sys.path.insert(0, _SRC)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)  # so sibling _bench_common imports resolve
 
 import jax
 
 from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
-
-
-def _resolve_precisions(value):
-    """``('x32',)`` / ``('x64',)`` / ``('x32', 'x64')`` for ``'x32'``/``'x64'``/``'both'``."""
-    return ("x32", "x64") if value == "both" else (value,)
+from _bench_common import _resolve_precisions, _planck_like, _parse_in_memory
 
 
 # --------------------------------------------------------------------------- #
@@ -124,16 +122,6 @@ BYTES_PER_VALUE = 4  # float32 zarr arrays
 # --------------------------------------------------------------------------- #
 # Synthetic grid                                                               #
 # --------------------------------------------------------------------------- #
-def _planck_like(wavelengths_angstrom, teff):
-    """Cheap Planck-shaped curve, only used to fill the grid with non-trivial
-    numbers (the loader never looks at the values)."""
-    h = 6.62607015e-27
-    c = 2.99792458e10
-    k = 1.380649e-16
-    w_cm = np.asarray(wavelengths_angstrom) * 1e-8
-    return (2 * h * c ** 2 / w_cm ** 5 / (np.exp(h * c / (w_cm * k * teff)) - 1.0)) * 1e-8
-
-
 def axis_lengths_for_dims(n_dims, n_nodes):
     """Distribute ``~n_nodes`` grid points over ``n_dims`` axes as evenly as
     possible (each axis gets ``round(n_nodes ** (1/d))`` points, with the first
@@ -415,16 +403,6 @@ def make_plots(rows, path):
 # --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
-def _parse_in_memory(value):
-    if value in ("true", "1", "yes"):
-        return (True,)
-    if value in ("false", "0", "no"):
-        return (False,)
-    if value == "both":
-        return (False, True)
-    raise argparse.ArgumentTypeError(f"expected true/false/both, got {value!r}")
-
-
 def build_parser():
     p = argparse.ArgumentParser(
         description=__doc__,
