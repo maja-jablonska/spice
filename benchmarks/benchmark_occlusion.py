@@ -12,6 +12,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
 if os.path.isdir(os.path.join(_SRC, "spice")):
     sys.path.insert(0, _SRC)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)  # so sibling _bench_common imports resolve
+
+from _bench_common import _resolve_precisions
 
 import jax.numpy as jnp
 import numpy as np
@@ -153,11 +157,6 @@ def plot_benchmark_results(results, filename='occlusion_benchmark_results.png'):
     plt.tight_layout()
     plt.savefig(filename, dpi=300)
     print(f"Wrote plot to {filename}")
-
-
-def _resolve_precisions(value):
-    """``('x32',)`` / ``('x64',)`` / ``('x32', 'x64')`` for ``'x32'``/``'x64'``/``'both'``."""
-    return ("x32", "x64") if value == "both" else (value,)
 
 
 def main(argv=None):

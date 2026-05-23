@@ -70,6 +70,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.normpath(os.path.join(_HERE, "..", "src"))
 if os.path.isdir(os.path.join(_SRC, "spice")):
     sys.path.insert(0, _SRC)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)  # so sibling _bench_common imports resolve
 
 import jax
 import jax.numpy as jnp
@@ -77,11 +79,7 @@ import jax.numpy as jnp
 from spice.models import IcosphereModel
 from spice.spectrum.spectrum import simulate_observed_flux
 from spice.spectrum.lazy_zarr_interpolator import FluxLazyZarrInterpolator
-
-
-def _resolve_precisions(value):
-    """``('x32',)`` / ``('x64',)`` / ``('x32', 'x64')`` for ``'x32'``/``'x64'``/``'both'``."""
-    return ("x32", "x64") if value == "both" else (value,)
+from _bench_common import _resolve_precisions, _planck_like
 
 
 # --------------------------------------------------------------------------- #
@@ -160,16 +158,6 @@ class StaticSpectrum:
         flux = jnp.interp(log_wavelengths, self._ref_logw, self._ref_flux)
         cont = jnp.interp(log_wavelengths, self._ref_logw, self._ref_cont)
         return jnp.stack([flux, cont], axis=-1)
-
-
-def _planck_like(wavelengths_angstrom, teff):
-    """A cheap Planck-shaped curve in erg/s/cm^2/A units (only used to fill the
-    synthetic grid / static spectrum with something non-trivial)."""
-    h = 6.62607015e-27
-    c = 2.99792458e10
-    k = 1.380649e-16
-    w_cm = np.asarray(wavelengths_angstrom) * 1e-8
-    return (2 * h * c ** 2 / w_cm ** 5 / (np.exp(h * c / (w_cm * k * teff)) - 1.0)) * 1e-8
 
 
 def build_static_spectrum():
