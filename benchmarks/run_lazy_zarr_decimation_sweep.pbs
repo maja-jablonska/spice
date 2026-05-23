@@ -1,0 +1,141 @@
+#!/bin/bash
+#============================================================================
+#  Gadi PBS job — LazyZarr leave-out decimation interpolation error sweep.
+#
+#  Runs ``lazy_zarr_interpolation_decimation_sweep.py`` (same protocol as
+#  ``lazy_zarr_linear_interpolation_errors.ipynb``): build a decimated zarr
+#  from the full NLTE grid, reconstruct held-out Teff/log g cells, and write
+#  per-spectrum CSVs, parameter-dependence tables, and PNG diagnostics.
+#
+#  USAGE
+#    cd benchmarks
+#
+#    # Full sweep (all presets; ~hours depending on grid size):
+#    qsub run_lazy_zarr_decimation_sweep.pbs
+#
+#    # Leave-out-half only, outputs under scratch:
+#    qsub -v OUT_DIR=/scratch/y89/$USER/spice/decimation_sweep,CONFIGS=leave_out_half \
+#        run_lazy_zarr_decimation_sweep.pbs
+#
+#    # Coarser-grid mimic vs leave-out-half:
+#    qsub -v CONFIGS="leave_out_half keep_4_interp_2" \
+#        run_lazy_zarr_decimation_sweep.pbs
+#
+#    # Quick smoke test (500 random held spectra per config):
+#    qsub -v QUICK=1 run_lazy_zarr_decimation_sweep.pbs
+#
+#  Monitor:  qstat -fx <jobid>  ;  tail -f lazy_zarr_dec_sweep.o<jobid>
+#
+#  WALLTIME SIZING
+#    One config with ~1.4e5 held spectra at chunk=64 is ~15–25 min on 8 CPUs
+#    once the decimated interpolator is warm. Three presets + full-grid load:
+#    04:00:00 is a reasonable default; bump for slower nodes or --in-memory
+#    on very large rowwise stores.
+#============================================================================
+
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l walltime=04:00:00
+#PBS -l ncpus=8
+#PBS -l mem=64GB
+#PBS -l jobfs=50GB
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N lazy_zarr_dec_sweep
+#PBS -j oe
+#PBS -m a
+#PBS -M maja.jablonska@anu.edu.au
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# 1) Paths (override with qsub -v ...)
+# ---------------------------------------------------------------------------
+STORE_PATH="${STORE_PATH:-/g/data/y89/mj8805/runs/fe-nlte-new-dense/outputs/zarr/regular_synthesized_spectra.zarr}"
+OUT_DIR="${OUT_DIR:-$PBS_O_WORKDIR/lazy_zarr_decimation_sweep}"
+CONFIGS="${CONFIGS:-leave_out_half keep_4_interp_2 keep_3_interp_2}"
+CHUNK="${CHUNK:-64}"
+QUICK="${QUICK:-0}"
+MAX_HELD="${MAX_HELD:-}"
+IN_MEMORY="${IN_MEMORY:-0}"
+SEED="${SEED:-0}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"
+
+PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
+SWEEP_PY="${SWEEP_PY:-$PBS_O_WORKDIR/lazy_zarr_interpolation_decimation_sweep.py}"
+
+# ---------------------------------------------------------------------------
+# 2) Environment
+# ---------------------------------------------------------------------------
+module purge
+module load python3/3.11.7
+
+export JAX_PLATFORMS=cpu
+export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=${PBS_NCPUS:-8}"
+export OMP_NUM_THREADS=${PBS_NCPUS:-8}
+export MKL_NUM_THREADS=${PBS_NCPUS:-8}
+export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-8}
+export TF_CPP_MIN_LOG_LEVEL=2
+
+# Decimated zarr is built under tempfile; on Gadi jobfs is fast and large.
+export TMPDIR="${TMPDIR:-${PBS_JOBFS:-/tmp}}"
+
+# ---------------------------------------------------------------------------
+# 3) Preflight
+# ---------------------------------------------------------------------------
+if [ ! -f "$SWEEP_PY" ]; then
+    echo "ERROR: sweep script not found: $SWEEP_PY"
+    exit 2
+fi
+if [ ! -f "$STORE_PATH/index.parquet" ]; then
+    echo "ERROR: index.parquet missing under STORE_PATH=$STORE_PATH"
+    exit 4
+fi
+
+mkdir -p "$OUT_DIR"
+
+if [ "$QUICK" = "1" ]; then
+    MAX_HELD="${MAX_HELD:-500}"
+    CONFIGS="${CONFIGS:-leave_out_half}"
+fi
+
+ARGS=(
+    --store-path "$STORE_PATH"
+    --output-dir "$OUT_DIR"
+    --configs $CONFIGS
+    --chunk "$CHUNK"
+    --seed "$SEED"
+)
+
+if [ -n "$MAX_HELD" ]; then
+    ARGS+=( --max-held "$MAX_HELD" )
+fi
+
+if [ "$IN_MEMORY" = "1" ]; then
+    ARGS+=( --in-memory )
+fi
+
+if [ -n "$EXTRA_ARGS" ]; then
+    # shellcheck disable=SC2206
+    ARGS+=( $EXTRA_ARGS )
+fi
+
+cd "$PBS_O_WORKDIR"
+
+echo "==============================================================="
+echo "Job:        ${PBS_JOBID:-<interactive>}"
+echo "Node:       $(hostname)"
+echo "CPUs:       ${PBS_NCPUS:-?}"
+echo "TMPDIR:     ${TMPDIR}"
+echo "Python:     ${PYTHON_BIN}"
+echo "Store:      ${STORE_PATH}"
+echo "Out:        ${OUT_DIR}"
+echo "Configs:    ${CONFIGS}"
+echo "Args:       ${ARGS[*]}"
+echo "==============================================================="
+
+"${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, '|', jax.devices())" || true
+
+"${PYTHON_BIN}" -u "$SWEEP_PY" "${ARGS[@]}"
+
+echo "[$(date '+%F %T')] finished — outputs in ${OUT_DIR}"
