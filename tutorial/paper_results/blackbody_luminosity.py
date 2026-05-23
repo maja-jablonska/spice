@@ -1,3 +1,17 @@
+"""Blackbody passband luminosities / magnitudes over a range of mesh resolutions.
+
+Merges the former ``blackbody_luminosity.py`` and ``blackbody_luminosity_offsets.py``
+scripts (their ``run_blackbody`` was identical apart from the Doppler-shift and
+precision settings) behind a small CLI:
+
+    # was blackbody_luminosity.py  (Doppler shift on, single precision)
+    python blackbody_luminosity.py --output blackbody_luminosity_single_precision.csv
+
+    # was blackbody_luminosity_offsets.py  (Doppler shift disabled)
+    python blackbody_luminosity.py --disable-doppler-shift
+"""
+import argparse
+
 from spice.models import IcosphereModel
 from spice.spectrum import simulate_observed_flux
 from spice.spectrum.spectrum import simulate_monochromatic_luminosity, ST_passband_luminosity
@@ -13,18 +27,16 @@ from tqdm import tqdm
 
 from jax import config
 
-DOUBLE_PRECISION = False
-
 config.update('jax_platform_name', 'cpu')
-config.update("jax_enable_x64", DOUBLE_PRECISION)
 
 
-def run_blackbody(n_vertices: int):
+def run_blackbody(n_vertices: int, disable_doppler_shift: bool):
     bb = Blackbody()
     model = IcosphereModel.construct(n_vertices, 1., 1., bb.solar_parameters, bb.parameter_names)
 
     vws = jnp.linspace(1., 100000., 100000)
-    i_bb = simulate_observed_flux(bb.intensity, model, jnp.log10(vws), 10., chunk_size=1000)
+    i_bb = simulate_observed_flux(bb.intensity, model, jnp.log10(vws), 10., chunk_size=1000,
+                                  disable_doppler_shift=disable_doppler_shift)
 
     bb_synphot = SourceSpectrum(Empirical1D, points=vws, lookup_table=i_bb[:, 0]/1e8*units.FLAM)
     i = SpectralElement.from_filter('johnson_v')
@@ -56,5 +68,21 @@ def run_blackbody(n_vertices: int):
 
 
 if __name__ == '__main__':
-    vertex_data = [run_blackbody(n_vertices) for n_vertices in tqdm([100, 1000, 5000, 10000])]
-    pd.DataFrame.from_records(vertex_data).to_csv('blackbody_luminosity_single_precision.csv', index=False)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--disable-doppler-shift', action='store_true',
+                        help='Disable the Doppler shift in simulate_observed_flux '
+                             '(former blackbody_luminosity_offsets.py behaviour).')
+    parser.add_argument('--double-precision', action='store_true',
+                        help='Enable jax_enable_x64 (64-bit) before computing.')
+    parser.add_argument('--output', default='blackbody_luminosity.csv',
+                        help='Output CSV path.')
+    parser.add_argument('--n-vertices', type=int, nargs='+', default=[100, 1000, 5000, 10000],
+                        help='Mesh vertex counts to evaluate.')
+    args = parser.parse_args()
+
+    config.update('jax_enable_x64', args.double_precision)
+
+    vertex_data = [run_blackbody(n_vertices, args.disable_doppler_shift)
+                   for n_vertices in tqdm(args.n_vertices)]
+    pd.DataFrame.from_records(vertex_data).to_csv(args.output, index=False)

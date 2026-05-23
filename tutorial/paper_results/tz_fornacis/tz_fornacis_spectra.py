@@ -58,21 +58,12 @@ import astropy.units as u
 from tqdm import tqdm
 
 
-# TZ Fornacis literature parameters. Must match tz_fornacis_lightcurves.py.
-PRIMARY_MASS = 2.057       # Msun
-PRIMARY_RADIUS = 8.28      # Rsun
-PRIMARY_TEFF = 4930        # K
-PRIMARY_LOGG = 2.91        # cgs
-SECONDARY_MASS = 1.958     # Msun
-SECONDARY_RADIUS = 3.94    # Rsun
-SECONDARY_TEFF = 6650      # K
-SECONDARY_LOGG = 3.35      # cgs
-PERIOD_DAYS = 75.66647     # Gallenne et al. 2016 — must match tz_fornacis_lightcurves.py
-ECC = 0.0
-INCL_DEG = 85.68
-PER0_DEG = 65.99           # argument of periastron
-LONG_AN_DEG = 269.0        # longitude of ascending node
-DISTANCE_PC = 182.8        # pc (Gaia); must match tz_fornacis_lightcurves.py
+# TZ Fornacis literature parameters live in the shared constants module so the
+# spectra / lightcurve / test scripts stay in lock-step. Only values specific to
+# *this* script (wavelength window, mesh resolution, orbit precompute density,
+# line of sight) are defined locally below.
+from tzfor_constants import *  # noqa: F401,F403  (literature constants + _repo_root)
+
 # Wavelength grid: defaults trimmed to a HARPS metal-band window with fine
 # sampling (Δλ ~ 0.01 Å → native R ≳ 5e5 at 5500 Å) so that downstream R = 80k
 # convolution is honest for both HARPS and SPICE. Pass --wl-min/--wl-max to
@@ -80,55 +71,6 @@ DISTANCE_PC = 182.8        # pc (Gaia); must match tz_fornacis_lightcurves.py
 WL_MIN = 4800.0            # Angstrom; default wavelength grid lower edge
 WL_MAX = 6800.0            # Angstrom; default wavelength grid upper edge
 N_MESH = 5000              # icosphere subdivisions per body (spectra use finer mesh)
-
-# Stellar atmosphere parameters (per body) beyond teff/log g. Names match the
-# common Payne/TPayne bundle channels; ``em.to_parameters`` silently falls back
-# to SOLAR_PARAMETERS for any key the bundle doesn't expose, so unknown channels
-# are harmless. [Fe/H] from Andersen et al. 1991 (A&A 246, 99); vmic for
-# evolved stars at TZ For's metallicity is the standard ~1.5 km/s.
-PRIMARY_FEH = -0.30        # dex; both components share TZ For's metallicity
-SECONDARY_FEH = -0.30
-PRIMARY_VMIC = 1.5         # km/s; K-giant standard microturbulence
-SECONDARY_VMIC = 1.5       # km/s; F subgiant — close enough to the primary
-PRIMARY_AFE = 0.0          # [α/Fe]; mildly metal-poor TZ For is not particularly α-enhanced
-SECONDARY_AFE = 0.0
-
-# Rotation broadening (km/s, equatorial velocity).
-# Primary: assumed tidally synchronized at P_orb. v_eq = 2π R / P_orb evaluates
-# to ~5.5 km/s for R = 8.28 R☉ and P = 75.66 d; literature vsini ≈ 6 km/s.
-# Secondary: Andersen+1991 reports vsini ≈ 38 km/s — NOT synchronized.
-PRIMARY_VROT_KMS = 5.5
-SECONDARY_VROT_KMS = 38.0
-
-# Macroturbulent velocity (km/s, FWHM of the Gaussian kernel applied to each
-# body's spectrum after synthesis). TPayne emulators carry thermal + micro
-# broadening only; macroturbulence is added post-emulator. Typical values for
-# late-type giants / subgiants are 4–7 km/s.
-PRIMARY_VMACRO_KMS = 5.0   # K-giant
-SECONDARY_VMACRO_KMS = 6.0  # F subgiant runs a bit hotter
-
-# Ephemeris / vgamma — must match tz_fornacis_lightcurves.py
-T_P_HJD = 2452599.29040
-GAMMA1_KMS = 17.99
-GAMMA2_KMS = 18.35
-GAMMA_KMS = (PRIMARY_MASS * GAMMA1_KMS + SECONDARY_MASS * GAMMA2_KMS) / (
-    PRIMARY_MASS + SECONDARY_MASS
-)
-_FIRST_BJD = float(os.environ.get("TZ_FOR_FIRST_BJD", "2454887.5473123"))
-# IMPORTANT: T_P_HJD from Gallenne+2016 == Clausen+1991 photometric T0 + 98·P
-# (exact within 0.005 d / 1.5e-4 cycle). It is the time of the DEEPER minimum
-# (the F subgiant partially occulted by the K giant), NOT literal periastron.
-# For ECC=0 that event is at ν + ω = 3π/2, i.e. M_at_TP = (3π/2 − ω) mod 2π.
-# The mean-anomaly formula below treats T_P as the M=0 epoch (the simplest
-# baseline); downstream consumers (e.g. tz_fornacis_clausen_b_compare.ipynb)
-# must subtract phase_at_TP = M_at_TP / (2π) ≈ 0.567 when mapping SPICE phase
-# to HJD against Clausen's photometric ephemeris. ω is essentially degenerate
-# in this fit (Gallenne σ(ω) = 71°), so the literal value is kept only so it
-# matches the published spectroscopic-orbit solution.
-_MEAN_ANOMALY_T0 = (
-    ((_FIRST_BJD - T_P_HJD) % PERIOD_DAYS) / PERIOD_DAYS * (2.0 * np.pi)
-)
-M_AT_T_P_RAD = float((1.5 * np.pi - np.deg2rad(PER0_DEG)) % (2.0 * np.pi))
 
 # Keplerian orbit precomputation for add_orbit / linear interpolation at evaluate_orbit.
 # 15 points smears eclipse geometry (~2% of P fits in one interpolation segment);
@@ -315,9 +257,6 @@ def _evaluate_orbit_chunked(binary, times, chunk_size):
     return pb1, pb2
 
 
-_C_KMS = 299_792.458
-
-
 def _apply_macroturbulence(spectra, log_vws, vmacro_kms):
     """Convolve each (n_wavelengths, 2) per-time spectrum with a Gaussian
     macroturbulent kernel of FWHM ``vmacro_kms``.
@@ -333,7 +272,7 @@ def _apply_macroturbulence(spectra, log_vws, vmacro_kms):
 
     if vmacro_kms <= 0.0:
         return spectra
-    R_macro = _C_KMS / vmacro_kms
+    R_macro = C_KMS / vmacro_kms
     # Pin the 1-D Gaussian convolution to CPU: it routes through
     # jax.lax.conv_general_dilated, which dispatches to cuDNN on GPU, and some
     # Gadi cuDNN 9 installs are missing libcudnn_engines_runtime_compiled.so.9

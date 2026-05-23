@@ -1,0 +1,911 @@
+#!/usr/bin/env python
+"""Build a grid of Cepheid bundles + spectra following ``cepheid_build_vmicro.ipynb``.
+
+For each entry in the configured Cepheid grid this script:
+
+  1. Loads up to four spectrum emulators -- ``IntensityLazyZarrInterpolator``
+     (zarr line intensity grid, mu-conditioned), ``FluxLazyZarrInterpolator``
+     (zarr flux grid, applies a linear LD law at call time), and two
+     pretrained aemu intensity bundles (HARPS-resolution and a small
+     iron-line bundle). LD coefficients are bound per call at synthesis
+     time, so we don't rebuild emulators or bundles per coefficient.
+  2. Constructs up to four mesh bundles per Cepheid -- one per emulator --
+     using the Cepheid's stellar parameters and a Fourier-decomposed radius
+     pulsation template. Each emulator gets its own bundle because the
+     mesh stores stellar parameters in the emulator's training order, which
+     differs across the four.
+  3. Pushes phase-dependent Teff, logg and vmicro into every snapshot
+     (vmicro from the Luck 2018 delta Cep fit; Teff/logg from SPIPS3).
+     Modifier indices are looked up by name from each emulator's
+     ``stellar_parameter_names``; emulators that don't carry vmicro just
+     skip that modifier.
+  4. Synthesises 5000-5020 Å spectra for ``with_ld`` (zarr intensity bundle)
+     plus a 20-point linear LD coefficient sweep on the zarr flux bundle,
+     plus one variant per aemu bundle. The optional ``intensity_mu1``
+     bundle (opt-in via ``--bundles``) runs the same 20-point linear-LD
+     sweep but uses the line intensity grid evaluated at μ=1 in place of
+     the flux grid, so the disc-centre specific intensity is rescaled by
+     the same flux-conservation linear LD applied to ``flux_linear_<u>``.
+  5. Pickles ``<name>_bundles.pkl`` and ``<name>_spectra.pkl`` to ``--out-dir``.
+
+The default grid spans the classical-Cepheid period range (3-30 d) using the
+Bono et al. 2001 PR relation for radius and mass, and the Delta-Cep SPIPS3
+template for the pulsation shape and phase-resolved Teff/logg trends. δ Cep
+appears twice — ``cep_DeltaCep`` (12 km/s rotation) and ``cep_DeltaCep_norot``
+— so rotating and non-rotating cases are built without a custom CSV. Override
+or extend the grid via ``--config CSV`` (see :func:`load_grid_csv`).
+
+Synthesis is the slow step (~1-2 min per variant on CPU; 23 variants by
+default, so ~30-45 min per Cepheid). The script is restartable: existing
+per-Cepheid pickles in ``--out-dir`` are skipped unless ``--force`` is given.
+Pass ``--skip-aemu`` to drop the two aemu bundles (the
+``astro_emulators_toolkit`` extra is then optional) or ``--skip-zarr`` to
+drop the two zarr bundles.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import os
+import pickle
+import sys
+import time
+import traceback
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional, Sequence
+
+# CPU-only on macOS, matches src/spice/__init__.py (Linux/Gadi: use GPU if available)
+if sys.platform == "darwin" and "JAX_PLATFORMS" not in os.environ:
+    os.environ["JAX_PLATFORMS"] = "cpu"
+
+HERE = Path(__file__).resolve().parent
+SRC = HERE.parents[1] / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+sys.path.insert(0, str(HERE))
+
+import numpy as np
+import jax.numpy as jnp
+from astropy.io import fits
+from astropy.table import Table
+from scipy import optimize
+from scipy.interpolate import interp1d
+
+from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
+from spice.spectrum.lazy_zarr_interpolator import (
+    IntensityLazyZarrInterpolator,
+    FluxLazyZarrInterpolator,
+)
+from cepheid_bundles import (  # noqa: E402  (sys.path patched above)
+    CepheidBundle,
+    LineSpectra,
+    build_bundle,
+    apply_phase_params,
+    load_pickle,
+    simulate_line_spectra,
+    save_pickle,
+)
+from cepheid_phase import (  # noqa: E402  (sys.path patched above)
+    fourier_series,
+    xi_micro_deltaCep,
+    INTENSITY_PARAMS,
+    FLUX_PARAMS,
+    SOLAR_INTENSITY,
+    SOLAR_FLUX,
+)
+
+
+# --- defaults that match the build notebook --------------------------------
+# Gadi paths used by the cepheid_build_vmicro.ipynb notebook.
+LINE_INTERP_PATH = "/g/data/y89/mj8805/fe_regular_nlte_big.zarr"
+FLUX_INTERP_PATH = "/g/data/y89/mj8805/fe_nlte_flux_big.zarr/regular_synthesized_spectra.zarr"
+
+# Pretrained aemu (astro_emulators_toolkit) bundles. Both expose
+# ``IntensityPretrainedAemuSpectrumEmulator``. Defaults match
+# benchmarks/benchmark_spice_components.py.
+DEFAULT_HARPS_AEMU = "RozanskiT/TPayne-spice-harps"
+DEFAULT_IRON_AEMU  = "RozanskiT/TPayne-spice-small-random"
+
+# Bundle variant keys that this script knows how to build. Used by `--bundles`
+# / `--skip-aemu` / `--skip-zarr`. Order is the build order.
+#
+# ``intensity_mu1`` is opt-in: it shares the line intensity zarr with
+# ``intensity`` but at synthesis time evaluates the grid only at μ=1 and
+# rescales by a flux-conservation linear LD, mirroring the ``flux_no_ld``
+# sweep against the line intensity grid instead of the disc-integrated
+# flux grid. Selecting it requires ``--bundles`` (it is not part of the
+# default ``ALL_BUNDLES``).
+ALL_BUNDLES = ("intensity", "flux_no_ld", "harps", "iron_line")
+OPTIONAL_BUNDLES = ("intensity_mu1",)
+BUILDABLE_BUNDLES = ALL_BUNDLES + OPTIONAL_BUNDLES
+ZARR_BUNDLES = ("intensity", "flux_no_ld", "intensity_mu1")
+AEMU_BUNDLES = ("harps", "iron_line")
+
+# INTENSITY_PARAMS / FLUX_PARAMS / SOLAR_INTENSITY / SOLAR_FLUX are imported
+# from cepheid_phase (shared with the cepheid notebooks).
+
+# 20-point LD sweep across [0, 1]; spacing is 1/19 ≈ 0.0526, so 3 decimals in
+# the formatted key keep every coefficient distinct.
+LD_COEFFS = np.linspace(0.0, 1.0, 5)
+LD_FMT = ".3f"
+DEFAULT_PULSATION_FITS = HERE / "delta_cep.fits"
+
+
+class _IntensityAtDiscCentre:
+    """Intensity callable that queries the line intensity grid at μ=1 only
+    and applies a flux-conservation LD law as a function of the cell's μ.
+
+    Backs the ``intensity_mu1`` variant: instead of evaluating the
+    :class:`IntensityLazyZarrInterpolator` at each cell's μ (where μ is a
+    grid axis already carrying the atmosphere's own limb darkening), we
+    take the disc-centre specific intensity ``I(μ=1, params)`` as a flux
+    template and rescale it to ``I(μ)`` via the same
+    :func:`apply_flux_limb_darkening` path that ``FluxLazyZarrInterpolator``
+    uses. The resulting spectra are directly comparable to
+    ``flux_linear_<u>`` at the same coefficient, but sourced from the
+    line intensity grid rather than the disc-integrated flux grid.
+
+    ``ld_law`` / ``ld_coeffs`` are bound per call by
+    :class:`spice.spectrum.flux_limb_darkening.LdBoundIntensity` inside
+    ``simulate_observed_flux``; the LD sweep therefore reuses one adapter
+    instance across all coefficients without rebuilding it.
+
+    Made hashable by ``(intensity_emulator, "intensity_mu1")`` so the
+    enclosing :class:`LdBoundIntensity` hashes stably across calls and
+    the jit cache is keyed on the LD coefficients rather than adapter
+    identity.
+    """
+
+    __slots__ = ("intensity_emulator",)
+
+    def __init__(self, intensity_emulator):
+        self.intensity_emulator = intensity_emulator
+
+    def __call__(self, log_wavelengths, mu, parameters,
+                 *, ld_law="linear", ld_coeffs=None):
+        mu_arr = jnp.asarray(mu)
+        one_mu = jnp.ones_like(jnp.atleast_1d(mu_arr))
+        i_disc = self.intensity_emulator.intensity(
+            log_wavelengths, one_mu, parameters,
+        )
+        flux = apply_flux_limb_darkening(i_disc[..., 0], mu_arr, ld_law, ld_coeffs)
+        cont = apply_flux_limb_darkening(i_disc[..., 1], mu_arr, ld_law, ld_coeffs)
+        return jnp.stack([flux, cont], axis=-1)
+
+    def __hash__(self) -> int:
+        return hash((id(self.intensity_emulator), "intensity_mu1"))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, _IntensityAtDiscCentre):
+            return False
+        return self.intensity_emulator is other.intensity_emulator
+
+    def __repr__(self) -> str:
+        return f"_IntensityAtDiscCentre({type(self.intensity_emulator).__name__})"
+
+# δ Cep projected rotation used in cepheid_grid.csv / cepheid_analysis.ipynb.
+DELTA_CEP_ROTATION_KMS = 12.0
+
+WL_MIN, WL_MAX = 5000.0, 5020.0
+WL_STEPS = 2000
+N_PHASES = 100
+N_FOURIER_TERMS = 8
+
+
+# ---------------------------------------------------------------------------
+# Cepheid configuration
+# ---------------------------------------------------------------------------
+@dataclass
+class CepheidConfig:
+    """Stellar + pulsation parameters for one Cepheid in the grid."""
+
+    name: str
+    period: float                                  # days
+    radius: float                                  # R_sun (mean)
+    mass: float                                    # M_sun
+    teff: Optional[float] = None                   # phase-0 Teff (K); None → take from fits
+    logg: Optional[float] = None                   # phase-0 logg;     None → take from fits
+    fe_h: float = 0.06
+    vmicro: float = 3.5
+    # Abundances default to solar (0). The vmicro notebook only sets teff,
+    # logg, [Fe/H], vmicro on stellar_params_dict; everything else falls back
+    # to the emulator's solar_parameters via parameter_helper. Override here
+    # (or in the CSV) for non-solar abundance studies.
+    a_fe: float = 0.0
+    c_fe: float = 0.0
+    n_fe: float = 0.0
+    o_fe: float = 0.0
+    r_fe: float = 0.0
+    s_fe: float = 0.0
+    rotation_velocity: float = 0.0                 # km/s; 0 = no rotation
+    n_vertices: Optional[int] = None               # None → fall back to --n-mesh
+    pulsation_fits: Path = field(default_factory=lambda: DEFAULT_PULSATION_FITS)
+
+    def stellar_params_dict(self, teff_default: float, logg_default: float) -> dict:
+        return {
+            "teff":   self.teff if self.teff is not None else teff_default,
+            "logg":   self.logg if self.logg is not None else logg_default,
+            "[Fe/H]": self.fe_h,
+            "vmicro": self.vmicro,
+            "[a/Fe]": self.a_fe,
+            "[C/Fe]": self.c_fe,
+            "[N/Fe]": self.n_fe,
+            "[O/Fe]": self.o_fe,
+            "[r/Fe]": self.r_fe,
+            "[s/Fe]": self.s_fe,
+        }
+
+
+def _delta_cep_configs() -> tuple[CepheidConfig, CepheidConfig]:
+    """δ Cep literature parameters, rotating and non-rotating (cepheid_grid.csv)."""
+    common = dict(
+        period=5.366265401100268,
+        radius=43.06,
+        mass=5.26,
+        teff=6562.0,
+        logg=1.883,
+        fe_h=0.06,
+    )
+    return (
+        CepheidConfig(name="cep_DeltaCep", rotation_velocity=DELTA_CEP_ROTATION_KMS, **common),
+        CepheidConfig(name="cep_DeltaCep_norot", rotation_velocity=0.0, **common),
+    )
+
+
+def default_grid() -> list[CepheidConfig]:
+    """Six-entry classical-Cepheid grid covering log P = 0.5–1.5.
+
+    Radius scales via Bono et al. 2001 (log R/R_sun = 0.748 log P + 1.10).
+    Mass-period passes through Delta-Cep (M=5.26, P=5.366) with slope 0.4 in
+    log-log, giving ~4-10 M_sun across P=3-30 d (consistent with pulsation-
+    model masses). Teff drops along the IS toward longer period (rough fit
+    to Madore & Freedman 1991); logg follows from M and R.
+
+    δ Cep is listed twice (``cep_DeltaCep`` at :data:`DELTA_CEP_ROTATION_KMS`
+    km/s and ``cep_DeltaCep_norot`` at 0 km/s); other periods are non-rotating.
+    """
+    rows: list[CepheidConfig] = []
+    for p_days, teff in [(3.0, 6300), (5.366, 6562), (10.0, 5800),
+                         (20.0, 5500), (30.0, 5300)]:
+        if p_days == 5.366:
+            rows.extend(_delta_cep_configs())
+            continue
+        log_p = np.log10(p_days)
+        radius = 10.0 ** (0.748 * log_p + 1.10)
+        mass   = 10.0 ** (0.40 * log_p + 0.430)
+        # log g = log(GM/R²) in cgs, with G·M_sun/R_sun² → 10^4.44 cgs at solar
+        logg = 4.44 + np.log10(mass) - 2.0 * np.log10(radius)
+        rows.append(CepheidConfig(
+            name=f"cep_P{p_days:05.2f}".replace(".", "p"),
+            period=p_days, radius=float(radius), mass=float(mass),
+            teff=float(teff), logg=float(logg),
+            fe_h=0.0,
+        ))
+    return rows
+
+
+def load_grid_csv(path: Path) -> list[CepheidConfig]:
+    """Read a CSV with one row per Cepheid.
+
+    Required columns: ``name, period, radius, mass``.
+    Optional: ``teff, logg, fe_h, vmicro, a_fe, c_fe, n_fe, o_fe, r_fe, s_fe,
+    rotation_velocity, n_vertices, pulsation_fits``.
+    """
+    configs = []
+    with open(path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            kwargs = {"name": row["name"],
+                      "period": float(row["period"]),
+                      "radius": float(row["radius"]),
+                      "mass":   float(row["mass"])}
+            for key in ("teff", "logg", "fe_h", "vmicro",
+                        "a_fe", "c_fe", "n_fe", "o_fe", "r_fe", "s_fe",
+                        "rotation_velocity"):
+                if key in row and row[key] != "":
+                    kwargs[key] = float(row[key])
+            if "n_vertices" in row and row["n_vertices"] != "":
+                kwargs["n_vertices"] = int(row["n_vertices"])
+            if "pulsation_fits" in row and row["pulsation_fits"]:
+                kwargs["pulsation_fits"] = Path(row["pulsation_fits"])
+            configs.append(CepheidConfig(**kwargs))
+    return configs
+
+
+# ---------------------------------------------------------------------------
+# Pulsation template helpers (per-star: Fourier fit + Teff/logg interpolators)
+# ---------------------------------------------------------------------------
+def fit_radius_template(pulsation_data: Table, n_terms: int = N_FOURIER_TERMS) -> np.ndarray:
+    """Fourier-fit ``R(phase) / R(0)`` and pack into the (3, n_terms, 2) VSH matrix.
+
+    Cepheid pulsation is the radial l=0, m=0 mode, so only the first row of
+    the (radial, spheroidal, toroidal) VSH matrix is non-zero.
+    """
+    phases = np.array(pulsation_data["PHASE"])
+    radius = np.array(pulsation_data["R"] / pulsation_data["R"][0])
+    sort_idx = np.argsort(phases)
+    phases, radius = phases[sort_idx], radius[sort_idx]
+
+    p0 = [float(np.mean(radius))] + [0.0] * (2 * n_terms)
+    params, _ = optimize.curve_fit(fourier_series, phases, radius, p0=p0)
+    fc = params[1:]
+
+    radial = np.zeros((n_terms, 2))
+    for i in range(n_terms):
+        a_i, b_i = fc[2 * i], fc[2 * i + 1]
+        radial[i] = [np.sqrt(a_i ** 2 + b_i ** 2), np.arctan2(b_i, a_i)]
+    return np.stack([radial, np.zeros_like(radial), np.zeros_like(radial)])
+
+
+def make_phase_modifiers(pulsation_data: Table):
+    """Cubic-interpolate Teff(phase) and logg(phase) from the SPIPS3 table, and
+    pull vmicro(phase) from :func:`xi_micro_deltaCep` (Luck 2018 δ Cep fit)."""
+    phase = np.asarray(pulsation_data["PHASE"])
+    sort_idx = np.argsort(phase)
+    phase  = phase[sort_idx]
+    teff   = np.asarray(pulsation_data["Teff"])[sort_idx]
+    logg   = np.asarray(pulsation_data["logg"])[sort_idx]
+    teff_i = interp1d(phase, teff, kind="cubic", bounds_error=False,
+                      fill_value=(float(teff[-1]), float(teff[0])), assume_sorted=True)
+    logg_i = interp1d(phase, logg, kind="cubic", bounds_error=False,
+                      fill_value=(float(logg[-1]), float(logg[0])), assume_sorted=True)
+
+    teff_at   = lambda p: float(teff_i(p % 1.0))
+    logg_at   = lambda p: float(logg_i(p % 1.0))
+    vmicro_at = lambda p: float(xi_micro_deltaCep(p))
+
+    return teff_at, logg_at, vmicro_at
+
+
+# ---------------------------------------------------------------------------
+# Emulator setup (built once, shared across all Cepheids)
+# ---------------------------------------------------------------------------
+def _load_aemu_intensity(name: str):
+    """Lazy-import + load an :class:`IntensityPretrainedAemuSpectrumEmulator`.
+
+    Imported here (not at module top) so the script still imports when the
+    optional ``aemu`` extra is missing -- relevant when callers pass
+    ``--skip-aemu`` to build the two zarr bundles only.
+    """
+    from spice.spectrum.aemu_spectrum_emulator import (
+        IntensityPretrainedAemuSpectrumEmulator,
+    )
+    return IntensityPretrainedAemuSpectrumEmulator(name)
+
+
+def build_emulators(
+    intensity_path: str,
+    flux_path: str,
+    *,
+    harps_aemu: Optional[str] = DEFAULT_HARPS_AEMU,
+    iron_aemu: Optional[str] = DEFAULT_IRON_AEMU,
+    wanted: Sequence[str] = ALL_BUNDLES,
+) -> dict[str, Any]:
+    """Build the emulator backing each requested bundle variant.
+
+    Returns ``{bundle_name: emulator}`` for every key in ``wanted`` (subset
+    of :data:`BUILDABLE_BUNDLES`). LD coefficients for the ``flux_no_ld``
+    and ``intensity_mu1`` variants are passed per call to
+    ``simulate_observed_flux`` at synthesis time, so we don't need a
+    separate emulator per coefficient. ``intensity`` and ``intensity_mu1``
+    share one :class:`IntensityLazyZarrInterpolator` instance so the line
+    intensity zarr is opened once even when both variants are selected.
+    """
+    out: dict[str, Any] = {}
+    if "intensity" in wanted or "intensity_mu1" in wanted:
+        print(f"Loading intensity grid: {intensity_path}")
+        intensity_em = IntensityLazyZarrInterpolator(
+            intensity_path, params=INTENSITY_PARAMS, solar_parameters=SOLAR_INTENSITY,
+            sparse=True, in_memory=False,
+        )
+        if "intensity" in wanted:
+            out["intensity"] = intensity_em
+        if "intensity_mu1" in wanted:
+            out["intensity_mu1"] = intensity_em
+    if "flux_no_ld" in wanted:
+        print(f"Loading flux grid:      {flux_path}")
+        out["flux_no_ld"] = FluxLazyZarrInterpolator(
+            flux_path, params=FLUX_PARAMS, solar_parameters=SOLAR_FLUX,
+            sparse=True, in_memory=False,
+        )
+    if "harps" in wanted and harps_aemu is not None:
+        print(f"Loading HARPS aemu:     {harps_aemu}")
+        out["harps"] = _load_aemu_intensity(harps_aemu)
+    if "iron_line" in wanted and iron_aemu is not None:
+        print(f"Loading iron-line aemu: {iron_aemu}")
+        out["iron_line"] = _load_aemu_intensity(iron_aemu)
+    return out
+
+
+# Names of phase-dependent stellar parameters that the SPIPS3 / Luck-2018
+# templates produce. Mapped to bundle parameter indices via
+# ``_phase_modifiers_for`` -- only parameters that the emulator actually
+# carries get a modifier.
+PHASE_MODIFIER_NAMES = ("teff", "logg", "vmicro")
+
+
+def _phase_modifiers_for(emulator, teff_at, logg_at, vmicro_at):
+    """Build a ``[(param_index, fn), ...]`` modifier list for ``emulator``.
+
+    Looks up each phase-dependent parameter by name in the emulator's
+    ``stellar_parameter_names`` and skips any that are not present (e.g.
+    aemu bundles that don't carry vmicro).
+    """
+    name_to_fn = {"teff": teff_at, "logg": logg_at, "vmicro": vmicro_at}
+    names = list(getattr(emulator, "stellar_parameter_names", []))
+    if not names:
+        # Last-resort fallback: assume the canonical zarr ordering.
+        names = INTENSITY_PARAMS[:-1] if "intensity" in repr(type(emulator)) else FLUX_PARAMS
+    out = []
+    for n, fn in name_to_fn.items():
+        if n in names:
+            out.append((names.index(n), fn))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Per-Cepheid build
+# ---------------------------------------------------------------------------
+def spectrum_variant_names(wanted: Sequence[str]) -> frozenset[str]:
+    """Spectrum keys this run will write for the requested bundle variants."""
+    names: list[str] = []
+    if "intensity" in wanted:
+        names.append("with_ld")
+    if "flux_no_ld" in wanted:
+        names.extend(f"flux_linear_{c:{LD_FMT}}" for c in LD_COEFFS)
+    if "intensity_mu1" in wanted:
+        names.extend(f"intensity_mu1_linear_{c:{LD_FMT}}" for c in LD_COEFFS)
+    for name in AEMU_BUNDLES:
+        if name in wanted:
+            names.append(name)
+    return frozenset(names)
+
+
+def _load_pickle_dict_or_none(path: Path) -> Optional[dict]:
+    """Load a dict pickle, or return None if missing/empty/truncated/non-dict.
+
+    A previous run killed mid-``save_pickle`` (pre-atomic-write) could leave a
+    zero-byte or truncated ``.pkl`` on disk. We treat any such file as "no
+    usable prior data" so the resume path rebuilds it instead of crashing.
+    """
+    if not path.exists():
+        return None
+    try:
+        obj = load_pickle(str(path))
+    except (EOFError, pickle.UnpicklingError, OSError) as exc:
+        print(f"  [resume] discarding unreadable {path.name}: {exc}", flush=True)
+        return None
+    if not isinstance(obj, dict):
+        print(
+            f"  [resume] discarding {path.name}: expected dict, got {type(obj).__name__}",
+            flush=True,
+        )
+        return None
+    return obj
+
+
+def cepheid_outputs_complete(
+    out_dir: Path,
+    name: str,
+    wanted_bundles: Sequence[str],
+    *,
+    skip_spectra: bool,
+    wl_min: float = WL_MIN,
+    wl_max: float = WL_MAX,
+    wl_steps: int = WL_STEPS,
+) -> bool:
+    """True when ``out_dir`` already holds every bundle/spectrum key this run would add."""
+    existing_b = _load_pickle_dict_or_none(out_dir / f"{name}_bundles.pkl")
+    if existing_b is None:
+        return False
+    if set(wanted_bundles) - set(existing_b.keys()):
+        return False
+    if skip_spectra:
+        return True
+    existing_s = _load_pickle_dict_or_none(out_dir / f"{name}_spectra.pkl")
+    if existing_s is None:
+        return False
+    need = spectrum_variant_names(wanted_bundles)
+    if not (need <= set(existing_s.keys())):
+        return False
+
+    # Verify wavelength range matches requested window.
+    # Take any available spectrum variant to check the common WL axis.
+    sample_key = next(iter(existing_s.keys()))
+    sample_spectra_dict = existing_s[sample_key]
+    if not sample_spectra_dict:
+        return False
+    # Each variant is {line_center: LineSpectra}
+    sample_lc = next(iter(sample_spectra_dict.keys()))
+    ls = sample_spectra_dict[sample_lc]
+
+    if len(ls.wavelengths) != wl_steps:
+        return False
+    if not np.isclose(ls.wavelengths[0], wl_min):
+        return False
+    if not np.isclose(ls.wavelengths[-1], wl_max):
+        return False
+
+    return True
+
+
+def _merge_pickle_dict(path: Path, new_obj: dict) -> dict:
+    """Update an on-disk dict pickle with ``new_obj`` (shallow merge of top-level keys)."""
+    prev = _load_pickle_dict_or_none(path)
+    if prev is None:
+        return new_obj
+    merged = dict(prev)
+    merged.update(new_obj)
+    return merged
+
+
+def build_one(
+    config: CepheidConfig,
+    emulators: dict[str, Any],
+    out_dir: Path,
+    *,
+    skip_spectra: bool = False,
+    n_mesh: int = 5000,
+    wl_min: float = WL_MIN,
+    wl_max: float = WL_MAX,
+    wl_steps: int = WL_STEPS,
+    n_phases: int = N_PHASES,
+    phase_chunk_idx: int = 0,
+    phase_chunk_n: int = 1,
+    wl_chunk: Optional[int] = None,
+) -> None:
+    bundles_path = out_dir / f"{config.name}_bundles.pkl"
+    spectra_path = out_dir / f"{config.name}_spectra.pkl"
+    n_mesh_used = config.n_vertices if config.n_vertices is not None else n_mesh
+    print(f"\n=== {config.name}  P={config.period:.4f} d  "
+          f"R={config.radius:.2f} R_sun  M={config.mass:.2f} M_sun  "
+          f"v_rot={config.rotation_velocity:.2f} km/s  n_vertices={n_mesh_used} ===")
+    print(f"  variants: {', '.join(emulators.keys())}")
+
+    with fits.open(config.pulsation_fits, ignore_missing_simple=True) as hdul:
+        pulsation_data = Table(hdul[2].data)
+
+    fourier = fit_radius_template(pulsation_data)
+    teff_at, logg_at, vmicro_at = make_phase_modifiers(pulsation_data)
+
+    teff_default = float(pulsation_data["Teff"][0])
+    logg_default = float(pulsation_data["logg"][0])
+    sp = config.stellar_params_dict(teff_default, logg_default)
+    vm_phase = [vmicro_at(p) for p in np.linspace(0, 1, 64)]
+    print(f"  stellar params: Teff={sp['teff']:.0f} K  logg={sp['logg']:.3f}  "
+          f"[Fe/H]={sp['[Fe/H]']:+.2f}")
+    print(f"  vmicro (Luck 2018 δ Cep fit): "
+          f"phase range [{min(vm_phase):.2f}, {max(vm_phase):.2f}] km/s")
+
+    # Phase chunking: split the full linspace(0, period, n_phases) into
+    # ``phase_chunk_n`` contiguous slices and keep only chunk ``phase_chunk_idx``.
+    # This lets us spread one star's pulsation phase across several PBS jobs,
+    # which can then be merged back together with merge_phase_chunks.py.
+    full_timeseries = jnp.linspace(0, config.period, n_phases)
+    if phase_chunk_n > 1:
+        if not 0 <= phase_chunk_idx < phase_chunk_n:
+            raise ValueError(
+                f"phase_chunk_idx={phase_chunk_idx} out of range for "
+                f"phase_chunk_n={phase_chunk_n}"
+            )
+        lo = (phase_chunk_idx * n_phases) // phase_chunk_n
+        hi = ((phase_chunk_idx + 1) * n_phases) // phase_chunk_n
+        timeseries = full_timeseries[lo:hi]
+        print(
+            f"  phase chunk {phase_chunk_idx}/{phase_chunk_n}: "
+            f"snapshots [{lo}:{hi}] of {n_phases} "
+            f"(t = {float(timeseries[0]):.4f} .. {float(timeseries[-1]):.4f} d, "
+            f"phase = {float(timeseries[0]) / config.period:.4f} .. "
+            f"{float(timeseries[-1]) / config.period:.4f})"
+        )
+    else:
+        timeseries = full_timeseries
+
+    # 1) Build one bundle per *unique* emulator. Each emulator has its own
+    # parameter ordering; ``build_bundle`` reads ``stellar_parameter_names``
+    # and stores parameters on the mesh in that emulator's order. Variants
+    # that share an emulator instance (e.g. ``intensity`` and
+    # ``intensity_mu1`` both back onto the same line intensity zarr) share
+    # the same built bundle: dedup by ``id(emul)`` so we don't pay the
+    # icosphere + per-phase pulsation evaluation cost twice.
+    bundles: dict[str, CepheidBundle] = {}
+    base_cache: dict[int, CepheidBundle] = {}
+    for name, emul in emulators.items():
+        eid = id(emul)
+        if eid in base_cache:
+            bundles[name] = base_cache[eid]
+            print(f"  reusing built bundle for {name} (shared emulator)")
+            continue
+        print(f"  building {name}…")
+        bundles[name] = base_cache[eid] = build_bundle(
+            emul, emul.to_parameters(sp),
+            fourier_params=fourier,
+            period=config.period, timeseries=timeseries,
+            n_mesh=n_mesh_used, radius=config.radius, mass=config.mass,
+            rotation_velocity=config.rotation_velocity,
+            param_names_attr="stellar_parameter_names",
+            desc=f"  evaluating {name}",
+        )
+
+    # 2) Phase-dependent Teff, logg, and vmicro. Modifier indices are looked
+    # up by name in each emulator's ``stellar_parameter_names``; aemu bundles
+    # that lack a particular parameter (e.g. vmicro) silently skip it.
+    # Variants sharing an emulator instance get identical phase modifiers,
+    # so dedup on ``id(emul)`` again to apply them once.
+    phases_per_snapshot = [(t % config.period) / config.period for t in timeseries]
+    phased_cache: dict[int, CepheidBundle] = {}
+    for name, bundle in bundles.items():
+        eid = id(emulators[name])
+        if eid in phased_cache:
+            bundles[name] = phased_cache[eid]
+            continue
+        modifiers = _phase_modifiers_for(
+            emulators[name], teff_at, logg_at, vmicro_at,
+        )
+        bundles[name] = phased_cache[eid] = apply_phase_params(
+            bundle, phases_per_snapshot, modifiers=modifiers,
+        )
+
+    bundles = _merge_pickle_dict(bundles_path, bundles)
+    save_pickle(bundles, str(bundles_path))
+    print(f"  → saved {bundles_path.name} ({len(bundles)} bundle key(s))")
+
+    if skip_spectra:
+        print("  (skip-spectra: leaving spectra unbuilt)")
+        return
+
+    # 3) Spectrum synthesis. The intensity/aemu bundles each get a single
+    # variant; the zarr flux bundle and the optional ``intensity_mu1``
+    # bundle each additionally fan out into a 20-point linear-LD
+    # coefficient sweep (different ``ld_coeffs`` per call, no rebuild
+    # required). For ``intensity_mu1`` the LD law is applied to the
+    # disc-centre intensity I(μ=1) via the same flux-conservation path
+    # as the flux variant.
+    line_center = 0.5 * (wl_min + wl_max)
+    line_width = 0.5 * (wl_max - wl_min)
+
+    # Gate each variant on BOTH the bundle existing AND the emulator being
+    # loaded in this invocation. ``bundles`` is post-merge with the on-disk
+    # pickle, so it can carry variants from earlier runs (e.g. ``intensity``
+    # / ``harps`` from the main grid build) whose emulators weren't requested
+    # this time. Their spectra remain on disk via the merge at the end of
+    # this function — we just don't try to re-synthesize them here.
+    spectrum_variants: list[tuple[str, Any, CepheidBundle, Optional[Any]]] = []
+    if "intensity" in bundles and "intensity" in emulators:
+        spectrum_variants.append((
+            "with_ld",
+            emulators["intensity"].intensity,
+            bundles["intensity"],
+            None,
+        ))
+    if "flux_no_ld" in bundles and "flux_no_ld" in emulators:
+        for c in LD_COEFFS:
+            spectrum_variants.append((
+                f"flux_linear_{c:{LD_FMT}}",
+                emulators["flux_no_ld"].intensity,
+                bundles["flux_no_ld"],
+                jnp.array([float(c), 0.0, 0.0, 0.0]),
+            ))
+    if "intensity_mu1" in bundles and "intensity_mu1" in emulators:
+        # One adapter reused across the 20 coefficient calls so the
+        # surrounding ``LdBoundIntensity`` hashes stably and jit only
+        # recompiles for new coefficients.
+        intensity_mu1_fn = _IntensityAtDiscCentre(emulators["intensity_mu1"])
+        for c in LD_COEFFS:
+            spectrum_variants.append((
+                f"intensity_mu1_linear_{c:{LD_FMT}}",
+                intensity_mu1_fn,
+                bundles["intensity_mu1"],
+                jnp.array([float(c), 0.0, 0.0, 0.0]),
+            ))
+    for name in ("harps", "iron_line"):
+        if name in bundles and name in emulators:
+            spectrum_variants.append((
+                name,
+                emulators[name].intensity,
+                bundles[name],
+                None,
+            ))
+
+    spectra: dict[str, dict[float, LineSpectra]] = {}
+    sim_kwargs: dict[str, Any] = {}
+    if wl_chunk is not None:
+        sim_kwargs["wavelengths_chunk_size"] = wl_chunk
+    for name, intensity_fn, bundle, ld_coeffs in spectrum_variants:
+        t0 = time.perf_counter()
+        spectra[name] = simulate_line_spectra(
+            bundle.snapshots, bundle.snapshots[0], intensity_fn, (line_center,),
+            line_width=line_width, steps=wl_steps,
+            ld_coeffs=ld_coeffs,
+            **sim_kwargs,
+        )
+        print(f"    {name:>20s}: {time.perf_counter() - t0:6.1f} s")
+
+    spectra = _merge_pickle_dict(spectra_path, spectra)
+    save_pickle(spectra, str(spectra_path))
+    print(f"  → saved {spectra_path.name} ({len(spectra)} spectrum variant(s))")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def parse_args():
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--out-dir", type=Path, default=HERE / "cepheid_grid",
+                   help="Directory for per-star pickles.")
+    p.add_argument("--config", type=Path, default=None,
+                   help="CSV with custom Cepheid grid (default: built-in 6-entry grid).")
+    p.add_argument("--names", nargs="+", default=None,
+                   help="Subset of grid names to build (default: all).")
+    p.add_argument("--intensity-zarr", type=str, default=LINE_INTERP_PATH,
+                   help=f"Intensity grid zarr path (default: {LINE_INTERP_PATH}).")
+    p.add_argument("--flux-zarr", type=str, default=FLUX_INTERP_PATH,
+                   help=f"Flux grid zarr path (default: {FLUX_INTERP_PATH}).")
+    p.add_argument("--harps-aemu", type=str, default=DEFAULT_HARPS_AEMU,
+                   help="HARPS aemu bundle: HF repo id or local bundle dir "
+                        f"(default: {DEFAULT_HARPS_AEMU}).")
+    p.add_argument("--iron-aemu", type=str, default=DEFAULT_IRON_AEMU,
+                   help="Iron-line aemu bundle: HF repo id or local bundle dir "
+                        f"(default: {DEFAULT_IRON_AEMU}).")
+    p.add_argument("--skip-aemu", action="store_true",
+                   help="Skip the HARPS and iron-line aemu bundles "
+                        "(useful when astro_emulators_toolkit isn't installed).")
+    p.add_argument("--skip-zarr", action="store_true",
+                   help="Skip the zarr intensity/flux bundles (only build the aemu ones).")
+    p.add_argument("--bundles", nargs="+", default=None,
+                   choices=list(BUILDABLE_BUNDLES),
+                   help="Explicit subset of bundle variants to build "
+                        f"(default: all of {list(ALL_BUNDLES)}; "
+                        f"opt-in extras: {list(OPTIONAL_BUNDLES)}; "
+                        "overrides --skip-aemu / --skip-zarr).")
+    p.add_argument("--n-mesh", type=int, default=5000,
+                   help="Icosphere mesh resolution.")
+    p.add_argument("--wl-min", type=float, default=WL_MIN,
+                   help=f"Spectrum window lower bound in Å (default: {WL_MIN}).")
+    p.add_argument("--wl-max", type=float, default=WL_MAX,
+                   help=f"Spectrum window upper bound in Å (default: {WL_MAX}).")
+    p.add_argument("--wl-steps", type=int, default=WL_STEPS,
+                   help=f"Number of wavelength samples across the window "
+                        f"(default: {WL_STEPS}).")
+    p.add_argument("--n-phases", type=int, default=N_PHASES,
+                   help=f"Number of pulsation-phase samples (timestamps) per "
+                        f"Cepheid (default: {N_PHASES}). Lower values trade "
+                        f"phase resolution for shorter runtime.")
+    p.add_argument("--phase-chunk", type=str, default="0/1",
+                   help="i/N — synthesise only chunk i (0-indexed) out of N "
+                        "contiguous slices of the full --n-phases timeseries. "
+                        "Use to spread one star's phase scan across N PBS jobs; "
+                        "merge with merge_phase_chunks.py. Default '0/1' = no "
+                        "chunking.")
+    p.add_argument("--wl-chunk", type=int, default=None,
+                   help="wavelengths_chunk_size passed to simulate_observed_flux. "
+                        "Defaults to the library default (1024). On a V100 16GB "
+                        "with the HARPS transformer aemu, 1024 is fine for "
+                        "wl-steps up to ~20000; drop to 512 if you see OOM.")
+    p.add_argument("--force", action="store_true",
+                   help="Re-build even if output pickles already exist.")
+    p.add_argument("--skip-spectra", action="store_true",
+                   help="Skip spectrum synthesis (the slow step). Save bundles only.")
+    p.add_argument("--continue-on-error", action="store_true",
+                   help="If a star fails, log and move on instead of aborting.")
+    return p.parse_args()
+
+
+def _resolve_bundle_set(args) -> tuple[str, ...]:
+    """Combine ``--bundles`` / ``--skip-aemu`` / ``--skip-zarr`` into a final
+    ordered tuple of bundle keys to build.
+
+    Default (no ``--bundles`` given) is :data:`ALL_BUNDLES`; opt-in extras
+    in :data:`OPTIONAL_BUNDLES` are only built when explicitly listed via
+    ``--bundles``.
+    """
+    if args.bundles:
+        wanted = tuple(b for b in BUILDABLE_BUNDLES if b in set(args.bundles))
+    else:
+        wanted = ALL_BUNDLES
+    if args.skip_aemu:
+        wanted = tuple(b for b in wanted if b not in AEMU_BUNDLES)
+    if args.skip_zarr:
+        wanted = tuple(b for b in wanted if b not in ZARR_BUNDLES)
+    return wanted
+
+
+def _parse_phase_chunk(spec: str) -> tuple[int, int]:
+    try:
+        idx_s, n_s = spec.split("/", 1)
+        idx, n = int(idx_s), int(n_s)
+    except ValueError as exc:
+        raise SystemExit(f"--phase-chunk must be 'i/N' (got {spec!r}): {exc}")
+    if n < 1 or idx < 0 or idx >= n:
+        raise SystemExit(f"--phase-chunk i/N: need 0 <= i < N and N >= 1 (got {spec!r})")
+    return idx, n
+
+
+def main() -> int:
+    args = parse_args()
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    phase_chunk_idx, phase_chunk_n = _parse_phase_chunk(args.phase_chunk)
+
+    grid = load_grid_csv(args.config) if args.config else default_grid()
+    if args.names:
+        wanted = set(args.names)
+        grid = [c for c in grid if c.name in wanted]
+        missing = wanted - {c.name for c in grid}
+        if missing:
+            print(f"warning: --names entries not in grid: {sorted(missing)}", file=sys.stderr)
+
+    wanted_bundles = _resolve_bundle_set(args)
+    if not wanted_bundles:
+        print("No bundle variants selected (check --bundles / --skip-aemu / --skip-zarr).",
+              file=sys.stderr)
+        return 1
+
+    # Skip stars that already have every bundle/spectrum key this run would add.
+    pending = []
+    for cfg in grid:
+        if (
+            not args.force
+            and cepheid_outputs_complete(
+                args.out_dir, cfg.name, wanted_bundles, skip_spectra=args.skip_spectra,
+                wl_min=args.wl_min, wl_max=args.wl_max, wl_steps=args.wl_steps,
+            )
+        ):
+            print(f"skip {cfg.name}: all requested outputs present (use --force to rebuild)")
+            continue
+        pending.append(cfg)
+
+    if not pending:
+        print("Nothing to do.")
+        return 0
+
+    print(f"Will build {len(pending)} Cepheid(s) → {args.out_dir.resolve()}")
+    print(f"Bundle variants: {list(wanted_bundles)}")
+    emulators = build_emulators(
+        args.intensity_zarr, args.flux_zarr,
+        harps_aemu=args.harps_aemu, iron_aemu=args.iron_aemu,
+        wanted=wanted_bundles,
+    )
+
+    failures = []
+    grid_t0 = time.perf_counter()
+    for cfg in pending:
+        star_t0 = time.perf_counter()
+        try:
+            build_one(
+                cfg, emulators, args.out_dir,
+                skip_spectra=args.skip_spectra,
+                n_mesh=args.n_mesh,
+                wl_min=args.wl_min,
+                wl_max=args.wl_max,
+                wl_steps=args.wl_steps,
+                n_phases=args.n_phases,
+                phase_chunk_idx=phase_chunk_idx,
+                phase_chunk_n=phase_chunk_n,
+                wl_chunk=args.wl_chunk,
+            )
+        except Exception as exc:
+            failures.append((cfg.name, exc))
+            print(f"  !! {cfg.name} failed: {exc}", file=sys.stderr)
+            if not args.continue_on_error:
+                traceback.print_exc()
+                return 1
+        else:
+            print(f"  {cfg.name}: {time.perf_counter() - star_t0:.0f} s")
+
+    elapsed = time.perf_counter() - grid_t0
+    print(f"\nDone — {len(pending) - len(failures)}/{len(pending)} succeeded "
+          f"in {elapsed/60:.1f} min.")
+    if failures:
+        print("Failures:")
+        for name, exc in failures:
+            print(f"  {name}: {exc}")
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

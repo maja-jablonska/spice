@@ -48,43 +48,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
-# ---- Constants kept in sync with tz_fornacis_spectra.py (inlined to avoid
-# the astropy import in that module, which has broken on some local envs).
-PRIMARY_MASS = 2.057
-PRIMARY_RADIUS = 8.28
-PRIMARY_TEFF = 4930
-PRIMARY_LOGG = 2.91
-SECONDARY_MASS = 1.958
-SECONDARY_RADIUS = 3.94
-SECONDARY_TEFF = 6650
-SECONDARY_LOGG = 3.35
-PERIOD_DAYS = 75.66647
-PERIOD_YR = PERIOD_DAYS / 365.25  # Julian year (matches astropy day→year exactly)
-ECC = 0.0
-INCL_DEG = 85.68
-PER0_DEG = 65.99
-LONG_AN_DEG = 269.0
-DISTANCE_PC = 182.8
-T_P_HJD = 2_452_599.29040
-GAMMA1_KMS = 17.99
-GAMMA2_KMS = 18.35
-GAMMA_KMS = (PRIMARY_MASS * GAMMA1_KMS + SECONDARY_MASS * GAMMA2_KMS) / (
-    PRIMARY_MASS + SECONDARY_MASS
-)
-PRIMARY_FEH = -0.30
-SECONDARY_FEH = -0.30
-PRIMARY_VMIC = 1.5
-SECONDARY_VMIC = 1.5
-PRIMARY_AFE = 0.0
-SECONDARY_AFE = 0.0
-PRIMARY_VROT_KMS = 5.5
-SECONDARY_VROT_KMS = 38.0
-PRIMARY_VMACRO_KMS = 5.0
-SECONDARY_VMACRO_KMS = 6.0
-_FIRST_BJD = float(os.environ.get("TZ_FOR_FIRST_BJD", "2454887.5473123"))
-_MEAN_ANOMALY_T0 = (
-    ((_FIRST_BJD - T_P_HJD) % PERIOD_DAYS) / PERIOD_DAYS * (2.0 * np.pi)
-)
+# ---- TZ For literature constants: single source of truth, shared with
+# tz_fornacis_spectra.py. The module is dependency-light (numpy + stdlib only),
+# so importing it here does not reintroduce the astropy import this test avoids.
+from tzfor_constants import *  # noqa: F401,F403
 
 # ---- Test-specific overrides (fast CPU run)
 WL_MIN = 4980.0
@@ -97,8 +64,6 @@ MODEL = os.environ.get("MODEL", "RozanskiT/TPayne-spice-harps")
 # Force the cheap fallback emulator with USE_GAUSSIAN=1; otherwise we try
 # TPayne first and fall back if astro_emulators_toolkit isn't installed.
 USE_GAUSSIAN_FALLBACK = os.environ.get("USE_GAUSSIAN", "auto")
-
-C_KMS = 299_792.458
 
 
 def _make_emulator():
