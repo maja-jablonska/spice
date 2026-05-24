@@ -1,24 +1,23 @@
-from typing import Any, Dict, List
-import inspect as _inspect
-import time as _time
-import sys as _sys
+from typing import Any, Dict, Optional
 import warnings
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 
 
-def parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> ArrayLike:
-    """Convert passed values to the accepted parameters format
+def parameter_helper(interpolator, parameter_values: Optional[Dict[str, Any]] = None) -> ArrayLike:
+    """Convert passed values to the accepted parameters format.
 
     Args:
-        parameter_values (Dict[str, Any], optional): parameter values in the format of {'parameter_name': value}. Unset parameters will be set to solar values.
-        relative (bool, optional): if True, the values are treated as relative to the solar values for the abundaces 
+        interpolator: the spectrum emulator providing ``solar_parameters``,
+            ``stellar_parameter_names`` and the min/max parameter bounds.
+        parameter_values (Dict[str, Any], optional): parameter values in the format
+            of {'parameter_name': value}. Unset parameters will be set to solar values.
 
     Returns:
-        ArrayLike:
+        ArrayLike: the parameters as an array ordered by ``stellar_parameter_names``.
     """
-    
-    if not parameter_values:
+
+    if parameter_values is None:
         return interpolator.solar_parameters
 
     # Initialize parameters with solar values
@@ -34,6 +33,6 @@ def parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> A
         parameters = jnp.array(parameter_values)
     
     if not (jnp.all(parameters >= interpolator.min_stellar_parameters) and jnp.all(parameters <= interpolator.max_stellar_parameters)):
-        warnings.warn("Possible exceeding parameter bonds - extrapolating.")
+        warnings.warn("Possible exceeding parameter bounds - extrapolating.")
         
     return parameters

@@ -1,11 +1,9 @@
-import warnings
 import jax.numpy as jnp
 from functools import partial
 import jax
 from jax.typing import ArrayLike
-from typing import List, NamedTuple, Optional, Tuple, Dict, Union, Any
+from typing import List, NamedTuple, Optional, Tuple, Dict, Any
 import numpy as np
-from jaxtyping import Float, Array
 from collections import namedtuple
 from jax import tree_util
 
@@ -31,11 +29,10 @@ except Exception:
     Component = None
     DAY_TO_S = 86400.0
 
+from spice.constants import SOLAR_MASS_KG, SOLAR_RAD_CM, SOLAR_RAD_M
+
 YEAR_TO_SECONDS = 3.154e7
 DAY_TO_YEAR = 0.0027378507871321013
-SOLAR_MASS_KG = 1.988409870698051e+30
-SOLAR_RAD_CM = 6.957e10
-SOLAR_RAD_M = 6.957e8
 DEFAULT_N_NEIGHBOURS = 32
 
 def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:

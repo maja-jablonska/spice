@@ -99,7 +99,6 @@ def clip(subject_polygon: ArrayLike, clipping_polygon: ArrayLike) -> ArrayLike:
 
         final_polygon = jnp.nan*jnp.ones((12, 2))
 
-        #c_edge_start = clipping_polygon[((i-1)%(clipping_polygon.shape[0])).astype(int)]
         c_edge_start = jax.lax.cond(i==0,
                                     lambda: last_non_nan(clipping_polygon),
                                     lambda: clipping_polygon[i-1])

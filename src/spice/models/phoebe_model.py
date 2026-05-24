@@ -6,8 +6,7 @@ from typing import List, Optional, Dict
 from collections import namedtuple
 import numpy as np
 
-R_SOL_CM = 69570000000.0
-DAY_TO_S = 86400.0
+from spice.constants import SOLAR_RAD_CM as R_SOL_CM, DAY_TO_S
 
 LOG_G_NAMES: List[str] = ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs',
                           'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']

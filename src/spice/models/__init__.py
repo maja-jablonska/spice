@@ -38,10 +38,15 @@ def __getattr__(name):
             import importlib
             module = importlib.import_module(_phoebe_imports[name], __package__)
             return getattr(module, name)
-        except Exception:
+        except Exception as e:
+            # PHOEBE is an optional dependency and is notoriously fragile to
+            # import (it may even raise non-ImportError errors on a version
+            # mismatch), so we catch broadly — but chain the original error so
+            # the real cause isn't hidden behind a generic message.
             raise AttributeError(
-                f"{name} requires PHOEBE to be installed"
-            )
+                f"{name} requires the optional PHOEBE dependency, which could "
+                f"not be imported ({type(e).__name__}: {e})"
+            ) from e
 
     if name == "PHOEBE_AVAILABLE":
         try:

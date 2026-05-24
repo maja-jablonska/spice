@@ -9,12 +9,13 @@ import math
 from functools import partial
 from spice.spectrum.utils import ERG_S_TO_W
 from spice.spectrum.filter import Filter
+from spice.constants import C_KM_S, SOLAR_RAD_CM
 
 from jaxtyping import Array, Float
 
 DEFAULT_CHUNK_SIZE: int = 1024
-C: float = 299792.458  # km/s
-SOL_RAD_CM = 69570000000.0
+C: float = C_KM_S  # km/s
+SOL_RAD_CM = SOLAR_RAD_CM  # cm
 
 # Apply Doppler shift to wavelengths (in Angstroms)
 # vrad is in km/s, C is speed of light in km/s.
@@ -54,8 +55,7 @@ def __spectrum_flash_sum(intensity_fn,
 
     # (0, 0, 0)
     v_intensity = jax.vmap(intensity_fn, in_axes=(0, 0, 0))
-    
-    #v_intensity = intensity_fn
+
     n = math.ceil(n_areas / chunk_size)
 
     @partial(jax.checkpoint, prevent_cse=False)
@@ -167,9 +167,6 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
     """
 
     pad_len = (-x.shape[0]) % chunk_size
-    # print(f"PADDING: pad_len: {pad_len}")
-
-    # def _pad_array(_: None):
     pad_shape = (pad_len, *x.shape[1:])
     zero_pad = jnp.zeros(pad_shape, dtype=x.dtype)
     repeated_pad = jnp.broadcast_to(x[-1][jnp.newaxis, ...], pad_shape)
@@ -179,13 +176,8 @@ def _adjust_dim(x: ArrayLike, chunk_size: int) -> ArrayLike:
                             operand=None)
     return jnp.concatenate([x, pad_values], axis=0)
 
-    # return lax.cond(pad_len == 0,
-    #                 lambda _: x,
-    #                 _pad_array, 
-    #                 operand=None)
 
-
-# TODO: think: change to simulate_obseved_monochromatic_flux?
+# TODO: think: change to simulate_observed_monochromatic_flux?
 @partial(jax.jit, static_argnums=(0, 4, 5))
 def _simulate_observed_flux_impl(intensity_fn,
                                  m: MeshModel,
@@ -316,7 +308,7 @@ def __flux_flash_sum(flux_fn,
                       p_chunk)
 
         atmosphere_mul = jnp.multiply(
-            a_chunk[:, jnp.newaxis, jnp.newaxis],  # Czemy nie 2D? Broadcastowanie?
+            a_chunk[:, jnp.newaxis, jnp.newaxis],
             v_in)
 
         new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)

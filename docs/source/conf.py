@@ -3,11 +3,18 @@
 # -- Project information
 
 project = 'SPICE'
-copyright = '2024, Maya Jablonska'
-author = 'Maya Jablonska'
+copyright = '2024-2026, Maja Jablonska'
+author = 'Maja Jablonska'
 
-release = '1.0'
-version = '1.0'
+# Pull the version from the installed package metadata so the docs don't drift
+# from pyproject.toml. Fall back to a sensible default if the package can't be
+# imported during the build.
+try:
+    from importlib.metadata import version as _pkg_version
+    release = _pkg_version('stellar-spice')
+except Exception:
+    release = '0.0.0'
+version = release
 
 html_logo = "../img/spice_pink.svg"
 html_favicon = '../img/spice_pink-cropped.png'

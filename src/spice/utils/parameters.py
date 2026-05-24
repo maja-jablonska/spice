@@ -1,6 +1,6 @@
 """Utilities for parameter modification and transformation."""
 
-from typing import Any, Callable, Optional, Union, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike

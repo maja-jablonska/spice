@@ -1,3 +1,22 @@
+"""Dimensionless limb-darkening laws f(mu) for per-mu intensity emulators.
+
+This module returns the *dimensionless* factor f(mu) = I(mu) / I(1) for a chosen
+law; emulators that already produce a per-mu specific intensity multiply by it
+directly. It is deliberately **distinct** from
+:mod:`spice.spectrum.flux_limb_darkening`, which instead converts a
+disc-integrated *flux* into a specific intensity with flux-conservation
+normalisation, I(mu) = F * f(mu) / (2*pi * integral of f(mu')*mu' dmu').
+
+The two modules therefore use different ``LAW_IDS`` mappings on purpose:
+
+- here: ``{linear:0, quadratic:1, square_root:2, logarithmic:3, nonlinear:4}``
+  (5 laws; ``nonlinear`` is the Claret 4-parameter law);
+- ``flux_limb_darkening``: ``{linear:0, quadratic:1, nonlinear_4:2}``.
+
+Always obtain a law id from the matching module's ``get_limb_darkening_law_id``
+rather than hard-coding the integer.
+"""
+
 import jax
 import jax.numpy as jnp
 

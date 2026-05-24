@@ -9,7 +9,7 @@ derivative-based diagnostic fields.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
