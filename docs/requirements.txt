@@ -1,0 +1,9 @@
+# Documentation build requirements, consumed by .readthedocs.yaml.
+sphinx>=7
+furo
+
+# Install the package itself so that autodoc/autosummary can import spice.*
+# and read the docstrings. The core dependencies are pulled in transitively;
+# the optional extras (phoebe, aemu, huggingface) are import-guarded and are
+# not needed to build the API reference.
+.

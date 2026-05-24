@@ -1,4 +1,3 @@
-from abc import abstractmethod
 from typing import List, Dict, Any, Callable, Optional
 from typing_extensions import override
 from jaxtyping import ArrayLike
@@ -148,7 +147,7 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
         parameters = np.array(parameter_values)
 
     if not (np.all(parameters >= interpolator.min_stellar_parameters) and np.all(parameters <= interpolator.max_stellar_parameters)):
-        warnings.warn("Possible exceeding parameter bonds - extrapolating.")
+        warnings.warn("Possible exceeding parameter bounds - extrapolating.")
 
     return parameters
 
@@ -234,7 +233,6 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
         idx = self._mu_index()
         return bounds if idx is None else np.delete(bounds, idx)
 
-    @abstractmethod
     def to_parameters(self, parameters: ArrayLike = None) -> ArrayLike:
         # Convert a (possibly partial) parameter dict into an ordered array of
         # raw stellar values matching ``stellar_parameter_names``. Scaling to
@@ -243,18 +241,16 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
         # always carry the natural-units representation.
         return _np_parameter_helper(self, parameters)
 
-    @abstractmethod
     def flux(self, log_wavelengths: ArrayLike, parameters: ArrayLike) -> ArrayLike:
         raise NotImplementedError
 
-    @abstractmethod
     def intensity(self, log_wavelengths: ArrayLike, mu: float, parameters: ArrayLike) -> ArrayLike:
         """Calculate the intensity for given wavelengths and mus
 
         Args:
             log_wavelengths (ArrayLike): [log(angstrom)]
             mu (float): cosine of the angle between the star's radius and the line of sight
-            spectral_parameters (ArrayLike): an array of predefined stellar parameters
+            parameters (ArrayLike): an array of predefined stellar parameters
 
         Returns:
             ArrayLike: intensities corresponding to passed wavelengths [erg/cm2/s/angstrom]

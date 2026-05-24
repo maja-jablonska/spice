@@ -15,11 +15,13 @@ from spice.spectrum.line_profile import line_profile, get_line_profile_id
 # c     : speed of light             [cm s^-1]
 # k_B   : Boltzmann constant         [erg K^-1]
 # m_p   : proton mass                [g]
-H_CGS  = 6.62607015e-27     # erg s
-C_CGS  = 2.99792458e10      # cm s^-1
-KB_CGS = 1.380649e-16       # erg K^-1
-M_P    = 1.6726219e-24      # g
-C_KMS  = 2.99792458e5       # km s^-1
+from spice.constants import (
+    H_ERG_S as H_CGS,
+    C_CM_S as C_CGS,
+    K_B_ERG_K as KB_CGS,
+    M_P_G as M_P,
+    C_KM_S as C_KMS,
+)
 
 
 # -------------------------------------------------------

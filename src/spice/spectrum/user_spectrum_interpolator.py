@@ -9,6 +9,7 @@ from numpy.typing import ArrayLike
 
 from spice.spectrum.spectrum_emulator import SpectrumEmulator
 from spice.spectrum.utils import linear_multivariate_interpolation
+from spice.utils import log as _log
 from overrides import override
 
 # Parameter naming conventions to support flexible input formats
@@ -143,7 +144,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
         self._has_mu = has_mu
         
         if not has_mu:
-            print("No mu values provided, using limb darkening law: ", limb_darkening_law)
+            _log.info(f"No mu values provided, using limb darkening law: {limb_darkening_law}")
             # Set limb darkening law
             if limb_darkening_law.lower() == "linear":
                 self._limb_darkening_func = linear_limb_darkening
@@ -246,7 +247,8 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
         Returns:
             Standardized parameter array
         """
-        parameters = parameters or {}
+        if parameters is None:
+            parameters = {}
         if isinstance(parameters, (list, tuple)):
             parameters = jnp.array(parameters)
             

@@ -7,9 +7,7 @@ from spice.geometry import clip
 from functools import partial
 import jaxkd as jk
 from jaxtyping import Array, Float
-
-def _float_dtype():
-    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+from spice.utils.dtypes import float_dtype as _float_dtype
 
 @jax.jit
 def point_in_triangle(pt, tri_verts):  # tri_verts: (3,2)

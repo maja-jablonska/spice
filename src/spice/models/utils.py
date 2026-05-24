@@ -16,9 +16,8 @@ from typing import List, Any, Tuple, TYPE_CHECKING
 if TYPE_CHECKING:
     from jaxtyping import Array, Float
 
-
-def _float_dtype():
-    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+from spice.utils.dtypes import float_dtype as _float_dtype
+from spice.constants import SOLAR_MASS_KG, SOLAR_RAD_M, SOLAR_RAD_KM, G_SI, DAY_TO_S
 
 
 class ModelList:
@@ -128,10 +127,10 @@ def horizontal_to_radial_ratio(mass: float, radius: float, pulsation_period: flo
         float: The ratio K = xi_h / xi_r, suitable for use as `horizontal_ratio`
             in `add_pulsation()`.
     """
-    G = 6.674e-11       # m^3 kg^-1 s^-2
-    M = mass * 1.989e30  # kg
-    R = radius * 6.957e8 # m
-    omega = 2 * jnp.pi / (pulsation_period * 86400.0)  # rad/s
+    G = G_SI            # m^3 kg^-1 s^-2
+    M = mass * SOLAR_MASS_KG  # kg
+    R = radius * SOLAR_RAD_M # m
+    omega = 2 * jnp.pi / (pulsation_period * DAY_TO_S)  # rad/s
     return G * M / (omega**2 * R**3)
 
 
@@ -146,7 +145,7 @@ def velocity_to_period(velocity: float, radius: float) -> float:
     Returns:
         float: Rotation period in seconds.
     """
-    radius_km = radius * 6.957e5  # Convert solar radii to km
+    radius_km = radius * SOLAR_RAD_KM  # Convert solar radii to km
     circumference = 2 * jnp.pi * radius_km  # Circumference in km
     period_seconds = circumference / velocity  # Period in seconds
     return period_seconds
@@ -163,7 +162,7 @@ def period_to_velocity(period: float, radius: float) -> float:
     Returns:
         float: Rotational velocity in km/s.
     """
-    radius_km = radius * 6.957e5  # Convert solar radii to km
+    radius_km = radius * SOLAR_RAD_KM  # Convert solar radii to km
     circumference = 2 * jnp.pi * radius_km  # Circumference in km
     velocity = circumference / period  # Velocity in km/s
     return velocity

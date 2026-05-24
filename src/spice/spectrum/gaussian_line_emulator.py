@@ -5,17 +5,15 @@ A simple spectrum emulator with Gaussian absorption lines that can be used
 as an alternative to TransformerPayne for testing and demonstration purposes.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from functools import partial
 import numpy as np
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-# Physical constants
-h = 6.62607015e-27  # Planck's constant [erg*s]
-c = 2.99792458e10   # Speed of light [cm/s]
-k = 1.380649e-16    # Boltzmann constant [erg/K]
+# Physical constants (cgs), shared across SPICE.
+from spice.constants import H_ERG_S as h, C_CM_S as c, K_B_ERG_K as k
 
 
 def _blackbody(wavelength_cm: ArrayLike, T: float) -> ArrayLike:
@@ -138,16 +136,16 @@ class GaussianLineEmulator:
         """Solar parameters for the spectrum model"""
         return jnp.array([5777.0])  # Solar temperature
     
-    def to_parameters(self, parameter_values: Dict[str, Any] = None) -> ArrayLike:
+    def to_parameters(self, parameter_values: Optional[Dict[str, Any]] = None) -> ArrayLike:
         """Convert passed values to the accepted parameters format
-        
+
         Args:
             parameter_values: Dictionary with parameter values {'Teff': value}
-            
+
         Returns:
             Array of parameters [Teff]
         """
-        if not parameter_values:
+        if parameter_values is None:
             return self.solar_parameters
         
         Teff = parameter_values.get('Teff', self.solar_parameters[0])

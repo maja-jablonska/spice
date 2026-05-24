@@ -24,8 +24,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _float_dtype():
-    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
+from spice.utils.dtypes import float_dtype as _float_dtype
 
 
 def _default_los_vector():
@@ -82,6 +81,25 @@ MeshModelNamedTuple = namedtuple("MeshModel",
 
 
 class MeshModel(Model, MeshModelNamedTuple):
+    """A triangulated stellar surface registered as a JAX pytree.
+
+    ``MeshModel`` is a :class:`~collections.namedtuple` holding the mesh
+    geometry (vertices, faces, face centroids), per-element physical parameters,
+    and the rotation/pulsation/orbit state. Because it is an immutable pytree,
+    state is updated functionally via ``_replace`` and the helpers in
+    :mod:`spice.models.mesh_transform` — never mutate it in place.
+
+    The stored fields are *reference-frame* quantities (prefixed ``d_`` for
+    "delta", i.e. relative to :attr:`center`); the absolute, observer-facing
+    quantities are exposed through the computed properties below. Positions are
+    expressed in solar radii and velocities in km/s.
+
+    Note the two area arrays follow **different** unit conventions:
+    :attr:`areas` / :attr:`base_areas` are unit-sphere normalised (sum ~4*pi for
+    any radius), while :attr:`cast_areas` / :attr:`visible_cast_areas` are
+    physical R_sun^2. See the "Mesh area conventions" section of the README.
+    """
+
     # Stellar properties
     center: Float[Array, "3"]
 
@@ -149,10 +167,15 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def areas(self) -> Float[Array, "n_mesh_elements"]:
+        """Surface-element areas (unit-sphere normalised, summing to ~4*pi for any
+        radius), including pulsation offsets. Note these follow a different unit
+        convention than :attr:`cast_areas` — see the "Mesh area conventions"
+        section of the README."""
         return self.base_areas + self.area_pulsation_offsets
 
     @property
     def log_gs(self) -> Float[Array, "n_mesh_elements"]:
+        """log10 surface gravity per element in cgs, including rotational reduction."""
         return calculate_log_gs(
             self.mass,
             self.centers - self.center,
@@ -161,6 +184,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def vertices(self) -> Float[Array, "n_vertices 3"]:
+        """Absolute vertex positions (reference vertices + center + pulsation offsets) [R_sun]."""
         if len(self.d_vertices.shape) == 2:
             return self.d_vertices + self.center + self.vertices_pulsation_offsets
         else:
@@ -169,10 +193,12 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def mesh_elements(self) -> Float[Array, "n_faces 3 3"]:
+        """Per-face vertex coordinates, shape ``(n_faces, 3 vertices, 3 coords)`` [R_sun]."""
         return self.vertices[self.faces.astype(int)]
 
     @property
     def centers(self) -> Float[Array, "n_mesh_elements 3"]:
+        """Absolute face-centroid positions (reference centers + center + pulsation offsets) [R_sun]."""
         if len(self.d_centers.shape) == 2:
             return self.d_centers + self.center + self.center_pulsation_offsets
         else:
@@ -182,45 +208,55 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def velocities(self) -> Float[Array, "n_mesh_elements 3"]:
+        """Total per-element velocity: rotation + orbital + pulsation [km/s]."""
         return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
 
     @property
     def mus(self) -> Float[Array, "n_mesh_elements"]:
+        """Cosine of the angle between each element's outward normal and the line of sight."""
         return cast_normalized_to_los(self.d_centers, self.los_vector)
 
     @property
     def los_velocities(self) -> Float[Array, "n_mesh_elements"]:
+        """Line-of-sight velocity per element [km/s]; approaching (blueshifted) is negative."""
         # Sign convention: approaching (blueshifted) LOS velocity is negative.
         return -cast_to_los(self.velocities, self.los_vector)
 
     @property
     def los_z(self) -> Float[Array, "n_mesh_elements"]:
+        """Line-of-sight projected depth of each centroid [R_sun]; larger is farther along the LOS."""
         return cast_to_los(self.centers, self.los_vector)
 
     @property
     def radii(self) -> Float[Array, "n_mesh_elements"]:
+        """Distance of each centroid from the model center, including pulsation [R_sun]."""
         return jnp.linalg.norm(self.d_centers+self.center_pulsation_offsets, axis=1)
 
     @property
     def cast_vertices(self) -> Float[Array, "n_vertices 2"]:
+        """Vertices projected onto the 2D plane normal to the line of sight [R_sun]."""
         return cast_to_normal_plane(self.vertices, self.los_vector)
 
     @property
     def cast_centers(self) -> Float[Array, "n_mesh_elements 2"]:
+        """Face centroids projected onto the 2D plane normal to the line of sight [R_sun]."""
         return cast_to_normal_plane(self.centers, self.los_vector)
-    
+
     @property
     def cast_vertex_bounding_circle_radii(self) -> Float[Array, "n_mesh_elements"]:
+        """Radius of the smallest circle around each projected element, used for occlusion search [R_sun]."""
         mesh_centers = self.cast_centers
         mesh_vertices = self.cast_vertices[self.faces.astype(int)]
         return jnp.max(jnp.linalg.norm(mesh_vertices - mesh_centers[:, None, :], axis=2), axis=1)
 
     @property
     def cast_areas(self) -> Float[Array, "n_mesh_elements"]:
+        """Projected (sky-plane) area of each element, same units as :attr:`areas` [R_sun^2]."""
         return get_cast_areas(self.cast_vertices[self.faces.astype(int)])
-    
+
     @property
     def visible_cast_areas(self) -> Float[Array, "n_mesh_elements"]:
+        """Cast area minus occluded area for front-facing elements (mu > 0), else 0 [R_sun^2]."""
         return jnp.where(self.mus > 0, self.cast_areas - jnp.nan_to_num(self.occluded_areas, 0.), 0.)
 
 

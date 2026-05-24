@@ -8,8 +8,8 @@ _t0 = _time.perf_counter()
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from mpl_toolkits.mplot3d import art3d
+from spice.utils import log as _log
 if not _mpl_already_loaded:
-    from spice.utils import log as _log
     _log.info(f"matplotlib loaded in {_time.perf_counter() - _t0:.1f} s")
 
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
@@ -27,8 +27,8 @@ DEFAULT_PROPERTY = 'mus'
 DEFAULT_PLOT_PROPERTY_LABELS = {
     'mus': r'$\mu$',
     'los_velocities': 'LOS velocity [km/s]',
-    'cast_areas': 'cast area [cm$^2$]',
-    'visible_cast_areas': 'visible cast area [cm$^2$]',
+    'cast_areas': r'cast area [$R_\odot^2$]',
+    'visible_cast_areas': r'visible cast area [$R_\odot^2$]',
     'log_gs': 'log g'
 }
 
@@ -143,7 +143,7 @@ def smart_save(anim, filename, fps=20):
             anim.save(filename, writer=writer)
             return
         except Exception as e:
-            print(f'PillowWriter failed: {e}, falling back to ffmpeg…')
+            _log.info(f'PillowWriter failed: {e}, falling back to ffmpeg…')
 
         # 2nd choice – ffmpeg with RGB fallback
         extra = ['-vf',
@@ -757,7 +757,7 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
-    spec_ax.set_xlabel('Wavelength [$\AA$]', fontsize=10)
+    spec_ax.set_xlabel('Wavelength [$\\AA$]', fontsize=10)
     spec_ax.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
     
     # Set up color normalization for the mesh
@@ -1019,11 +1019,11 @@ def animate_single_star(meshes: List[MeshModel],
             if current_time - most_recent_time < 10:
                 warnings.warn(f"Animation save warning: {str(e)}")
             else:
-                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                _log.info(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
                 # File exists but is older, re-raise the error
                 raise
         else:
-            print(f'File {filename} does not exist, re-raising error')
+            _log.info(f'File {filename} does not exist, re-raising error')
             # File doesn't exist, re-raise the error
             raise
     
@@ -1131,7 +1131,7 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
-    spec_ax.set_xlabel('Wavelength [$\AA$]', fontsize=10)
+    spec_ax.set_xlabel('Wavelength [$\\AA$]', fontsize=10)
     spec_ax.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
     
     # Set up color normalization for the mesh
@@ -1226,11 +1226,11 @@ def animate_mesh_and_spectra(meshes, spectra, wavelengths,
             if current_time - most_recent_time < 10:
                 warnings.warn(f"Animation save warning: {str(e)}")
             else:
-                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                _log.info(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
                 # File exists but is older, re-raise the error
                 raise
         else:
-            print(f'File {filename} does not exist, re-raising error')
+            _log.info(f'File {filename} does not exist, re-raising error')
             # File doesn't exist, re-raise the error
             raise
     
@@ -1585,7 +1585,7 @@ def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelen
     
     # Spectrum subplot
     spec_ax = fig.add_subplot(gs[1:3, 3])
-    spec_ax.set_xlabel('Wavelength [$\AA$]', fontsize=10)
+    spec_ax.set_xlabel('Wavelength [$\\AA$]', fontsize=10)
     spec_ax.set_ylabel('Flux [erg/s/cm$^3$]', fontsize=10)
     
     # Set up colormap
@@ -1709,11 +1709,11 @@ def animate_binary_and_spectrum(binary1_meshes, binary2_meshes, spectra, wavelen
             if current_time - most_recent_time < 10:
                 warnings.warn(f"Animation save warning: {str(e)}")
             else:
-                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                _log.info(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
                 # File exists but is older, re-raise the error
                 raise
         else:
-            print(f'File {filename} does not exist, re-raising error')
+            _log.info(f'File {filename} does not exist, re-raising error')
             # File doesn't exist, re-raise the error
             raise
     
@@ -1989,11 +1989,11 @@ def animate_binary_and_separate_spectra(binary1_meshes, binary2_meshes, spectra1
             if current_time - most_recent_time < 10:
                 warnings.warn(f"Animation save warning: {str(e)}")
             else:
-                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                _log.info(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
                 # File exists but is older, re-raise the error
                 raise
         else:
-            print(f'File {filename} does not exist, re-raising error')
+            _log.info(f'File {filename} does not exist, re-raising error')
             # File doesn't exist, re-raise the error
             raise
     
@@ -2272,11 +2272,11 @@ def animate_binary_and_lightcurve(binary1_meshes, binary2_meshes,
             if current_time - most_recent_time < 10:
                 warnings.warn(f"Animation save warning: {str(e)}")
             else:
-                print(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
+                _log.info(f'File {filename} is older than 10 seconds (meaning it exists but is not from this run), re-raising error')
                 # File exists but is older, re-raise the error
                 raise
         else:
-            print(f'File {filename} does not exist, re-raising error')
+            _log.info(f'File {filename} does not exist, re-raising error')
             # File doesn't exist, re-raise the error
             raise
     

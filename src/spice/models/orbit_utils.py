@@ -2,17 +2,16 @@ import jax
 import jax.numpy as jnp
 from jax import jit, lax
 
-
-SOLAR_MASS_KG = 1.988409870698051e+30
-SOLAR_RAD_M = 6.957e8
+from spice.constants import SOLAR_MASS_KG, SOLAR_RAD_M, G_SI
 
 
-class c:# Solar mas
-    Msun = 1.989e30 # kg
+class Constants:
+    """Astronomical constants namespace used by the orbit utilities."""
+    Msun = SOLAR_MASS_KG  # kg
     # Astronomical unit
     AU = 1.496e11 # m
     # Gravitational constant
-    G = 6.674e-11 # m^3 kg^-1 s^-2
+    G = G_SI # m^3 kg^-1 s^-2
     # Year in seconds
     yr = 365.25*24*3600 # s
     # Day
@@ -22,11 +21,15 @@ class c:# Solar mas
     # Parsec
     pc = 3.086e16 # m
     # Solar radius
-    Rsun = 6.957e8 # m
+    Rsun = SOLAR_RAD_M # m
     # light year
     ly = 9.461e15 # m
     # mas
     mas = 4.848e-9 # rad
+
+
+# Backwards-compatible alias for the former lowercase class name.
+c = Constants
 
 # Function to calculate the orbital period of a binary system
 

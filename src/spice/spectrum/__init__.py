@@ -30,6 +30,15 @@ def __getattr__(name):
         "LazyZarrInterpolator": ".lazy_zarr_interpolator",
         "IntensityLazyZarrInterpolator": ".lazy_zarr_interpolator",
         "FluxLazyZarrInterpolator": ".lazy_zarr_interpolator",
+        # user_spectrum_interpolator.py
+        "UserSpectrumInterpolator": ".user_spectrum_interpolator",
+        # aemu_spectrum_emulator.py (requires the optional ``aemu`` extra)
+        "AemuSpectrumEmulator": ".aemu_spectrum_emulator",
+        "PretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
+        "FluxPretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
+        "IntensityPretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
+        # filter.py
+        "Filter": ".filter",
     }
 
     if name in _lazy_imports:

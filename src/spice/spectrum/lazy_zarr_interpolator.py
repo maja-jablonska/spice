@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict
 import inspect as _inspect
 import os
 import time as _time
@@ -14,8 +14,8 @@ import jax
 from jax.typing import ArrayLike
 import jax.numpy as jnp
 from jax import lax
+from spice.utils import log as _log
 if not _jax_already_loaded:
-    from spice.utils import log as _log
     _log.info(f"JAX loaded in {_time.perf_counter() - _t0:.1f} s")
 
 # `vmap_method` was added to jax.pure_callback in JAX 0.4.32 (replacing the
@@ -41,12 +41,7 @@ def _default_device():
     return jax.devices()[0]
 
 
-def _float_dtype():
-    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
-
-
-def _np_float_dtype():
-    return np.float64 if jax.config.jax_enable_x64 else np.float32
+from spice.utils.dtypes import float_dtype as _float_dtype, np_float_dtype as _np_float_dtype
 
 @jax.jit
 def _axis_linear_base(values, value, atol=1e-6, rtol=1e-6):
@@ -230,7 +225,7 @@ class SparseGridIndex:
     @classmethod
     def from_dataframe(cls, df, columns, device=None):
         device = device or _default_device()
-        print('Building sparse grid index...', flush=True)
+        _log.info('Building sparse grid index...')
 
         axes = [np.unique(df[c].to_numpy()) for c in columns]
 
@@ -262,7 +257,7 @@ class SparseGridIndex:
         keys = keys[order]
         row_idx = row_idx[order]
 
-        print('Sparse grid index ready.', flush=True)
+        _log.info('Sparse grid index ready.')
         return cls(keys, row_idx, axes, columns, strides, device=device)
 
     @partial(jax.jit, static_argnums=(0,))
@@ -375,7 +370,7 @@ class GridIndex:
         columns: list of column names defining the grid axes
         """
         device = device or _default_device()
-        print('Building grid index...', flush=True)
+        _log.info('Building grid index...')
 
         axes = [np.unique(df[c].to_numpy()) for c in columns]
         shape = tuple(len(ax) for ax in axes)
@@ -391,7 +386,7 @@ class GridIndex:
 
         grid[tuple(indices)] = row_idx
 
-        print('Grid index ready.', flush=True)
+        _log.info('Grid index ready.')
         return cls(grid, axes, columns, device=device)
 
     def _grid_row(self, i, j, k, m):
@@ -782,7 +777,7 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
             parameters = {k: v for k, v in parameters.items() if k != 'mu'}
         return parameter_helper(self, parameters)
     
-    @override
+    @property
     def parameter_names(self):
         return self._stellar_parameter_names + ['mu']
 

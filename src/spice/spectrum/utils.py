@@ -8,15 +8,13 @@ except ImportError:
     raise ImportError("Please install JAX to use SPICE.")
 
 
+from spice.constants import C_CM_S as C_CENTIMETERS, H_ERG_S as H_CONST_ERG_S
+from spice.utils.dtypes import float_dtype as _dtype
+
 ERG_S_TO_W = 1e-7
 SPHERE_STERADIAN = 12.56
 ZERO_POINT_LUM_W = 3.0128*10**(28)
-C_CENTIMETERS = 29979245800.
 JY_TO_ERG = 1e-23
-H_CONST_ERG_S = 6.62607015*10**(-27)
-
-def _dtype():
-    return jnp.float64 if jax.config.jax_enable_x64 else jnp.float32
 
 
 def _sqrt_2pi():
@@ -141,9 +139,8 @@ def scale_all_abundances_by_metallicity(tpayne, metallicity):
     
     Args:
         tpayne: TransformerPayne instance
-        parameters: Current parameters array
         metallicity: [Fe/H] value to scale abundances by
-        
+
     Returns:
         Updated parameters array with all abundances scaled
     """
@@ -213,13 +210,13 @@ def linear_multivariate_interpolation(points: jnp.ndarray,
                                       values: jnp.ndarray,
                                       query_points: jnp.ndarray) -> jnp.ndarray:
     """
-    Multivariate interpolation using JAX.
-    
+    Multivariate interpolation using inverse-distance weighting (JAX).
+
     Args:
         points: Array of points (N x D)
         values: Array of values at points (N,)
         query_points: Points to interpolate at (M x D)
-        
+
     Returns:
         Interpolated values at query points (M,)
     """
@@ -237,15 +234,18 @@ def nearest_multivariate_interpolation(points: jnp.ndarray,
                                        values: jnp.ndarray,
                                        query_points: jnp.ndarray) -> jnp.ndarray:
     """
-    Multivariate interpolation using JAX.
-    
+    Nearest-neighbour multivariate interpolation using JAX.
+
+    For each query point the value of the closest point (by squared Euclidean
+    distance) is returned.
+
     Args:
         points: Array of points (N x D)
         values: Array of values at points (N,)
         query_points: Points to interpolate at (M x D)
-        
+
     Returns:
-        Interpolated values at query points (M,)
+        Value of the nearest point for each query point (M,)
     """
     # Compute pairwise distances
     distances = jnp.sum((points[:, None, :] - query_points[None, :, :]) ** 2, axis=-1)

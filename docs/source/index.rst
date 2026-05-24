@@ -1,7 +1,7 @@
-SPICE: SPectra Integration Compiled Engine
+SPICE: SPectral Integration Compiled Engine
 ===================================
 
-SPICE (SPectra Integration Compiled Engine) is a Python library designed for simulating synthetic **spectra of inhomogeneous stellar surfaces**. SPICE offers the following capabilities:
+SPICE (SPectral Integration Compiled Engine) is a Python library designed for simulating synthetic **spectra of inhomogeneous stellar surfaces**. SPICE offers the following capabilities:
 
 The core principle of SPICE is numerical integration over a stellar surface. Here's how it works:
 

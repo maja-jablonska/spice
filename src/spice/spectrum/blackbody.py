@@ -7,10 +7,8 @@ from spice.spectrum.limb_darkening import limb_darkening, get_limb_darkening_law
 from spice.spectrum.solar_parameters import TEFF
 
 
-# Define constants
-h = 6.62607015e-27  # Planck's constant [erg*s]
-c = 2.99792458e10   # Speed of light [cm/s]
-k = 1.380649e-16    # Boltzmann constant [erg/K]
+# Physical constants (cgs), shared across SPICE.
+from spice.constants import H_ERG_S as h, C_CM_S as c, K_B_ERG_K as k
 
 
 def blackbody_intensity(
@@ -87,7 +85,7 @@ class Blackbody:
         """Convert a ``{name: value}`` dict to the ``[Teff]`` parameter vector.
 
         Accepts either ``"Teff"`` or ``"teff"`` (the key used by ``SOLAR_PARAMETERS``)."""
-        if not parameter_values:
+        if parameter_values is None:
             return self.solar_parameters
         Teff = parameter_values.get("Teff", parameter_values.get("teff", float(self.solar_parameters[0])))
         return jnp.array([Teff])
