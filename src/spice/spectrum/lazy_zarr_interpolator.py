@@ -533,6 +533,14 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
                     f"(use --exclude-mu if the grid has no mu axis)."
                 )
             df = pd.read_parquet(index_path)
+            # Optional per-node geometry provenance (spherical / plane_parallel),
+            # row_idx-ordered, or None for grids whose index predates it. It is
+            # never an interpolation axis -- expose it so callers can tell when a
+            # query straddles the plane-parallel/spherical boundary.
+            self.geometry = (
+                df.sort_values("row_idx")["geometry"].to_numpy()
+                if "geometry" in df.columns else None
+            )
             if sparse:
                 self.grid_index = SparseGridIndex.from_dataframe(df, columns=params, device=device)
             else:
