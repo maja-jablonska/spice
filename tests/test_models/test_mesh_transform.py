@@ -304,3 +304,61 @@ class TestMeshTransformations:
                                 mesh_model.d_centers])
         chex.assert_equal_shape([evaluated.pulsation_velocities,
                                 mesh_model.d_centers])
+
+    def test_fourier_prim_matches_numerical_derivative(self):
+        """The analytic Fourier derivative must equal d/dt of the series.
+
+        Regression for the missing leading minus in
+        ``evaluate_fourier_prim_for_value`` (the derivative of
+        ``d*cos(wt - phi)`` is ``-d*w*sin(wt - phi)``), which inverted every
+        pulsation velocity — and therefore every pulsation Doppler shift —
+        relative to the actual surface motion.
+        """
+        from src.spice.models.utils import (evaluate_fourier_for_value,
+                                            evaluate_fourier_prim_for_value)
+
+        P = 2.7
+        d = jnp.array([0.4, 0.1, 0.05])
+        phi = jnp.array([0.0, 0.7, -1.3])
+        dt = 1e-7
+        for t in [0.13, 0.5, 1.1, 2.2]:
+            numerical = (evaluate_fourier_for_value(P, d, phi, t + dt) -
+                         evaluate_fourier_for_value(P, d, phi, t - dt)) / (2 * dt)
+            analytic = evaluate_fourier_prim_for_value(P, d, phi, t)
+            assert jnp.isclose(analytic, numerical, rtol=1e-5, atol=1e-6), \
+                f"t={t}: analytic {float(analytic):+.6f} vs numerical {float(numerical):+.6f}"
+
+    def test_radial_pulsation_velocity_sign_matches_surface_motion(self):
+        """An expanding radial pulsator's near-side surface must be approaching.
+
+        Ground truth is geometric: dR/dt measured by finite differences of the
+        deformed mesh. The sub-observer face of an expanding star moves toward
+        the observer, so its ``los_velocities`` entry must be ``~ -dR/dt``
+        (negative = approaching). Also checks the analytic and numerical
+        pulsation-velocity paths agree.
+        """
+        mesh = default_icosphere()
+        period = 1.0  # evaluate_pulsations works in days
+        # Purely radial l=0, m=0 mode: rows are [radial, spheroidal, toroidal]
+        fourier = jnp.zeros((3, 1, 2)).at[0, 0, :].set(jnp.array([0.1, 0.0]))
+        puls = add_pulsation(mesh, 0, 0, period, fourier)
+
+        solrad_per_day_to_km_s = 8.052083333333332
+        dt = 1e-4
+        for phase in [0.15, 0.65]:  # contracting and expanding
+            t = phase * period
+            evaluated = evaluate_pulsations(puls, t)
+            r_plus = jnp.mean(evaluate_pulsations(puls, t + dt).radii)
+            r_minus = jnp.mean(evaluate_pulsations(puls, t - dt).radii)
+            drdt = (r_plus - r_minus) / (2 * dt) * solrad_per_day_to_km_s
+
+            sub_observer = jnp.argmax(evaluated.mus)
+            v_sub = evaluated.los_velocities[sub_observer]
+            assert jnp.isclose(v_sub, -drdt, rtol=1e-2), \
+                f"phase {phase}: sub-observer LOS velocity {float(v_sub):+.3f} km/s, " \
+                f"expected -dR/dt = {float(-drdt):+.3f} km/s"
+
+            numerical = evaluate_pulsations(puls, t, use_numerical_derivative=True, dt=1e-6)
+            assert jnp.allclose(evaluated.pulsation_velocities,
+                                numerical.pulsation_velocities, rtol=1e-3, atol=1e-6), \
+                "analytic and numerical pulsation velocities disagree"

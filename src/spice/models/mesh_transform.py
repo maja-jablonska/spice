@@ -383,7 +383,9 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
         m (MeshModel): The mesh model to add pulsation effects to.
         m_order (Float): The order (m) of the spherical harmonics.
         l_degree (Float): The degree (l) of the spherical harmonics.
-        period (Float): Pulsation period in seconds.
+        period (Float): Pulsation period in days (the same unit as the ``t``
+            passed to ``evaluate_pulsations``; the pulsation-velocity
+            conversion to km/s assumes solRad/day).
         fourier_series_parameters (Float[Array, "3 n_terms 2"]): Fourier series parameters
             for each VSH component. Shape (3, N, 2) where the first axis indexes
             [radial, spheroidal, toroidal] and each (N, 2) block contains
@@ -479,7 +481,9 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
         m (MeshModel): The mesh model to add pulsation effects to.
         m_orders (Float[Array, "n_pulsations"]): Array of orders (m) of the spherical harmonics.
         l_degrees (Float[Array, "n_pulsations"]): Array of degrees (l) of the spherical harmonics.
-        periods (Float[Array, "n_pulsations"]): Array of pulsation periods in seconds.
+        periods (Float[Array, "n_pulsations"]): Array of pulsation periods in days
+            (the same unit as the ``t`` passed to ``evaluate_pulsations``; the
+            pulsation-velocity conversion to km/s assumes solRad/day).
         fourier_series_parameters (Float[Array, "n_pulsations 3 n_terms 2"]): Fourier parameters
             for each pulsation and VSH component. Shape (K, 3, N, 2) where K is the number of
             pulsations, 3 indexes [radial, spheroidal, toroidal], N is the number of Fourier

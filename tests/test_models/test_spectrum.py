@@ -209,6 +209,53 @@ class TestSpectrumFunctions:
                                                        wavelengths_chunk_size=int(test_log_wavelengths.shape[0]))
             chex.assert_shape(mono_lum, (50, 2))
 
+    def test_doppler_shift_direction_matches_los_velocity_convention(self):
+        """An approaching surface must imprint a BLUEshifted line, a receding one a REDshifted line.
+
+        ``MeshModel.los_velocities`` uses negative = approaching (moving toward
+        the observer, i.e. along ``-los_vector``). Regression for the inverted
+        Doppler sampling in ``apply_vrad``/``apply_vrad_log``: the rest-frame
+        intensity was sampled at ``λ·(1 + v/c)`` instead of ``λ/(1 + v/c)``,
+        which placed approaching material on the RED wing (spot signatures
+        migrated red-to-blue instead of blue-to-red across a rotation).
+        """
+        line_center = 5500.0
+        v_mag = 50.0  # km/s
+        c_km_s = 299792.458
+        expected_shift = line_center * v_mag / c_km_s  # ~0.917 A
+
+        wavelengths = jnp.linspace(line_center - 4.0, line_center + 4.0, 2001)
+        log_wavelengths = jnp.log10(wavelengths)
+
+        def gaussian_line_intensity(log_wl, mu, params):
+            wl = jnp.power(10.0, log_wl)
+            line = 1.0 - 0.5 * jnp.exp(-0.5 * ((wl - line_center) / 0.5) ** 2)
+            return jnp.stack([line, jnp.ones_like(line)], axis=-1)
+
+        mesh = default_icosphere()
+        # -los_vector points from the star toward the observer, so this bulk
+        # velocity is approaching; +los_vector is receding.
+        approaching = mesh._replace(orbital_velocity=-v_mag * mesh.los_vector)
+        receding = mesh._replace(orbital_velocity=v_mag * mesh.los_vector)
+
+        # Pin the map-side convention first: approaching = negative.
+        assert jnp.allclose(approaching.los_velocities, -v_mag)
+        assert jnp.allclose(receding.los_velocities, v_mag)
+
+        for model, sign, label in [(approaching, -1.0, "approaching"),
+                                   (receding, +1.0, "receding")]:
+            flux = simulate_observed_flux(gaussian_line_intensity, model, log_wavelengths)
+            observed_center = wavelengths[jnp.argmin(flux[:, 0])]
+            shift = float(observed_center - line_center)
+            assert shift * sign > 0, (
+                f"{label} star shifted the line by {shift:+.3f} A; "
+                f"expected sign {'+' if sign > 0 else '-'}"
+            )
+            assert abs(shift - sign * expected_shift) < 0.02, (
+                f"{label} star: line shift {shift:+.3f} A, "
+                f"expected {sign * expected_shift:+.3f} A"
+            )
+
     def test_simulate_observed_flux_scales_as_r_squared_over_d_squared(self):
         """Observed flux must scale as (R / d)^2.
 
