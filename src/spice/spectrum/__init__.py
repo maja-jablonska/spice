@@ -37,8 +37,6 @@ def __getattr__(name):
         "PretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
         "FluxPretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
         "IntensityPretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
-        # grid_node_interpolation.py
-        "GridNodeInterpolatedEmulator": ".grid_node_interpolation",
         # filter.py
         "Filter": ".filter",
     }

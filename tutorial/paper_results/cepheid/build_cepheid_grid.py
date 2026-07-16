@@ -381,7 +381,6 @@ def build_emulators(
     harps_aemu: Optional[str] = DEFAULT_HARPS_AEMU,
     iron_aemu: Optional[str] = DEFAULT_IRON_AEMU,
     wanted: Sequence[str] = ALL_BUNDLES,
-    teff_interp: float = 0.0,
 ) -> dict[str, Any]:
     """Build the emulator backing each requested bundle variant.
 
@@ -410,25 +409,12 @@ def build_emulators(
             flux_path, params=FLUX_PARAMS, solar_parameters=SOLAR_FLUX,
             sparse=True, in_memory=False,
         )
-    def _maybe_teff_interp(emul, label):
-        # The TPayne aemu bundles memorize their 250 K Teff training grid
-        # (plateaus with sharp transitions at node midpoints) instead of
-        # interpolating; wrap them so Teff between nodes is log-linearly
-        # interpolated from the two bracketing node evaluations.
-        if teff_interp and teff_interp > 0:
-            from spice.spectrum.grid_node_interpolation import (
-                GridNodeInterpolatedEmulator,
-            )
-            print(f"  ({label}: interpolating Teff between {teff_interp:.0f} K grid nodes)")
-            return GridNodeInterpolatedEmulator(emul, "teff", spacing=teff_interp)
-        return emul
-
     if "harps" in wanted and harps_aemu is not None:
         print(f"Loading HARPS aemu:     {harps_aemu}")
-        out["harps"] = _maybe_teff_interp(_load_aemu_intensity(harps_aemu), "harps")
+        out["harps"] = _load_aemu_intensity(harps_aemu)
     if "iron_line" in wanted and iron_aemu is not None:
         print(f"Loading iron-line aemu: {iron_aemu}")
-        out["iron_line"] = _maybe_teff_interp(_load_aemu_intensity(iron_aemu), "iron_line")
+        out["iron_line"] = _load_aemu_intensity(iron_aemu)
     return out
 
 
@@ -765,11 +751,6 @@ def parse_args():
     p.add_argument("--iron-aemu", type=str, default=DEFAULT_IRON_AEMU,
                    help="Iron-line aemu bundle: HF repo id or local bundle dir "
                         f"(default: {DEFAULT_IRON_AEMU}).")
-    p.add_argument("--teff-interp", type=float, default=0.0,
-                   help="If > 0, wrap the aemu bundles so Teff is log-linearly "
-                        "interpolated between training-grid nodes of this spacing "
-                        "in K (the TPayne bundles memorize their 250 K grid; "
-                        "pass 250 to smooth Teff response). 0 disables.")
     p.add_argument("--skip-aemu", action="store_true",
                    help="Skip the HARPS and iron-line aemu bundles "
                         "(useful when astro_emulators_toolkit isn't installed).")
@@ -887,7 +868,6 @@ def main() -> int:
         args.intensity_zarr, args.flux_zarr,
         harps_aemu=args.harps_aemu, iron_aemu=args.iron_aemu,
         wanted=wanted_bundles,
-        teff_interp=args.teff_interp,
     )
 
     failures = []
