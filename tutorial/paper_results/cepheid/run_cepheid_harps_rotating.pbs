@@ -101,6 +101,13 @@ PHASE_CHUNK_N="${PHASE_CHUNK_N:-1}"
 # aemu; drop to 512 (or 256) if you hit OOM on wider windows.
 WL_CHUNK="${WL_CHUNK:-1024}"
 
+# Teff grid-node interpolation (K). The TPayne aemu memorizes its 250 K Teff
+# training grid (plateaus with sharp midpoint transitions) instead of
+# interpolating, which staircases broadband photometry; 250 wraps the bundle
+# so Teff between nodes is log-linearly interpolated from the bracketing node
+# evaluations (~2x synthesis cost). Set TEFF_INTERP=0 for the raw bundle.
+TEFF_INTERP="${TEFF_INTERP:-250}"
+
 if [ ! -f "$CONFIG" ]; then
     echo "ERROR: CSV not found at $CONFIG (set CONFIG=... or place cepheid_grid.csv beside this script)"
     exit 4
@@ -176,6 +183,7 @@ cd "$PBS_O_WORKDIR"
     --n-mesh "$N_MESH" \
     --phase-chunk "${PHASE_CHUNK_IDX}/${PHASE_CHUNK_N}" \
     --wl-chunk "$WL_CHUNK" \
+    --teff-interp "$TEFF_INTERP" \
     --continue-on-error
 
 echo "[$(date '+%F %T')] finished $NAME"
