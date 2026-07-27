@@ -313,10 +313,12 @@ class PhysicalLineEmulator:
             Cosine of the viewing angle (0 <= μ <= 1).
         spectral_parameters : jnp.ndarray
             Can be:
-              - [],            → [5777, 4.44, mu]
-              - [Teff],        → [Teff, 4.44, mu]
-              - [Teff, logg],  → [Teff, logg, mu]
-              - [Teff, logg, mu]
+
+            - ``[]`` → ``[5777, 4.44, mu]``
+            - ``[Teff]`` → ``[Teff, 4.44, mu]``
+            - ``[Teff, logg]`` → ``[Teff, logg, mu]``
+            - ``[Teff, logg, mu]``
+
             All values are assumed in [K, cgs, dimensionless].
 
         Returns

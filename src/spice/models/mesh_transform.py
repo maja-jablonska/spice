@@ -318,6 +318,7 @@ _evaluate_rotation_v = jax.vmap(_evaluate_rotation, in_axes=(None, 0))
 
 
 def evaluate_rotation_at_times(mesh: MeshModel, times: ArrayLike) -> ArrayLike:
+    """Vectorized :func:`evaluate_rotation` over an array of times (in seconds)."""
     from spice.utils import log
     with log.timed(
         f"Evaluating rotation at {len(times)} time steps",

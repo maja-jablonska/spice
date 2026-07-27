@@ -344,6 +344,13 @@ def weighted_rows_from_brackets_batched(grid, brackets, d, num_rows):
     return jax.vmap(per_query)(brackets)
 
 class GridIndex:
+    """Dense N-d lookup from grid-axis values to zarr row indices.
+
+    Fast constant-time lookups; memory grows with the product of axis
+    lengths, so prefer :class:`SparseGridIndex` for many-parameter or
+    irregular grids.
+    """
+
     def __init__(self, grid, axes, columns, device=None):
         """
         axes: list/tuple of 1D arrays (one per dimension)
@@ -472,6 +479,16 @@ def combine_rows_jax(row_indices, weights, data):
 
 
 class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
+    """Multilinear interpolator over a zarr-backed spectral grid.
+
+    Loads rows lazily from the store (or eagerly with ``in_memory``), so
+    grids larger than memory can be queried; lookups are JAX-compatible.
+    Use :class:`IntensityLazyZarrInterpolator` for grids with a ``mu`` axis
+    and :class:`FluxLazyZarrInterpolator` for flux-only grids. The optional
+    per-node radiative-transfer geometry provenance from the index is
+    exposed as ``self.geometry``.
+    """
+
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
                  solar_parameters=None, accumulate_chunk_size=64):
@@ -762,6 +779,13 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
 
 
 class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
+    """Interpolator for specific-intensity grids (grids with a ``mu`` axis).
+
+    ``intensity`` plugs directly into
+    :func:`~spice.spectrum.simulate_observed_flux`; ``flux`` integrates over
+    ``mu`` with Gauss-Legendre quadrature. ``params`` must include ``'mu'``.
+    """
+
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
                  solar_parameters=None, accumulate_chunk_size=64):
@@ -813,6 +837,12 @@ from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
 
 
 class FluxLazyZarrInterpolator(LazyZarrInterpolator):
+    """Interpolator for flux-only grids (no ``mu`` axis).
+
+    ``intensity`` derives the angle dependence from the disc-integrated flux
+    via a flux-conserving limb-darkening law (``ld_law``/``ld_coeffs``).
+    """
+
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
                  solar_parameters=None, accumulate_chunk_size=64):

@@ -37,8 +37,16 @@ extensions = [
     'sphinx.ext.doctest',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
+    'sphinx.ext.napoleon',
     'sphinx.ext.intersphinx'
 ]
+
+# The API reference is generated from docstrings; optional heavy dependencies
+# are mocked so the docs build needs only the core install.
+autodoc_mock_imports = ['phoebe', 'h5py', 'astro_emulators_toolkit', 'transformer_payne', 'zarr']
+autodoc_member_order = 'bysource'
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),

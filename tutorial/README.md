@@ -35,6 +35,9 @@ reproduced by running the matching notebook end-to-end.
 | Notebook | Documentation page | Requires |
 | --- | --- | --- |
 | [`mesh_examples.ipynb`](docs_examples/mesh_examples.ipynb) | Creating a Mesh Model | core install |
+| [`spectral_synthesis_examples.ipynb`](docs_examples/spectral_synthesis_examples.ipynb) | Spectral Synthesis | core install |
+| [`spectral_grids_examples.ipynb`](docs_examples/spectral_grids_examples.ipynb) | Spectral Grids | `[grid]` extra |
+| [`custom_emulators_examples.ipynb`](docs_examples/custom_emulators_examples.ipynb) | Custom Emulators | core install |
 | [`synthetic_photometry_examples.ipynb`](docs_examples/synthetic_photometry_examples.ipynb) | Synthetic Photometry | core install |
 | [`transformer_payne_examples.ipynb`](docs_examples/transformer_payne_examples.ipynb) | TransformerPayne Integration | `transformer-payne`, `huggingface-hub` |
 | [`binaries_examples.ipynb`](docs_examples/binaries_examples.ipynb) | Binaries | `[phoebe]` extra |

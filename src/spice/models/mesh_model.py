@@ -48,6 +48,17 @@ def create_harmonics_params(n: int):
 
 
 def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0):
+    """Per-element log10 surface gravity in cgs (cm/s^2).
+
+    Args:
+        mass: Stellar mass in solar masses.
+        d_centers: Element centers relative to the stellar center, in solar radii.
+        rot_velocities: Element rotation speeds in km/s; the centrifugal term
+            reduces the effective gravity.
+
+    Returns:
+        log10(g) per mesh element, with g in cm/s^2.
+    """
     # g in m/s^2 (d_centers in solar radii, mass in solar masses; 274.20011... = GM_sun/R_sun^2)
     r = jnp.linalg.norm(d_centers, axis=1)
     g_mks = (274.20011165737316 * mass / jnp.power(r, 2)) - jnp.power(rot_velocities, 2) / (695700000.0 * r)

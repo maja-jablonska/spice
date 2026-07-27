@@ -55,10 +55,23 @@ Contents
    :maxdepth: 2
 
    introduction
+   installation
+   quickstart
+   conventions
    mesh
+   spectral_synthesis
+   spectral_grids
+   custom_emulators
    binaries
    transformer_payne_integration
    phoebe_integration
    synthetic_photometry
    api
    troubleshooting
+
+Citation
+--------
+
+A preprint describing SPICE is available on
+`arXiv <https://arxiv.org/abs/2511.10998>`_. Please cite it if you use SPICE
+in your work.

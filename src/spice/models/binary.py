@@ -39,6 +39,14 @@ def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:
     return jk.build_tree(jnp.zeros(points_shape))
 
 class Binary(NamedTuple):
+    """Two mesh models bound on a Keplerian orbit.
+
+    Construct with :meth:`from_bodies`, attach orbital elements with
+    :func:`add_orbit`, and obtain positioned, occlusion-resolved component
+    meshes with :func:`evaluate_orbit` / :func:`evaluate_orbit_at_times`.
+    State is immutable; every operation returns a new instance.
+    """
+
     body1: Model
     body2: Model
 

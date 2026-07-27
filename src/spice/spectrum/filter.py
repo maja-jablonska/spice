@@ -26,6 +26,16 @@ def _filter_responses(wavelengths: ArrayLike,
 
 
 class Filter(ABC):
+    """An astronomical passband: a transmission curve plus system zero points.
+
+    Subclass (or instantiate a subclass from ``spice.spectrum.filter``) and
+    pass to :func:`~spice.spectrum.AB_passband_luminosity`,
+    :func:`~spice.spectrum.ST_passband_luminosity`, or
+    :func:`~spice.spectrum.Vega_passband_luminosity`. ``non_photonic`` marks
+    energy-based (rather than photon-counting) responses; ``Vega_zeropoint``
+    must be set for Vega magnitudes.
+    """
+
     def __init__(self,
                  transmission_curve: Float[Array, "2 n_samples"],
                  name: Optional[str] = None,
