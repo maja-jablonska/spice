@@ -236,8 +236,9 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
 
     Returns:
         Float[Array, "n_wavelengths 2"]: Array containing the computed flux at each wavelength point.
-        The second dimension contains [flux, flux_error].
-        Units are erg/s/cm^2/Å.
+        The two columns are the disc-integrated versions of ``intensity_fn``'s two output
+        channels — [flux, continuum] for the grid interpolators; ``Blackbody`` duplicates
+        its intensity into both. Units are erg/s/cm^2/Å.
     """
     if ld_law is not None or ld_coeffs is not None:
         # ``LdBoundIntensity`` hashes by (intensity_fn, ld_law, coeffs values)

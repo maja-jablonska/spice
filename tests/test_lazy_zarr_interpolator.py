@@ -27,16 +27,24 @@ def _load_module():
     ]
     missing = object()
     saved_modules = {name: sys.modules.get(name, missing) for name in target_module_names}
+    pre_existing_spice_modules = {
+        name for name in sys.modules
+        if name == "spice" or name.startswith("spice.")
+    }
 
     try:
+        # Real __path__ entries let sibling imports inside the loaded modules
+        # (spice.spectrum.parameters, .solar_parameters, .flux_limb_darkening,
+        # ...) resolve from src/ without importing the real spice package
+        # __init__; the stub spice.utils below still shadows the real one.
         spice_pkg = types.ModuleType("spice")
-        spice_pkg.__path__ = []
+        spice_pkg.__path__ = [str(root / "src" / "spice")]
         spectrum_pkg = types.ModuleType("spice.spectrum")
-        spectrum_pkg.__path__ = []
+        spectrum_pkg.__path__ = [str(root / "src" / "spice" / "spectrum")]
         spice_pkg.spectrum = spectrum_pkg
 
         utils_pkg = types.ModuleType("spice.utils")
-        utils_pkg.__path__ = []
+        utils_pkg.__path__ = [str(root / "src" / "spice" / "utils")]
 
         class _LogShim:
             class _Timed:
@@ -80,11 +88,16 @@ def _load_module():
         interp_spec.loader.exec_module(interp_module)
         return interp_module
     finally:
+        # Evict every spice.* module cached during the shimmed load (sibling
+        # imports pull in more than target_module_names), then restore what
+        # was there before.
+        for name in list(sys.modules):
+            if ((name == "spice" or name.startswith("spice."))
+                    and name not in pre_existing_spice_modules):
+                sys.modules.pop(name, None)
         for name in target_module_names:
             old_module = saved_modules[name]
-            if old_module is missing:
-                sys.modules.pop(name, None)
-            else:
+            if old_module is not missing:
                 sys.modules[name] = old_module
 
 

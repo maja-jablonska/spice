@@ -33,13 +33,13 @@ def _fake_polars():
 def _write_grid_store(tmp_path, params, param_names, mu_selected=None):
     store_path = tmp_path / "grid.zarr"
     group = zarr.open_group(str(store_path), mode="w")
-    group.create_dataset("flux", data=np.ones((params.shape[0], 3)))
-    group.create_dataset("continuum", data=np.ones((params.shape[0], 3)))
-    group.create_dataset("wavelength", data=np.linspace(5000.0, 5002.0, 3))
-    group.create_dataset("params", data=np.asarray(params))
-    group.create_dataset("param_names", data=np.asarray(param_names, dtype="S"))
+    group.create_array("flux", data=np.ones((params.shape[0], 3)))
+    group.create_array("continuum", data=np.ones((params.shape[0], 3)))
+    group.create_array("wavelength", data=np.linspace(5000.0, 5002.0, 3))
+    group.create_array("params", data=np.asarray(params))
+    group.create_array("param_names", data=np.asarray(param_names, dtype="S"))
     if mu_selected is not None:
-        group.create_dataset("mu_selected", data=np.asarray(mu_selected))
+        group.create_array("mu_selected", data=np.asarray(mu_selected))
     return store_path
 
 

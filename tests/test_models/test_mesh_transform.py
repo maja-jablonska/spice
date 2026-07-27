@@ -215,9 +215,10 @@ class TestMeshTransformations:
         m_orders = jnp.array([1, 2])
         l_degrees = jnp.array([1, 2])
         periods = jnp.array([3600.0, 7200.0], dtype=jnp.float64)  # 1 hour and 2 hours
+        # Legacy radial-only form: (n_pulsations, n_terms, 2) of [amplitude, phase]
         fourier_series_parameters = jnp.array([
-            [0.1, 0.0],  # Amplitude 0.1, phase 0.0 for first pulsation
-            [0.05, jnp.pi/2]  # Amplitude 0.05, phase pi/2 for second pulsation
+            [[0.1, 0.0]],  # Amplitude 0.1, phase 0.0 for first pulsation
+            [[0.05, jnp.pi/2]]  # Amplitude 0.05, phase pi/2 for second pulsation
         ], dtype=jnp.float64)
         pulsation_axes = jnp.array([
             [0.0, 1.0, 0.0],  # Y-axis for first pulsation
@@ -293,8 +294,9 @@ class TestMeshTransformations:
         
         max_ind = m_order + mesh_model.max_pulsation_mode * n_degree
         chex.assert_shape(pulsated.pulsation_axes[max_ind], (3,))
-        chex.assert_shape(pulsated.fourier_series_parameters[max_ind], 
-                         (mesh_model.max_fourier_order, 2))
+        # (3, N, 2): [radial, spheroidal, toroidal] VSH components
+        chex.assert_shape(pulsated.fourier_series_parameters[max_ind],
+                         (3, mesh_model.max_fourier_order, 2))
 
         # Test evaluate_pulsations  
         evaluated = evaluate_pulsations(pulsated, t)

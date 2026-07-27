@@ -55,6 +55,9 @@ def _set_axes_centered(plot_ax: plt.axes, center: np.ndarray, axes_lim: float) -
     plot_ax.set_xlim3d(center[0] - axes_lim, center[0] + axes_lim)
     plot_ax.set_ylim3d(center[1] - axes_lim, center[1] + axes_lim)
     plot_ax.set_zlim3d(center[2] - axes_lim, center[2] + axes_lim)
+    # Equal limits alone are not enough: without a cubic box aspect matplotlib
+    # stretches the 3D box to the (non-square) axes area, flattening the sphere.
+    plot_ax.set_box_aspect((1, 1, 1))
 
 
 def _single_mesh_arrow_vectors(mesh: MeshModel) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
