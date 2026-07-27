@@ -11,7 +11,7 @@ To create a basic icosphere model, you can use the `IcosphereModel.construct()` 
 .. code-block:: python
 
     from spice.models import IcosphereModel
-    from transformer_payne import Blackbody
+    from spice.spectrum import Blackbody
 
     # Initialize a Blackbody model (for spectrum calculation)
     bb = Blackbody()
@@ -374,7 +374,7 @@ or by adding two circular spots:
         smoothness=jnp.array([0.5, 0.5]) # smoothness of the spot edges
     )
 
-This exampe adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.
+This example adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.
 
 .. image:: ../img/temp_two_spots_dark.png
    :width: 600
