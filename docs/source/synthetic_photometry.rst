@@ -45,10 +45,9 @@ SPICE includes utilities to calculate luminosity offsets for blackbody models wi
 .. code-block:: python
 
     from spice.models import IcosphereModel
-    from spice.spectrum import simulate_observed_flux, luminosity, absolute_bol_luminosity
+    from spice.spectrum import simulate_observed_flux, luminosity, absolute_bol_luminosity, Blackbody
     from spice.spectrum.filter import JohnsonCousinsB, JohnsonCousinsI, GaiaG, JohnsonCousinsV
     from spice.spectrum.spectrum import AB_passband_luminosity, ST_passband_luminosity
-    from transformer_payne import Blackbody
 
     def calculate_blackbody_luminosity(n_vertices):
         bb = Blackbody()

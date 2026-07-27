@@ -24,10 +24,10 @@ This approach allows SPICE to accurately model stars with inhomogeneous surfaces
 3. **Synthetic Photometry**:
    - Calculate monochromatic and bolometric luminosities
    - Compute magnitudes in various photometric systems (e.g., AB, ST)
-   - Support for multiple standard filters (e.g., Johnson, Bessel, Gaia)
+   - Support for multiple standard filters (e.g., Johnson-Cousins, Gaia, 2MASS)
 
 4. **Binary System Modeling**:
-   - Simulate synthetic spectra and photometric for binary star systems
+   - Simulate synthetic spectra and photometry for binary star systems
    - Account for eclipsing
 
 5. **Data Visualization**:
