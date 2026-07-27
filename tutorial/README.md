@@ -28,7 +28,21 @@ recommended but not strictly required.
 
 ## Documentation examples — [`docs_examples/`](docs_examples/)
 
-Notebooks that generate figures for the documentation (`docs_imgs.ipynb`).
+Companion notebooks for the documentation pages: one notebook per page, one
+section per code snippet / figure, so every figure in the docs can be
+reproduced by running the matching notebook end-to-end.
+
+| Notebook | Documentation page | Requires |
+| --- | --- | --- |
+| [`mesh_examples.ipynb`](docs_examples/mesh_examples.ipynb) | Creating a Mesh Model | core install |
+| [`synthetic_photometry_examples.ipynb`](docs_examples/synthetic_photometry_examples.ipynb) | Synthetic Photometry | core install |
+| [`transformer_payne_examples.ipynb`](docs_examples/transformer_payne_examples.ipynb) | TransformerPayne Integration | `transformer-payne`, `huggingface-hub` |
+| [`binaries_examples.ipynb`](docs_examples/binaries_examples.ipynb) | Binaries | `[phoebe]` extra |
+| [`phoebe_integration_examples.ipynb`](docs_examples/phoebe_integration_examples.ipynb) | PHOEBE Integration | `[phoebe]` extra |
+
+Figure sections write both light and dark variants directly into `docs/img/`
+with the filenames the docs reference. `docs_imgs.ipynb` is the legacy
+scratch notebook these supersede.
 
 ## Paper reproduction — [`paper_results/`](paper_results/)
 

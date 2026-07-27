@@ -4,6 +4,12 @@ TransformerPayne Integration
 The TransformerPayne model is our recommended model for spectra emulation. It is a neural network that can be used to predict spectra from a given set of parameters, including individual abundances.
 To read more about TransformerPayne, see the `arXiv paper <https://arxiv.org/abs/2407.05751>`_
 
+.. note::
+
+   Every code snippet and figure on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/transformer_payne_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/transformer_payne_examples.ipynb>`_
+   (requires ``transformer-payne`` and ``huggingface-hub``); running it regenerates all figures below.
+
 Downloading TransformerPayne
 ----------------------------
 

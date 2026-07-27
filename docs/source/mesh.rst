@@ -3,6 +3,12 @@ Creating a Mesh Model
 
 The SPICE library provides functionality to create and manipulate icosphere models, which are useful for representing stellar surfaces. Here's how you can create and modify an icosphere model:
 
+.. note::
+
+   Every code snippet and figure on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/mesh_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/mesh_examples.ipynb>`_;
+   running it end-to-end regenerates all figures below.
+
 Basic Icosphere Creation
 ------------------------
 
@@ -11,7 +17,7 @@ To create a basic icosphere model, you can use the `IcosphereModel.construct()` 
 .. code-block:: python
 
     from spice.models import IcosphereModel
-    from transformer_payne import Blackbody
+    from spice.spectrum import Blackbody
 
     # Initialize a Blackbody model (for spectrum calculation)
     bb = Blackbody()
@@ -110,6 +116,12 @@ Here's an example of what the output should look like:
 .. image:: ../img/rotated_mesh.png
    :width: 600
    :alt: 3D visualization of a rotated mesh
+   :class: only-light
+
+.. image:: ../img/rotated_mesh_dark.png
+   :width: 600
+   :alt: 3D visualization of a rotated mesh
+   :class: only-dark
 
 In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight, and the black arrow shows the rotation axis.
 
@@ -156,9 +168,15 @@ Again, note that the amplitude is given in percent of the original radius.
 
 This example pulsation will look like this:
 
+.. image:: ../img/pulsated_mesh.png
+   :width: 600
+   :alt: 3D visualization of a pulsation
+   :class: only-light
+
 .. image:: ../img/pulsated_mesh_dark.png
    :width: 600
    :alt: 3D visualization of a pulsation
+   :class: only-dark
 
 Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.
 
@@ -374,8 +392,14 @@ or by adding two circular spots:
         smoothness=jnp.array([0.5, 0.5]) # smoothness of the spot edges
     )
 
-This exampe adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.
+This example adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.
+
+.. image:: ../img/temp_two_spots.png
+   :width: 600
+   :alt: 3D visualization of a temperature map for two spots
+   :class: only-light
 
 .. image:: ../img/temp_two_spots_dark.png
    :width: 600
    :alt: 3D visualization of a temperature map for two spots
+   :class: only-dark

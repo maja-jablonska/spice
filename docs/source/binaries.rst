@@ -4,6 +4,12 @@ Binaries
 PHOEBE Configuration and Binary System Setup
 --------------------------------------------
 
+.. note::
+
+   Every code snippet on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/binaries_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/binaries_examples.ipynb>`_
+   (requires the ``phoebe`` extra).
+
 Here's an example of how to set up a basic PHOEBE binary system:
 
 .. code-block:: python
