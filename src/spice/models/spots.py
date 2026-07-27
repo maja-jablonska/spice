@@ -158,17 +158,17 @@ def add_spherical_harmonic_spot(mesh: MeshModel,
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
     if isinstance(m_order, int) and isinstance(l_degree, int) and m_order > l_degree:
-        raise ValueError("m must be lesser or equal to n.")
-    elif _is_arraylike(m_order) and _is_arraylike(n_degree):
+        raise ValueError("m must be lesser or equal to l.")
+    elif _is_arraylike(m_order) and _is_arraylike(l_degree):
         m_order = int(m_order.item())
-        n_degree = int(n_degree.item())
-        if jnp.any(jnp.greater(m_order, n_degree)):
-            raise ValueError("m must be lesser or equal to n.")
-        
+        l_degree = int(l_degree.item())
+        if jnp.any(jnp.greater(m_order, l_degree)):
+            raise ValueError("m must be lesser or equal to l.")
+
     if tilt_axis is not None:
         tilt_angle = 0.0 if tilt_angle is None else tilt_angle
-        return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, n_degree, param_delta, param_index, tilt_axis, tilt_angle)
-    return _add_spherical_harmonic_spot(mesh, m_order, n_degree, param_delta, param_index)
+        return _add_spherical_harmonic_spot_with_tilt(mesh, m_order, l_degree, param_delta, param_index, tilt_axis, tilt_angle)
+    return _add_spherical_harmonic_spot(mesh, m_order, l_degree, param_delta, param_index)
 
 
 @jax.jit
@@ -277,7 +277,7 @@ def _add_spherical_harmonic_spots(mesh: MeshModel,
                                   param_indices: ArrayLike) -> MeshModel:
     def scan(carry, params):
         return _add_spherical_harmonic_spot(
-            carry, m=params[0].astype(int), n=params[1].astype(int),
+            carry, m_order=params[0].astype(int), l_degree=params[1].astype(int),
             param_delta=params[2], param_index=params[3].astype(int)
         ), params
 
@@ -296,7 +296,7 @@ def _add_spherical_harmonic_spots_with_tilt(mesh: MeshModel,
         # Extract tilt axis from params[4:7] since it's 3 components
         tilt_axis = params[4:7]
         return _add_spherical_harmonic_spot_with_tilt(
-            carry, m=params[0].astype(int), n=params[1].astype(int),
+            carry, m_order=params[0].astype(int), l_degree=params[1].astype(int),
             param_delta=params[2], param_index=params[3].astype(int),
             tilt_axis=tilt_axis, tilt_angle=params[7]
         ), params
