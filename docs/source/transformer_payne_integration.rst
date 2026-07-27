@@ -1,11 +1,11 @@
 TransformerPayne Integration
-===========================
+============================
 
 The TransformerPayne model is our recommended model for spectra emulation. It is a neural network that can be used to predict spectra from a given set of parameters, including individual abundances.
 To read more about TransformerPayne, see the `arXiv paper <https://arxiv.org/abs/2407.05751>`_
 
 Downloading TransformerPayne
-------------
+----------------------------
 
 To download the TransformerPayne model, use the following code:
 
@@ -19,7 +19,7 @@ To download the TransformerPayne model, use the following code:
 Make sure to have the `transformer-payne` and `huggingface-hub` packages installed to use this function.
 
 Creating a Mesh Model
-------------
+---------------------
 
 TranformerPayne has much more parameters, for example, individual abundances:
 
@@ -39,7 +39,7 @@ TranformerPayne has much more parameters, for example, individual abundances:
 
 
 Spectrum Calculation
-------------
+--------------------
 
 Currently, TransformerPayne contains GALAH DR3 lines.
 
@@ -64,7 +64,7 @@ The spectrum can be plotted using the following code:
 
     _, ax = plt.subplots(figsize=(12, 6))
     plt.plot(vws, spec_no_rot[:, 0], color='black', linewidth=1, label='No rotation')
-    plt.plot(vws, spec_rot[:, 0], color='royalblue', linewidth=3, label='25 km/s')
+    plt.plot(vws, spec_rot[:, 0], color='royalblue', linewidth=3, label='100 km/s')
     ax.set_xlabel(r'Wavelength [$\AA$]')
     ax.set_ylabel(r'Normalized Flux [erg/s/cm$^2$/$\AA$]');
     plt.legend()
@@ -81,7 +81,7 @@ The spectrum can be plotted using the following code:
    :class: only-dark
 
 Line Profiles
-------------
+-------------
 
 Line profiles for spotted star models can be calculated using the following code:
 
@@ -105,13 +105,7 @@ Models for various phases can be visualized using the following code:
 
 .. image:: ../img/mn_spot_0.png
    :width: 600
-   :alt: Magnesium spot at phase 0
-   :class: only-light
-
-.. image:: ../img/mn_spot_0_dark.png
-   :width: 600
-   :alt: Magnesium spot at phase 0
-   :class: only-dark
+   :alt: Manganese spot at phase 0
 
 .. code-block:: python
 
@@ -119,15 +113,15 @@ Models for various phases can be visualized using the following code:
 
 .. image:: ../img/mn_spot_50.png
    :width: 600
-   :alt: Magnesium spot at phase 50
+   :alt: Manganese spot at phase 50
    :class: only-light
 
 .. image:: ../img/mn_spot_50_dark.png
    :width: 600
-   :alt: Magnesium spot at phase 50
+   :alt: Manganese spot at phase 50
    :class: only-dark
 
-Magnesium spot was chosen because of its spectral lines within one of the GALAH DR3 windows.
+Manganese spot was chosen because of its spectral lines within one of the GALAH DR3 windows.
 
 The spectra can be calculated using the following code:
 
@@ -160,13 +154,7 @@ The line profiles can be plotted using the following code:
 
 .. image:: ../img/mn_line_profile.png
    :width: 600
-   :alt: Magnesium line profiles
-   :class: only-light
-
-.. image:: ../img/mn_line_profile_dark.png
-   :width: 600
-   :alt: Magnesium line profiles
-   :class: only-dark
+   :alt: Manganese line profiles
 
 
 Similarly, line profiles can be calculated for pulsating models. For example, a very simple pulsating model with a period of 5 days:
@@ -179,7 +167,7 @@ Similarly, line profiles can be calculated for pulsating models. For example, a 
 
     TIMESTAMPS = jnp.linspace(0., 5., 20)
 
-    mps = [evaluate_pulsations(m, t) for t in tqdm(TIMESTAMPS)]
+    mps = [evaluate_pulsations(mp, t) for t in tqdm(TIMESTAMPS)]
 
 for which we can calculate spectra with TransformerPayne:
 

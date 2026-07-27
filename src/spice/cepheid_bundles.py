@@ -86,7 +86,13 @@ def build_bundle(
     param_names_attr: str = "stellar_parameter_names",
     desc: str = "Evaluating",
 ) -> CepheidBundle:
-    """Construct an icosphere mesh, attach pulsation+rotation, evaluate it across `timeseries`."""
+    """Construct an icosphere mesh, attach pulsation+rotation, evaluate it across `timeseries`.
+
+    `period` and `timeseries` are in days (the unit `evaluate_pulsations`
+    expects). Note `evaluate_rotation` interprets the same `t` as seconds, so a
+    nonzero `rotation_velocity` would rotate ~86400x slower than the day-valued
+    timeseries implies; keep the default of 0.0 unless that mismatch is resolved.
+    """
     param_names = getattr(emulator, param_names_attr, None) or emulator.parameter_names
     base = IcosphereModel.construct(
         n_mesh, radius, mass, base_params, param_names,

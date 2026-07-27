@@ -101,10 +101,13 @@ class TestIcosphere:
                 parameter_names=['teff', 'logg']
                 )
 
+        # log10(g) in cgs: G = 6.6743e-8 cm^3 g^-1 s^-2, M in g, r in cm
+        r_cm = jnp.linalg.norm(model.d_centers, axis=1) * SOLAR_RADIUS_CM
+        expected_log_g = jnp.log10(6.6743e-8 * model.mass * SOLAR_MASS_KG * 1000.0 / jnp.power(r_cm, 2))
         assert jnp.all(jnp.isclose(model.parameters,
                                    jnp.vstack([
                                            5777.*jnp.ones_like(model.areas),
-                                           jnp.log(6.6743e-11*model.mass*SOLAR_MASS_KG/jnp.power(jnp.linalg.norm(model.d_centers*SOLAR_RADIUS_CM, axis=1)*1e-2, 2)/9.80665)
+                                           expected_log_g
                                            ]).T)
                        )
 

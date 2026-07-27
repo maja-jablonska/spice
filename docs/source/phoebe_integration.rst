@@ -11,8 +11,13 @@ To use PHOEBE with SPICE, you first need to create a PHOEBE model. Here's a basi
 .. code-block:: python
 
     import phoebe
-    from spice.models import PhoebeModel, PhoebeConfig
+    import numpy as np
+    from spice.models import PhoebeModel
+    from spice.models.phoebe_utils import PhoebeConfig
+    from spice.spectrum import Blackbody
     from phoebe.parameters.dataset import _mesh_columns
+
+    bb = Blackbody()
     
     # Create a PHOEBE bundle
     b = phoebe.default_star()
@@ -21,17 +26,19 @@ To use PHOEBE with SPICE, you first need to create a PHOEBE model. Here's a basi
     times = np.linspace(0, 1, 100)
     # SPICE requires several columns, so we'll add all available mesh columns
     COLUMNS = _mesh_columns
-    b.add_dataset('mesh', times=times, columns=COLUMNS, dataset='mesh01')
+    b.add_dataset('mesh', compute_times=times, columns=COLUMNS, dataset='mesh01')
 
     # Make sure to set the coordinates to 'uvw'
-    b.run_compute( coordinates='uvw')
+    b.run_compute(coordinates='uvw')
     
     # Create a PhoebeConfig object
     p = PhoebeConfig(b)
     
-    # Generate a PhoebeModel for a specific time
+    # Generate a PhoebeModel for a specific time and component
     time = 0.0  # time in days
-    pm = PhoebeModel.construct(p, bb.parameter_names, {pn: sp for pn, sp in zip(bb.parameter_names, bb.solar_parameters)})
+    pm = PhoebeModel.construct(p, time, bb.parameter_names,
+                               {pn: sp for pn, sp in zip(bb.parameter_names, bb.solar_parameters)},
+                               component='starA')
 
 The `PhoebeConfig` class wraps a PHOEBE bundle and provides methods to extract relevant information for SPICE. The `PhoebeModel` class represents a snapshot of the binary system at a specific time.
 
@@ -48,8 +55,7 @@ Once you have a PhoebeModel, you can use it with SPICE's spectral synthesis func
 
 .. code-block:: python
 
-    from spice.models import Blackbody
-    from spice.spectrum import simulate_observed_flux
+    from spice.spectrum import Blackbody, simulate_observed_flux
     import numpy as np
     
     # Create a Blackbody model

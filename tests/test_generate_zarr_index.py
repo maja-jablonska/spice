@@ -59,7 +59,7 @@ def test_write_index_parquet_uses_store_default_path(tmp_path):
     store_path = tmp_path / "grid.zarr"
     params = _write_test_store(store_path)
 
-    output_path = write_index_parquet(store_path)
+    output_path = write_index_parquet(store_path, include_mu=False)
 
     assert output_path == store_path / "index.parquet"
     frame = pl.read_parquet(output_path)
@@ -76,7 +76,8 @@ def test_write_index_parquet_resolves_nested_wrapper_group(tmp_path):
     params = _write_test_store(store_path, nested=True)
     output_path = tmp_path / "custom-index.parquet"
 
-    write_index_parquet(store_path, output_path=output_path, compression="snappy")
+    write_index_parquet(store_path, output_path=output_path, compression="snappy",
+                        include_mu=False)
 
     frame = pl.read_parquet(output_path)
     np.testing.assert_allclose(frame["teff"].to_numpy(), params[:, 0])
@@ -90,7 +91,7 @@ def test_write_index_parquet_includes_mu_by_default(tmp_path):
 
     frame = pl.read_parquet(output_path)
 
-    assert frame.columns == ["row_idx", "mu", "teff", "logg", "fixed"]
+    assert frame.columns == ["row_idx", "teff", "logg", "fixed", "mu"]
     np.testing.assert_allclose(frame["mu"].to_numpy(), params[:, 0])
 
 

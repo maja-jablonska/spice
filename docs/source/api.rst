@@ -118,9 +118,11 @@ MeshModel
       Periods of pulsation modes.
 
    .. py:attribute:: fourier_series_parameters
-      :type: Float[Array, "n_puls_orders n_fourier_orders 2"]
+      :type: Float[Array, "n_puls_orders 3 n_fourier_orders 2"]
 
-      Fourier series parameters for pulsations.
+      Fourier series parameters for pulsations. The second axis indexes the
+      vector-spherical-harmonic components [radial, spheroidal, toroidal];
+      each innermost pair is [amplitude, phase].
 
    .. py:attribute:: pulsation_axes
       :type: Float[Array, "n_puls_orders 3"]
@@ -133,14 +135,14 @@ MeshModel
       Angles of pulsation modes.
 
 IcosphereModel
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 .. autoclass:: spice.models.mesh_model.IcosphereModel
    :members:
    :inherited-members:
    :show-inheritance:
    :exclude-members: count, index, construct
 
-   .. method:: construct(n_vertices: int, radius: float, mass: float, parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]], parameter_names: List[str], max_pulsation_mode: int = 3, max_fourier_order: int = 5, override_log_g: bool = True, log_g_index: Optional[int] = None) -> IcosphereModel
+   .. method:: construct(n_vertices: int, radius: float, mass: float, parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]], parameter_names: List[str], max_pulsation_mode: int = 5, max_fourier_order: int = 5, override_log_g: bool = True, log_g_index: Optional[int] = None) -> IcosphereModel
       
       Constructs an IcosphereModel with specified stellar and mesh properties.
 
@@ -153,7 +155,7 @@ IcosphereModel
       :param mass: Mass of the stellar object in solar masses
       :param parameters: Parameters for the model, can be a single value or an array
       :param parameter_names: Names of the parameters, used for identifying log g parameter
-      :param max_pulsation_mode: Maximum pulsation mode for the model, defaults to 3
+      :param max_pulsation_mode: Maximum pulsation mode for the model, defaults to 5
       :param max_fourier_order: Maximum order of Fourier series for pulsation calculation, defaults to 5
       :param override_log_g: Whether to override the log g values based on model's mass and centers, defaults to True
       :param log_g_index: Index of the log g parameter in parameters array. Required if override_log_g is True and specific log g parameter name not in parameter_names
@@ -167,21 +169,13 @@ Constants
 
    List of valid parameter names for surface gravity. If the parameter name is not in this list, the surface gravity will be calculated using the mass and center positions.
 
-.. data:: spice.models.mesh_model.DEFAULT_LOS_VECTOR
-   :type: jnp.ndarray
-   :value: [0., 1., 0.]
-
-   Default line-of-sight vector (from Y direction).
-
-.. data:: spice.models.mesh_model.DEFAULT_ROTATION_AXIS
-   :type: jnp.ndarray 
-   :value: [0., 0., 1.]
-
-   Default rotation axis (Z axis).
+The default line-of-sight vector is ``[0., 1., 0.]`` (the +Y direction) and the
+default rotation axis is ``[0., 0., 1.]`` (the Z axis); both are created
+internally with the dtype matching the active precision setting.
 
 .. data:: spice.models.mesh_model.DEFAULT_MAX_PULSATION_MODE_PARAMETER
    :type: int
-   :value: 3
+   :value: 5
 
    Default maximum pulsation mode.
 
@@ -192,7 +186,7 @@ Constants
    Default Fourier order for pulsations.
 
 Helper Functions
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 .. function:: calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0)
 
@@ -202,14 +196,14 @@ Helper Functions
 
    .. math::
 
-      \log g = \log \left(\frac{GM}{R^2} - \frac{v_{rot}^2}{R}\right) - \log(9.80665)
+      \log g = \log_{10} \left(\frac{GM}{R^2} - \frac{v_{rot}^2}{R}\right)
 
-   where:
-   - G is the gravitational constant (in solar units)
-   - M is the mass in solar masses 
+   with the gravity expressed in cgs units (cm/s^2), the standard astronomical
+   convention, where:
+
+   - M is the mass in solar masses
    - R is the radius at each mesh point in solar radii
    - v_rot is the rotation velocity in km/s
-   - 9.80665 converts from solar surface gravity units to cgs units (cm/s^2)
 
    :param mass: Mass of the star in solar masses
    :param d_centers: Center positions of mesh elements relative to star center
@@ -218,10 +212,10 @@ Helper Functions
 
 
 Mesh Transformations
-------------------
+--------------------
 
 Transform Functions
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. function:: transform(mesh: MeshModel, vector: Float[Array, "3"]) -> MeshModel
 
@@ -263,7 +257,7 @@ Transform Functions
    :raises ValueError: If parameter names not found or mesh is PhoebeModel
 
 Rotation Functions
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. function:: evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel
 
@@ -285,17 +279,17 @@ Rotation Functions
    :return: Mesh model with updated parameters
 
 Pulsation Functions
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
-.. function:: add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], n_degrees: Float[Array, "n_pulsations"], periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations n_terms 2"], pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel
+.. function:: add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degrees: Float[Array, "n_pulsations"], periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations 3 n_terms 2"], pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel
 
    Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
 
    :param m: The mesh model to add pulsation effects to
    :param m_orders: Array of orders (m) of the spherical harmonics
-   :param n_degrees: Array of degrees (n) of the spherical harmonics  
-   :param periods: Array of pulsation periods in seconds
-   :param fourier_series_parameters: Array of dynamic parameters for the Fourier series
+   :param l_degrees: Array of degrees (l) of the spherical harmonics
+   :param periods: Array of pulsation periods in days (the same unit as the ``t`` passed to ``evaluate_pulsations``)
+   :param fourier_series_parameters: Fourier parameters of shape (n_pulsations, 3, n_terms, 2), where 3 indexes the [radial, spheroidal, toroidal] VSH components and each innermost pair is [amplitude, phase]. A legacy (n_pulsations, n_terms, 2) input is interpreted as purely radial.
    :param pulsation_axes: Array of pulsation axes (defaults to rotation axis)
    :param pulsation_angles: Array of pulsation angles (defaults to zero)
    :return: The mesh model with updated pulsation parameters
@@ -309,7 +303,7 @@ Pulsation Functions
    :return: The mesh model with pulsation parameters reset
    :raises ValueError: If mesh is PhoebeModel
 
-.. function:: evaluate_pulsations(m: MeshModel, t: float) -> MeshModel
+.. function:: evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool = False, dt: float = 1e-6) -> MeshModel
 
    Evaluates and updates the mesh model with pulsation effects at a specific time.
 
@@ -317,7 +311,9 @@ Pulsation Functions
    Updates the mesh with calculated offsets and velocities.
 
    :param m: The mesh model to evaluate pulsations for
-   :param t: The time at which to evaluate the pulsations
+   :param t: The time at which to evaluate the pulsations, in days
+   :param use_numerical_derivative: Use a finite-difference velocity estimate instead of the analytic Fourier derivative
+   :param dt: Step used by the numerical derivative
    :return: The mesh model updated with pulsation effects
    :raises ValueError: If mesh is PhoebeModel
 
@@ -326,20 +322,7 @@ Mesh View
 ------------------
 
 Mesh View Functions
-~~~~~~~~~~~~~~~~~
-
-.. function:: get_grid_spans(m1: MeshModel, m2: MeshModel, n_cells_array: ArrayLike) -> ArrayLike
-
-   Calculate grid cell spans for different grid sizes.
-
-   For each number of cells in n_cells_array, calculates the span (width/height) of grid cells
-   that would cover the projected area of both meshes. Returns the minimum of x and y spans
-   to ensure square grid cells.
-
-   :param m1: First mesh model with cast_vertices and faces
-   :param m2: Second mesh model with cast_vertices and faces
-   :param n_cells_array: Array of different grid cell counts to try
-   :return: Array of grid cell spans corresponding to each n_cells value
+~~~~~~~~~~~~~~~~~~~
 
 .. function:: get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel
 
@@ -349,22 +332,23 @@ Mesh View Functions
    :param los_vector: LOS vector (3,)
    :return: mesh with updated los_vector, mus, and los_velocities
 
-.. function:: visible_area(vertices1: Float[Array, "n_vertices 3"], vertices2: Float[Array, "n_vertices 3"]) -> Float[Array, "n_vertices"]
+.. function:: visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]
 
-   Calculate visible area between two sets of vertices.
+   Calculate the area of the polygon defined by ``vertices1`` that remains
+   visible after clipping against the polygon defined by ``vertices2``.
 
-   :param vertices1: First set of vertices
-   :param vertices2: Second set of vertices
-   :return: Area of visible region
+   :param vertices1: Vertices of the (potentially occluded) polygon
+   :param vertices2: Vertices of the occluding polygon
+   :return: Scalar visible area
 
-.. function:: resolve_occlusion(m1: MeshModel, m2: MeshModel, grid: Grid) -> MeshModel
+.. function:: resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors: int) -> MeshModel
 
-   Calculate the occlusion of m1 by m2.
+   Calculate the occlusion of ``m_occluded`` by ``m_occluder``.
 
-   :param m1: occluded mesh model
-   :param m2: occluding mesh model  
-   :param grid: grid for calculation optimization
-   :return: m1 with updated visible areas
+   :param m_occluded: occluded mesh model
+   :param m_occluder: occluding mesh model
+   :param n_neighbors: number of nearest occluder faces checked per occluded face
+   :return: ``m_occluded`` with updated visible areas
 
 
 Spots
@@ -373,7 +357,7 @@ Spots
 Spot Functions
 ~~~~~~~~~~~~~~~~~
 
-.. function:: add_spot(mesh: MeshModel, spot_center_theta: float, spot_center_phi: float, spot_radius: float, parameter_delta: float, parameter_index: int, smoothness: float = 1.0) -> MeshModel
+.. function:: add_spot(mesh: MeshModel, spot_center_theta: float, spot_center_phi: float, spot_radius: float, parameter_delta: float, parameter_index: int, smoothness: float = 0.0) -> MeshModel
 
    Add a spot to a mesh model based on spherical coordinates and smoothness parameters.
 
@@ -384,10 +368,10 @@ Spot Functions
    :param mesh: The mesh model to which the spot will be added
    :param spot_center_theta: The theta (inclination) coordinate of the spot's center, in radians
    :param spot_center_phi: The phi (azimuthal) coordinate of the spot's center, in radians 
-   :param spot_radius: The angular radius of the spot, in radians
+   :param spot_radius: The angular radius of the spot, in degrees
    :param parameter_delta: The difference in the parameter value to be applied within the spot
    :param parameter_index: The index of the parameter in the mesh model that will be modified
-   :param smoothness: Factor controlling the smoothness of the spot's edge, defaults to 1.0
+   :param smoothness: Factor controlling the smoothness of the spot's edge, defaults to 0.0
    :return: The modified mesh model with the spot applied
    :raises ValueError: If mesh is a PhoebeModel
 
@@ -398,28 +382,28 @@ Spot Functions
    :param mesh: The mesh model to which the spots will be added
    :param spot_center_thetas: Array of theta coordinates of spot centers, in radians
    :param spot_center_phis: Array of phi coordinates of spot centers, in radians
-   :param spot_radii: Array of angular radii of spots, in radians
+   :param spot_radii: Array of angular radii of spots, in degrees
    :param parameter_deltas: Array of parameter value differences for each spot
    :param parameter_indices: Array of parameter indices to modify for each spot
    :param smoothness: Array of edge smoothness factors for each spot
    :return: The modified mesh model with all spots applied
    :raises ValueError: If mesh is a PhoebeModel
 
-.. function:: add_spherical_harmonic_spot(mesh: MeshModel, m_order: Union[Int, Float], n_degree: Union[Int, Float], param_delta: Float, param_index: Float, tilt_axis: Float[Array, "3"] = None, tilt_degree: Float = None) -> MeshModel
+.. function:: add_spherical_harmonic_spot(mesh: MeshModel, m_order: Union[Int, Float], l_degree: Union[Int, Float], param_delta: Float, param_index: Float, tilt_axis: Float[Array, "3"] = None, tilt_angle: Float = None) -> MeshModel
 
    Add a spherical harmonic variation to a parameter of the mesh model.
 
-   Creates a spot-like feature using spherical harmonic function Y_n^m(θ,φ) to modify surface parameters.
+   Creates a spot-like feature using spherical harmonic function Y_l^m(θ,φ) to modify surface parameters.
 
    :param mesh: The mesh model to modify
-   :param m_order: Order (m) of spherical harmonic, must be ≤ n_degree
-   :param n_degree: Degree (n) of spherical harmonic
+   :param m_order: Order (m) of spherical harmonic, must be ≤ l_degree
+   :param l_degree: Degree (l) of spherical harmonic
    :param param_delta: Maximum amplitude of parameter variation
    :param param_index: Index of parameter to modify
    :param tilt_axis: Optional axis for tilting the pattern
-   :param tilt_degree: Optional tilt angle in degrees
+   :param tilt_angle: Optional tilt angle in degrees
    :return: Modified mesh model with spherical harmonic variation
-   :raises ValueError: If m_order > n_degree or mesh is PhoebeModel
+   :raises ValueError: If m_order > l_degree or mesh is PhoebeModel
 
 .. function:: add_spherical_harmonic_spots(mesh: MeshModel, m_orders: Float[Array, "n_orders"], n_degrees: Float[Array, "n_orders"], param_deltas: Float[Array, "n_orders"], param_indices: Float[Array, "n_orders"], tilt_axes: Optional[Float[Array, "n_orders 3"]] = None, tilt_angles: Optional[Float[Array, "n_orders"]] = None) -> MeshModel
 

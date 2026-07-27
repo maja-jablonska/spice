@@ -110,12 +110,6 @@ Here's an example of what the output should look like:
 .. image:: ../img/rotated_mesh.png
    :width: 600
    :alt: 3D visualization of a rotated mesh
-   :class: only-light
-
-.. image:: ../img/rotated_mesh_dark.png
-   :width: 600
-   :alt: 3D visualization of a rotated mesh
-   :class: only-dark
 
 In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight, and the black arrow shows the rotation axis.
 
@@ -136,17 +130,17 @@ To add pulsation to your model, you can use the `add_pulsation()` function:
     mp = add_pulsation(
         m, # Model instance
         1, # m order
-        1, # n degree
+        1, # l degree
         100., # pulsation period
         jnp.array([[0.5, 0.]]) # Fourier series parameters
     )
 
-    t = 40. # time in the same unit as the pulsation period
+    t = 40. # time in days, the same unit as the pulsation period
 
     # To get the pulsated mesh at a specific time:
     pulsated_mesh = evaluate_pulsations(mp, t)  # t is the time
 
-Note that the time and pulsation period can be any time units, as long as they are consistent.
+The pulsation period and the time passed to ``evaluate_pulsations`` are in days: the conversion of pulsation velocities to km/s assumes solRad/day.
 
 The pulsation amplitude is given by the fourier series parameters. It can be calculated using the following function:
 
@@ -157,20 +151,14 @@ The pulsation amplitude is given by the fourier series parameters. It can be cal
 where :math:`D` is the mean amplitude, :math:`A_n` are the amplitudes, :math:`\phi_n` are the phases, and :math:`P` is the pulsation period.
 The amplitude corresponds to the percent of the original radius.
 
-The Fourier series parameters are provided as a 2D array with shape (N, 2), where N is the number of terms in the series. Each row contains [A_n, phi_n], where A_n is the amplitude and phi_n is the phase for the nth term. For example, [[0.1, 0.0], [0.05, 1.57]] represents a series with two terms: the first with amplitude 0.1 and phase 0, and the second with amplitude 0.05 and phase π/2.
+The Fourier series parameters are provided either as a 2D array with shape (N, 2) — interpreted as a purely radial pulsation — or as a full (3, N, 2) array whose first axis indexes the [radial, spheroidal, toroidal] vector-spherical-harmonic components. N is the number of terms in the series, and each innermost pair contains [A_n, phi_n], where A_n is the amplitude and phi_n is the phase for the nth term. For example, [[0.1, 0.0], [0.05, 1.57]] represents a radial series with two terms: the first with amplitude 0.1 and phase 0, and the second with amplitude 0.05 and phase π/2.
 Again, note that the amplitude is given in percent of the original radius.
 
 This example pulsation will look like this:
 
-.. image:: ../img/pulsated_mesh.png
-   :width: 600
-   :alt: 3D visualization of a pulsation
-   :class: only-light
-
 .. image:: ../img/pulsated_mesh_dark.png
    :width: 600
    :alt: 3D visualization of a pulsation
-   :class: only-dark
 
 Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.
 
@@ -191,7 +179,7 @@ You can also define pulsations with an axis different from the rotation axis. Th
     tilted_m = add_pulsation(
         m,  # Model instance
         0,  # m order
-        1,  # n degree
+        1,  # l degree
         2.,  # pulsation period
         jnp.array([[1e-1, 0.]]),  # Fourier series parameters
         pulsation_axes=jnp.array([0., 1., 0.]),  # Tilt axis (y-axis in this case)
@@ -258,7 +246,7 @@ You can add temperature spots to your model using spherical harmonics:
     m_harm_spot = add_spherical_harmonic_spot(
         m, # Model instance
         4, # m order
-        4, # n degree
+        4, # l degree
         param_delta=9300, # difference in the parameter value between the spot and the background
         param_index=0 # index of the parameter in the parameters array
     )
@@ -275,18 +263,18 @@ which should produce a temperature map like this:
    :alt: 3D visualization of a temperature map for harmonic series spots
    :class: only-dark
 
-Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and `tilt_degree` parameters:
+Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and `tilt_angle` parameters:
 
 .. code-block:: python
 
     m_harm_spot_tilted = add_spherical_harmonic_spot(
         m, # Model instance
         4, # m order
-        4, # n degree
+        4, # l degree
         param_delta=9300, # difference in the parameter value between the spot and the background
         param_index=0, # index of the parameter in the parameters array
         tilt_axis=jnp.array([0., 1., 0.]),
-        tilt_degree=45.
+        tilt_angle=45.  # tilt angle in degrees
     )
 
 .. image:: ../img/tilted_temperature_spot.png
@@ -315,7 +303,7 @@ or add it as a circular spot:
         smoothness=0.1 # smoothness of the spot edges
     )
 
-    The larger the smoothness parameter, the sharper the spot edges. A value of 1.0 will be a one-zero transition between the spot and the background.
+The smaller the ``smoothness`` value, the sharper the spot edge: ``0.0`` (the default) gives the sharpest transition, and larger values up to ``1.0`` produce an increasingly gradual edge.
 
 which should produce a temperature map like this:
 
@@ -388,12 +376,6 @@ or by adding two circular spots:
 
 This exampe adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.
 
-.. image:: ../img/temp_two_spots.png
-   :width: 600
-   :alt: 3D visualization of a temperature map for two spots
-   :class: only-light
-
 .. image:: ../img/temp_two_spots_dark.png
    :width: 600
    :alt: 3D visualization of a temperature map for two spots
-   :class: only-dark

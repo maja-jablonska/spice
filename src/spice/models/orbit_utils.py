@@ -134,8 +134,9 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
                Receding γ > 0 ⇒ the spectrum is redshifted; this is implemented by
                adding ``vgamma`` along ``+los_vector`` so that
                ``mesh.los_velocities = dot(velocities, los_vector)`` becomes
-               ``+vgamma`` for the barycenter, which ``apply_vrad`` then turns
-               into ``λ → λ·(1 + vgamma/c)``.
+               ``+vgamma`` for the barycenter, which the synthesis Doppler
+               sampling (``apply_vrad``) turns into observed features at
+               ``λ_rest·(1 + vgamma/c)``.
       los_vector : 3-component line-of-sight unit vector along which to apply
                ``vgamma``. Defaults to ``[0, 0, -1]`` — the standard astronomical
                convention used by ``eclipse_timestamps_kepler`` and by the
@@ -270,8 +271,8 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
     # Applied ONLY to the barycenter so that _add_orbit's body velocities
     # (= barycenter_vel + body_vel) carry γ exactly once. Applied along +los_vector
     # so that mesh.los_velocities = dot(velocities, los_vector) sees +vgamma at
-    # the barycenter — which apply_vrad then translates into the expected
-    # redshift λ → λ·(1 + vgamma/c).
+    # the barycenter — which the synthesis Doppler sampling (apply_vrad) then
+    # translates into the expected redshift (features at λ_rest·(1 + vgamma/c)).
     if los_vector is None:
         los_vector = jnp.array([0.0, 0.0, -1.0])
     los_unit = los_vector / (jnp.linalg.norm(los_vector) + 1e-30)

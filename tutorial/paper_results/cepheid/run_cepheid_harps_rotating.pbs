@@ -7,14 +7,15 @@
 #  (12 km/s rotation, row 1 of cepheid_grid.csv) only. No zarr / LD-sweep
 #  variants — only the transformer model at HARPS resolution.
 #
-#  USAGE
-#    cd <spice repo root>
-#    qsub tutorial/paper_results/run_cepheid_harps_rotating.pbs
+#  USAGE (submit from this script's directory so $PBS_O_WORKDIR resolves
+#  the CSV, the build script, and the output dir consistently)
+#    cd <spice repo root>/tutorial/paper_results/cepheid
+#    qsub run_cepheid_harps_rotating.pbs
 #
 #    # Override defaults via -v:
 #    qsub -v NAME=cep_DeltaCep,OUT_DIR=/path/to/out,N_PHASES=30,N_MESH=2000,\
 #HARPS_AEMU=RozanskiT/TPayne-spice-harps,HF_HOME=/scratch/y89/$USER/hf-cache \
-#        tutorial/paper_results/run_cepheid_harps_rotating.pbs
+#        run_cepheid_harps_rotating.pbs
 #
 #    # Phase-chunked submission: 4 jobs covering N_PHASES=120 timestamps in
 #    # contiguous slices of 30 each (V-band photometry window 4500-7000 Å):
@@ -22,10 +23,10 @@
 #      qsub -N cep_harps_rot_c${I} \
 #        -v PHASE_CHUNK_IDX=${I},PHASE_CHUNK_N=4,N_PHASES=120,\
 #WL_MIN=4500,WL_MAX=7000,WL_STEPS=25000,WL_CHUNK=512 \
-#        tutorial/paper_results/run_cepheid_harps_rotating.pbs
+#        run_cepheid_harps_rotating.pbs
 #    done
 #    # Each chunk writes to <OUT_DIR>/chunk_<i>/, merge with:
-#    #   python tutorial/paper_results/merge_phase_chunks.py <OUT_DIR>
+#    #   python merge_phase_chunks.py <OUT_DIR>
 #
 #  Monitor:  qstat -fx <jobid>  ;  tail -f cepheid_harps_rot.o<jobid>
 #  Restart:  re-submit. Per-Cepheid pickles in OUT_DIR are merged: if a
@@ -162,7 +163,7 @@ nvidia-smi -L 2>/dev/null || true
 # ---------------------------------------------------------------------------
 cd "$PBS_O_WORKDIR"
 
-"${PYTHON_BIN}" -u tutorial/paper_results/build_cepheid_grid.py \
+"${PYTHON_BIN}" -u "$PBS_O_WORKDIR/build_cepheid_grid.py" \
     --config "$CONFIG" \
     --names "$NAME" \
     --out-dir "$CHUNK_DIR" \

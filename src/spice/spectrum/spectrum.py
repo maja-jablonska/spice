@@ -17,15 +17,18 @@ DEFAULT_CHUNK_SIZE: int = 1024
 C: float = C_KM_S  # km/s
 SOL_RAD_CM = SOLAR_RAD_CM  # cm
 
-# Apply Doppler shift to wavelengths (in Angstroms)
-# vrad is in km/s, C is speed of light in km/s.
+# Map an OBSERVED wavelength (in Angstroms) to the REST-frAME wavelength at
+# which the emitter's spectrum must be sampled: lambda_rest = lambda_obs / (1 + vrad/C).
+# vrad is in km/s (positive = receding, matching ``MeshModel.los_velocities``),
+# C is speed of light in km/s. A receding patch therefore imprints its rest-frame
+# features redward of their rest wavelengths (lambda_obs = lambda_rest * (1 + vrad/C)).
 # Cast the velocity-derived term back to the wavelength dtype so that callers
 # who mix float32 wavelengths with float64 mesh state (e.g. when
 # ``jax_enable_x64`` is on) don't end up with branches of ``lax.cond`` that
 # disagree on dtype.
-apply_vrad = lambda x, vrad: x * (1.0 + (vrad / C).astype(x.dtype))
-# Apply Doppler shift to log10 of wavelengths (log10 of Angstroms)
-apply_vrad_log = lambda x, vrad: x + jnp.log10(vrad / C + 1).astype(x.dtype)
+apply_vrad = lambda x, vrad: x / (1.0 + (vrad / C).astype(x.dtype))
+# Same mapping for log10 of wavelengths (log10 of Angstroms)
+apply_vrad_log = lambda x, vrad: x - jnp.log10(vrad / C + 1).astype(x.dtype)
 # Vectorized version that applies Doppler shift to all wavelengths for each velocity
 v_apply_vrad = jax.jit(jax.vmap(apply_vrad, in_axes=(None, 0)))
 
@@ -233,8 +236,9 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
 
     Returns:
         Float[Array, "n_wavelengths 2"]: Array containing the computed flux at each wavelength point.
-        The second dimension contains [flux, flux_error].
-        Units are erg/s/cm^2/Å.
+        The two columns are the disc-integrated versions of ``intensity_fn``'s two output
+        channels — [flux, continuum] for the grid interpolators; ``Blackbody`` duplicates
+        its intensity into both. Units are erg/s/cm^2/Å.
     """
     if ld_law is not None or ld_coeffs is not None:
         # ``LdBoundIntensity`` hashes by (intensity_fn, ld_law, coeffs values)

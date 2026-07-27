@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stellar-spice"
-version = "1.7.0"
+version = "1.8.0"
 readme = "README.md"
 dependencies = [
     "autofig~=1.2.0",
@@ -28,9 +28,9 @@ huggingface = ["huggingface-hub~=0.21.3"]
 dev = ["pytest~=8.0.0", "pytest-datadir~=1.5.0", "coverage~=7.4.3"]
 phoebe = ["phoebe~=2.4.17"]
 aemu = ["astro-emulators-toolkit~=0.1.0"]
-
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+# Zarr-backed spectral grid interpolation (LazyZarrInterpolator family and
+# spice.spectrum.generate_zarr_index).
+grid = ["zarr>=3", "pandas", "polars", "pyarrow"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

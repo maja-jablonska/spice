@@ -4,10 +4,10 @@ Introduction
 SPICE (SPectra Integration Compiled Engine) is a Python library for simulating synthetic spectra of stars with inhomogeneous surfaces. It uses numerical integration over tessellated stellar surfaces to generate accurate synthetic spectra that account for surface features, rotation, pulsations, and binary interactions.
 
 Core Concepts
-------------
+-------------
 
 Surface Integration
-^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
 The fundamental approach in SPICE is to:
 
 1. Divide the stellar surface into small elements using icosphere tessellation
@@ -22,10 +22,10 @@ This enables accurate modeling of stars with:
 - Binary interactions and eclipses
 
 Key Components
--------------
+--------------
 
 Mesh Models
-^^^^^^^^^^
+^^^^^^^^^^^
 SPICE uses triangular mesh models to represent stellar surfaces. The ``IcosphereModel`` class provides:
 
 - Configurable resolution through vertex count
@@ -34,7 +34,7 @@ SPICE uses triangular mesh models to represent stellar surfaces. The ``Icosphere
 - Rotation and pulsation capabilities
 
 Binary Systems
-^^^^^^^^^^^^^
+^^^^^^^^^^^^^^
 The ``Binary`` class enables modeling of binary star systems with:
 
 - Keplerian orbital motion
@@ -43,7 +43,7 @@ The ``Binary`` class enables modeling of binary star systems with:
 - Integration with PHOEBE for binary parameters
 
 Spectral Synthesis
-^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^
 SPICE supports multiple spectrum models:
 
 - Simple blackbody radiation
@@ -51,7 +51,7 @@ SPICE supports multiple spectrum models:
 - Custom model integration
 
 Performance
-----------
+-----------
 SPICE leverages JAX for:
 
 - Just-in-time compilation
@@ -62,7 +62,7 @@ SPICE leverages JAX for:
 This enables efficient computation of synthetic spectra even for high-resolution surface meshes and complex binary configurations.
 
 Getting Started
--------------
+---------------
 The following sections will guide you through:
 
 - Creating and manipulating mesh models

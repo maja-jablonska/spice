@@ -20,6 +20,12 @@ For PHOEBE integration support:
 pip install stellar-spice[phoebe]
 ```
 
+For zarr-backed model-atmosphere grid interpolation (`LazyZarrInterpolator` and friends):
+
+```bash
+pip install stellar-spice[grid]
+```
+
 
 ## Documentation
 
@@ -36,7 +42,7 @@ pip install stellar-spice[phoebe]
 
 ### 🔄 **Stellar Rotation**
 
-- **Differential rotation** modeling with customizable rotation laws
+- **Solid-body (rigid) rotation** with a configurable axis and equatorial velocity
 - **Rotational broadening** effects on spectral lines
 - **Surface velocity field** calculations
 - **Time-dependent spectral variations** due to rotation
@@ -58,17 +64,16 @@ pip install stellar-spice[phoebe]
 ### ⭐ **Binary Star Systems**
 
 - **Full orbital dynamics** with Keplerian orbits
-- **Mutual eclipses** and occultations
-- **Roche lobe geometry** for close binaries
-- **Tidal distortion** effects
-- **PHOEBE integration** for advanced binary modeling
+- **Mutual eclipses** and occultations resolved on the projected meshes
+- **PHOEBE integration** — import Roche-lobe geometry and tidally distorted binary meshes computed by PHOEBE
 
 ### 📊 **Spectral Synthesis**
 
 - **Blackbody radiation** for basic stellar modeling
-- **ATLAS9 model atmospheres** for realistic stellar spectra
+- **Model-atmosphere grid interpolation** from precomputed, zarr-backed grids
+- **Analytic line-profile emulators** (Gaussian and physical)
 - **Transformer-Payne** integration for ML-based spectral synthesis
-- **Custom spectral models** support
+- **Custom spectral models** via the `SpectrumEmulator` interface
 
 ### 🔍 **Synthetic Photometry**
 
@@ -92,73 +97,113 @@ pip install stellar-spice[phoebe]
 ```python
 import numpy as np
 from spice.models import IcosphereModel
-from spice.spectrum import simulate_observed_flux
-from spice.spectrum.blackbody import Blackbody
+from spice.models.mesh_transform import add_rotation
+from spice.spectrum import simulate_observed_flux, Blackbody
+
+bb = Blackbody()
 
 # Create a solar-like star
 star = IcosphereModel.construct(
-    subdivisions=500,  # Mesh resolution
-    radius=1.0,        # Solar radii
-    mass=1.0,          # Solar masses
-    parameters=Blackbody().solar_parameters,
-    parameter_names=Blackbody().parameter_names
+    n_vertices=1000,                 # Mesh resolution (number of vertices)
+    radius=1.0,                      # Solar radii
+    mass=1.0,                        # Solar masses
+    parameters=bb.solar_parameters,
+    parameter_names=bb.parameter_names,
 )
 
-# Add rotation
-star = star.add_rotation(period=25.0)  # 25-day rotation period
+# Add solid-body rotation (equatorial velocity in km/s)
+star = add_rotation(star, rotation_velocity=2.0)
 
-# Generate spectrum
-wavelengths = np.logspace(3, 4, 1000)  # 1000-10000 Å
-spectrum = simulate_observed_flux(Blackbody().intensity, star, wavelengths)
+# Generate the disc-integrated spectrum. simulate_observed_flux expects *log10*
+# wavelengths and returns an (n_wavelengths, 2) array whose columns are the
+# disc-integrated emulator channels (flux and continuum; column 0 is the flux).
+wavelengths = np.logspace(3, 4, 1000)            # 1000-10000 Å
+flux = simulate_observed_flux(bb.intensity, star, np.log10(wavelengths))
 ```
 
 ### Binary Star System
 
 ```python
-from spice.models import Binary, add_orbit
+import numpy as np
+import jax.numpy as jnp
+from spice.models import IcosphereModel, Binary
+from spice.models.binary import add_orbit, evaluate_orbit_at_times
+from spice.models.mesh_view import get_mesh_view
+from spice.spectrum import simulate_observed_flux, Blackbody, AB_passband_luminosity
 from spice.spectrum.filter import GaiaG
 
-# Create binary components
-primary = IcosphereModel.construct(500, 1.0, 1.0, bb.solar_parameters, bb.parameter_names)
-secondary = IcosphereModel.construct(500, 0.8, 0.8, bb.solar_parameters, bb.parameter_names)
+bb = Blackbody()
+los = jnp.array([0.0, 1.0, 0.0])  # line of sight
 
-# Create binary system
+# Create binary components (cast to the line of sight for occlusion handling)
+primary = get_mesh_view(
+    IcosphereModel.construct(1000, 1.0, 1.0, bb.solar_parameters, bb.parameter_names), los)
+secondary = get_mesh_view(
+    IcosphereModel.construct(1000, 0.8, 0.8, bb.solar_parameters, bb.parameter_names), los)
+
+# Assemble the system
 binary = Binary.from_bodies(primary, secondary)
 
-# Add orbital parameters
+# Add orbital elements
 binary = add_orbit(
     binary,
-    P=1.0,      # 1-year period
-    ecc=0.1,    # 10% eccentricity
-    i=np.pi/3,  # 60° inclination
-    # ... other orbital elements
+    P=1.0,                    # orbital period [years]
+    ecc=0.1,                  # eccentricity
+    T=0.0,                    # time of periastron passage [years]
+    i=np.pi / 3,              # inclination [rad]
+    omega=0.0,                # argument of periastron [rad]
+    Omega=0.0,                # longitude of the ascending node [rad]
+    mean_anomaly=0.0,         # mean anomaly at the reference time [rad]
+    reference_time=0.0,       # reference time [years]
+    vgamma=0.0,               # systemic velocity [km/s]
+    orbit_resolution_points=50,
 )
 
-# Calculate light curve
-times = np.linspace(0, 1, 100)
-light_curve = []
-for t in times:
-    p1, p2 = evaluate_orbit_at_times(binary, t)
-    flux = simulate_observed_flux(bb.intensity, p1, wavelengths) + \
-           simulate_observed_flux(bb.intensity, p2, wavelengths)
-    light_curve.append(AB_passband_luminosity(GaiaG(), wavelengths, flux))
+# Evaluate the orbit across phases (eclipses/occlusions resolved internally)
+times = jnp.linspace(0.0, 1.0, 100)
+primaries, secondaries = evaluate_orbit_at_times(binary, times)
+
+# Combined Gaia G-band light curve
+wavelengths = np.linspace(900, 40000, 1000)
+gaia_g = GaiaG()
+light_curve = [
+    AB_passband_luminosity(
+        gaia_g,
+        wavelengths,
+        simulate_observed_flux(bb.intensity, p1, np.log10(wavelengths))[:, 0]
+        + simulate_observed_flux(bb.intensity, p2, np.log10(wavelengths))[:, 0],
+    )
+    for p1, p2 in zip(primaries, secondaries)
+]
 ```
 
 ### PHOEBE Integration
 
 ```python
+import numpy as np
 import phoebe
+from phoebe.parameters.dataset import _mesh_columns
 from spice.models import PhoebeBinary
+from spice.models.binary import evaluate_orbit
+from spice.models.phoebe_utils import PhoebeConfig
+from spice.spectrum import simulate_observed_flux, Blackbody
 
-# Create PHOEBE binary
+bb = Blackbody()
+
+# Build a PHOEBE binary and compute a mesh dataset (standard PHOEBE workflow)
 b = phoebe.default_binary()
-# ... set up PHOEBE parameters
+times = np.linspace(0, 1, 10)
+b.add_dataset('mesh', compute_times=times, columns=_mesh_columns, dataset='mesh01')
+b.run_compute(coordinates='uvw', overwrite=True)
 
-# Convert to SPICE format
-pb = PhoebeBinary.construct(b, parameter_names, parameter_values)
+# Wrap the PHOEBE meshes for SPICE (PHOEBE models are read-only inside SPICE)
+config = PhoebeConfig(b, 'mesh01')
+pb = PhoebeBinary.construct(config, ['teff', 'logg', 'abun'])
 
-# Use SPICE for spectral calculations
-spectrum = simulate_observed_flux(intensity_function, pb, wavelengths)
+# Evaluate the components at a snapshot time, then synthesise the spectrum
+primary, secondary = evaluate_orbit(pb, config.times[0])
+wavelengths = np.logspace(3, 4, 1000)
+flux = simulate_observed_flux(bb.intensity, primary, np.log10(wavelengths))
 ```
 
 ## Performance
@@ -227,4 +272,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Paper currently in preparation** - Check back for the full scientific publication!
+**A preprint describing SPICE is available on [arXiv](https://arxiv.org/abs/2511.10998).** See [Citation](#citation) if you use it in your work.
