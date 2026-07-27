@@ -3,6 +3,11 @@ Synthetic Photometry
 
 SPICE provides robust capabilities for synthetic photometry calculations. This section demonstrates how to use SPICE to generate synthetic photometry for various passbands and calculate stellar luminosities.
 
+.. note::
+
+   Every code snippet on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/synthetic_photometry_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/synthetic_photometry_examples.ipynb>`_.
+
 Passband Luminosities
 ---------------------
 
@@ -64,7 +69,8 @@ SPICE includes utilities to calculate luminosity offsets for blackbody models wi
             'absolute_bol_luminosity': absolute_bol_luminosity(solar_luminosity),
             'AB_solar_apparent_mag_B': AB_passband_luminosity(JohnsonCousinsB(), wavelengths, flux[:, 0]),
             'AB_solar_apparent_mag_V': AB_passband_luminosity(JohnsonCousinsV(), wavelengths, flux[:, 0]),
-            'ST_solar_apparent_mag_G': ST_passband_luminosity(GaiaG(), wavelengths, flux[:, 0]),
+            # Gaia filters are photonic and not supported for ST magnitudes
+            'ST_solar_apparent_mag_V': ST_passband_luminosity(JohnsonCousinsV(), wavelengths, flux[:, 0]),
         }
 
     # Calculate for different resolutions

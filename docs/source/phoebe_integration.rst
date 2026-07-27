@@ -3,6 +3,12 @@ PHOEBE Integration
 
 SPICE provides integration with the PHOEBE (PHysics Of Eclipsing BinariEs) library, allowing users to model binary star systems and generate synthetic spectra based on PHOEBE models.
 
+.. note::
+
+   Every code snippet on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/phoebe_integration_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/phoebe_integration_examples.ipynb>`_
+   (requires the ``phoebe`` extra).
+
 Setting up a PHOEBE Model
 -------------------------
 
