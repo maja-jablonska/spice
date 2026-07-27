@@ -67,7 +67,7 @@ Stellar parameters
   radius, and rotation.
 - Effective temperature is linear Kelvin for :class:`~spice.spectrum.Blackbody`
   and the grid interpolators, but **log10 Kelvin** (``logteff``) for
-  TransformerPayne — check your emulator's ``parameter_names``.
+  TPayne-style aemu bundles — check your emulator's ``parameter_names``.
 
 Spots and pulsations
 --------------------

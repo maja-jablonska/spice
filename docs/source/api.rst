@@ -311,6 +311,17 @@ Emulators
 .. autoclass:: spice.spectrum.user_spectrum_interpolator.UserSpectrumInterpolator
    :members:
 
+Neural-network bundles (``aemu`` extra; see :doc:`aemu_integration`):
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.AemuSpectrumEmulator
+   :members: flux, intensity, to_parameters
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.PretrainedAemuSpectrumEmulator
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.FluxPretrainedAemuSpectrumEmulator
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.IntensityPretrainedAemuSpectrumEmulator
+
 
 Grid Interpolation
 ------------------

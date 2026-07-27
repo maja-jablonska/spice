@@ -39,7 +39,7 @@ reproduced by running the matching notebook end-to-end.
 | [`spectral_grids_examples.ipynb`](docs_examples/spectral_grids_examples.ipynb) | Spectral Grids | `[grid]` extra |
 | [`custom_emulators_examples.ipynb`](docs_examples/custom_emulators_examples.ipynb) | Custom Emulators | core install |
 | [`synthetic_photometry_examples.ipynb`](docs_examples/synthetic_photometry_examples.ipynb) | Synthetic Photometry | core install |
-| [`transformer_payne_examples.ipynb`](docs_examples/transformer_payne_examples.ipynb) | TransformerPayne Integration | `transformer-payne`, `huggingface-hub` |
+| [`aemu_examples.ipynb`](docs_examples/aemu_examples.ipynb) | Machine-Learning Emulators (aemu) | `[aemu]` extra |
 | [`binaries_examples.ipynb`](docs_examples/binaries_examples.ipynb) | Binaries | `[phoebe]` extra |
 | [`phoebe_integration_examples.ipynb`](docs_examples/phoebe_integration_examples.ipynb) | PHOEBE Integration | `[phoebe]` extra |
 

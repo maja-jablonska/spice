@@ -30,11 +30,11 @@ Optional extras
        from PHOEBE (:doc:`phoebe_integration`)
      - ``phoebe``
    * - ``[huggingface]``
-     - Downloading pretrained emulators such as TransformerPayne
-       (:doc:`transformer_payne_integration`)
+     - Downloading pretrained emulator bundles from Hugging Face
      - ``huggingface-hub``
    * - ``[aemu]``
-     - The ``astro-emulators-toolkit`` spectrum emulators
+     - Neural-network spectrum emulators loaded as bundles
+       (:doc:`aemu_integration`)
      - ``astro-emulators-toolkit``
    * - ``[dev]``
      - Running the test suite
@@ -45,12 +45,6 @@ Extras combine freely, e.g.:
 .. code-block:: bash
 
     pip install "stellar-spice[grid,phoebe]"
-
-The TransformerPayne emulator itself is a separate package:
-
-.. code-block:: bash
-
-    pip install transformer-payne
 
 Verifying the install
 ---------------------

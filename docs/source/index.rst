@@ -17,7 +17,7 @@ This approach allows SPICE to accurately model stars with inhomogeneous surfaces
    - Implement rotation and pulsations for stellar mesh models
 
 2. **Spectral Synthesis**:
-   - Generate synthetic spectra using various models (e.g., Blackbody, TransformerPayne)
+   - Generate synthetic spectra using various models (e.g., Blackbody, neural-network aemu bundles)
    - Simulate observed flux for different stellar configurations with varying resolutions
    - Account for Doppler shifts in spectral calculations
 
@@ -42,7 +42,7 @@ This approach allows SPICE to accurately model stars with inhomogeneous surfaces
    - Integration with other astronomical tools and libraries (e.g., PHOEBE, Synphot)
 
 
-The underlying spectrum model is configurable - we provide a machine-learning based spectrum emulator, `Transformer Payne <https://github.com/RozanskiT/transformer_payne>`_
+The underlying spectrum model is configurable — machine-learning emulators are consumed as ``astro-emulators-toolkit`` (aemu) bundles; see :doc:`aemu_integration`.
 
 .. note::
 
@@ -63,7 +63,7 @@ Contents
    spectral_grids
    custom_emulators
    binaries
-   transformer_payne_integration
+   aemu_integration
    phoebe_integration
    synthetic_photometry
    api

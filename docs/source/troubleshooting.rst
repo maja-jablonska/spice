@@ -29,9 +29,9 @@ If you run into resource exhaustion while synthesizing spectra, try changing the
 
 .. code-block:: python
 
-    t = TransformerPayne.download()
-    
-    flux = simulate_observed_flux(t.intensity, model, jnp.log10(wavelengths), chunk_size=128)
+    emu = IntensityPretrainedAemuSpectrumEmulator("RozanskiT/TPayne-spice-small-random")
+
+    flux = simulate_observed_flux(emu.intensity, model, jnp.log10(wavelengths), chunk_size=128)
 
 
 Buffer Comparator Difference

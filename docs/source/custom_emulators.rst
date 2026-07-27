@@ -118,5 +118,5 @@ Built-in implementations to crib from
   user-supplied spectrum table.
 - The :doc:`grid interpolators <spectral_grids>` — the full-featured
   reference, including ``mu`` handling and lazy loading.
-- TransformerPayne (:doc:`transformer_payne_integration`) — an external
-  neural-network emulator consumed through the same interface.
+- The aemu wrappers (:doc:`aemu_integration`) — neural-network emulator
+  bundles consumed through the same interface.

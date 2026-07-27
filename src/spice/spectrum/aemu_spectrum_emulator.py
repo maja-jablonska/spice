@@ -365,6 +365,7 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
 
     Matches bundles like ``RozanskiT/TPayne-spice-small-random`` (and the
     locally-trained "new FE" Tpayne intensity bundles):
+
         * Inputs:  ``{"parameters": (B, n_p), "wavelengths": (B, n_w)}`` —
           ``wavelengths`` are **log10(Angstrom)**. The full input parameter
           channel list includes ``mu`` (the bundle is a true intensity
