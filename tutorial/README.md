@@ -28,8 +28,7 @@ recommended but not strictly required.
 
 ## Documentation examples — [`docs_examples/`](docs_examples/)
 
-Notebooks that generate figures and grid examples for the documentation
-(`docs_imgs.ipynb`, `korg_interpolator_parameters.ipynb`).
+Notebooks that generate figures for the documentation (`docs_imgs.ipynb`).
 
 ## Paper reproduction — [`paper_results/`](paper_results/)
 

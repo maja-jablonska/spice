@@ -10,14 +10,14 @@ SPICE can calculate luminosities for different photometric filters, given a synt
 
 .. code-block:: python
 
-    from spice.spectrum.filter import BesselU, BesselB, BesselV, Bolometric, GaiaG
+    from spice.spectrum.filter import JohnsonCousinsU, JohnsonCousinsB, JohnsonCousinsV, Bolometric, GaiaG
     from spice.spectrum.spectrum import AB_passband_luminosity, luminosity
-    
+
     # Calculate passband luminosities
-    filters = [BesselU(), BesselB(), BesselV(), Bolometric(), GaiaG()]
+    filters = [JohnsonCousinsU(), JohnsonCousinsB(), JohnsonCousinsV(), Bolometric(), GaiaG()]
     passband_lums = [AB_passband_luminosity(f, wavelengths, flux) for f in filters]
 
-This code snippet demonstrates how to calculate luminosities for Bessel U, B, V, Bolometric, and Gaia G passbands.
+This code snippet demonstrates how to calculate luminosities for Johnson-Cousins U, B, V, Bolometric, and Gaia G passbands.
 
 Solar Luminosity Calculation
 ----------------------------
@@ -46,7 +46,7 @@ SPICE includes utilities to calculate luminosity offsets for blackbody models wi
 
     from spice.models import IcosphereModel
     from spice.spectrum import simulate_observed_flux, luminosity, absolute_bol_luminosity
-    from spice.spectrum.filter import BesselB, BesselI, GaiaG, JohnsonV
+    from spice.spectrum.filter import JohnsonCousinsB, JohnsonCousinsI, GaiaG, JohnsonCousinsV
     from spice.spectrum.spectrum import AB_passband_luminosity, ST_passband_luminosity
     from transformer_payne import Blackbody
 
@@ -63,8 +63,8 @@ SPICE includes utilities to calculate luminosity offsets for blackbody models wi
             'n_vertices': len(model.d_vertices),
             'solar_luminosity': solar_luminosity,
             'absolute_bol_luminosity': absolute_bol_luminosity(solar_luminosity),
-            'AB_solar_apparent_mag_B': AB_passband_luminosity(BesselB(), wavelengths, flux[:, 0]),
-            'AB_solar_apparent_mag_V': AB_passband_luminosity(JohnsonV(), wavelengths, flux[:, 0]),
+            'AB_solar_apparent_mag_B': AB_passband_luminosity(JohnsonCousinsB(), wavelengths, flux[:, 0]),
+            'AB_solar_apparent_mag_V': AB_passband_luminosity(JohnsonCousinsV(), wavelengths, flux[:, 0]),
             'ST_solar_apparent_mag_G': ST_passband_luminosity(GaiaG(), wavelengths, flux[:, 0]),
         }
 
