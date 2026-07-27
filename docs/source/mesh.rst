@@ -11,7 +11,7 @@ To create a basic icosphere model, you can use the `IcosphereModel.construct()` 
 .. code-block:: python
 
     from spice.models import IcosphereModel
-    from transformer_payne import Blackbody
+    from spice.spectrum import Blackbody
 
     # Initialize a Blackbody model (for spectrum calculation)
     bb = Blackbody()
