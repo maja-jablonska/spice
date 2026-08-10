@@ -142,7 +142,7 @@ IcosphereModel
    :show-inheritance:
    :exclude-members: count, index, construct
 
-   .. method:: construct(n_vertices: int, radius: float, mass: float, parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]], parameter_names: List[str], max_pulsation_mode: int = 5, max_fourier_order: int = 5, override_log_g: bool = True, log_g_index: Optional[int] = None) -> IcosphereModel
+   .. method:: construct(n_vertices: int, radius: float, mass: float, parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]], parameter_names: List[str], max_pulsation_mode: int = 5, max_fourier_order: int = 5, override_log_g: bool = False, log_g_index: Optional[int] = None) -> IcosphereModel
       
       Constructs an IcosphereModel with specified stellar and mesh properties.
 
@@ -157,8 +157,8 @@ IcosphereModel
       :param parameter_names: Names of the parameters, used for identifying log g parameter
       :param max_pulsation_mode: Maximum pulsation mode for the model, defaults to 5
       :param max_fourier_order: Maximum order of Fourier series for pulsation calculation, defaults to 5
-      :param override_log_g: Whether to override the log g values based on model's mass and centers, defaults to True
-      :param log_g_index: Index of the log g parameter in parameters array. Required if override_log_g is True and specific log g parameter name not in parameter_names
+      :param override_log_g: If False (default), log g parameters are computed by SPICE from the model's mass and per-element radius. If True, explicitly passed log g values are kept as-is and a warning is issued.
+      :param log_g_index: Index of the log g parameter in parameters array. Only needed when no name in parameter_names matches one of the recognized log g names (see LOG_G_NAMES)
       :return: An instance of IcosphereModel initialized with the specified properties
 
 Constants

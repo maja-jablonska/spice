@@ -61,10 +61,11 @@ Stellar parameters
 ------------------
 
 - Mesh radius and mass are in solar units (solRad, solMass).
-- Surface gravity is :math:`\log_{10} g` in cgs (cm/s²); when
-  ``override_log_g=True`` (the default) any parameter named like ``logg``
-  (see ``LOG_G_NAMES``) is recomputed per element from mass, per-element
-  radius, and rotation.
+- Surface gravity is :math:`\log_{10} g` in cgs (cm/s²). By default, any
+  parameter named like ``logg`` (see ``LOG_G_NAMES``) is computed by SPICE
+  per element from mass and per-element radius. Pass ``override_log_g=True``
+  to keep explicitly supplied log g values instead; a warning is issued to
+  flag that SPICE's computed values are being overridden.
 - Effective temperature is linear Kelvin for :class:`~spice.spectrum.Blackbody`
   and the grid interpolators, but **log10 Kelvin** (``logteff``) for
   TPayne-style aemu bundles — check your emulator's ``parameter_names``.

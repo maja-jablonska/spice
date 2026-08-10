@@ -1,3 +1,5 @@
+import pytest
+
 from spice.models import IcosphereModel
 import jax.numpy as jnp
 
@@ -92,7 +94,7 @@ class TestIcosphere:
                                            ]).T)
                        )
 
-    def test_icosphere_parameters_from_list_logg_overriding(self):
+    def test_icosphere_parameters_from_list_logg_computed_by_default(self):
         model = IcosphereModel.construct(
                 n_vertices=1000,
                 radius=1.,
@@ -112,15 +114,16 @@ class TestIcosphere:
                        )
 
 
-    def test_icosphere_parameters_from_list_logg_no_overriding(self):
-        model = IcosphereModel.construct(
-            n_vertices=1000,
-            radius=1.,
-            mass=1.,
-            parameters=[5777., 0.5],
-            parameter_names=['teff', 'logg'],
-            override_log_g=False
-        )
+    def test_icosphere_parameters_from_list_logg_user_override(self):
+        with pytest.warns(UserWarning, match="override_log_g is True"):
+            model = IcosphereModel.construct(
+                n_vertices=1000,
+                radius=1.,
+                mass=1.,
+                parameters=[5777., 0.5],
+                parameter_names=['teff', 'logg'],
+                override_log_g=True
+            )
 
         assert jnp.all(jnp.isclose(model.parameters,
                                    jnp.vstack([
