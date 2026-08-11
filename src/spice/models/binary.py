@@ -233,7 +233,12 @@ def add_orbit(binary: Binary,
         i (float): Inclination of the orbit in radians.
         omega (float): Argument of periastron in radians.
         Omega (float): Longitude of the ascending node in radians.
-        mean_anomaly (float): Mean anomaly at reference time in radians.
+        mean_anomaly (float): Additive phase offset in radians on top of the
+            periastron timing (the orbit uses ``M(t) = mean_anomaly + n*(t - T)``).
+            Set either ``mean_anomaly`` or ``T``, not both: passing PHOEBE-style
+            values for both (where ``mean_anom`` at the reference time already
+            encodes ``T``) double-counts the periastron phase and shifts every
+            orbital event.
         reference_time (float): Reference time in years.
         vgamma (float): Systemic line-of-sight velocity in **km/s** (same units as
             PHOEBE ``vgamma@binary``). Converted to SI inside ``get_orbit_jax``.

@@ -28,11 +28,15 @@ from spice.utils.dtypes import float_dtype as _float_dtype
 
 
 def _default_los_vector():
-    return jnp.array([0., 1., 0.], dtype=_float_dtype())
+    # Points observer -> star; [0, 0, -1] is the standard astronomical
+    # convention shared by PhoebeModel and the binary-orbit utilities.
+    return jnp.array([0., 0., -1.], dtype=_float_dtype())
 
 
 def _default_rotation_axis():
-    return jnp.array([0., 0., 1.], dtype=_float_dtype())
+    # Kept in the sky plane of the default LOS so that a rotating star is
+    # viewed equator-on by default (maximal Doppler signal, not pole-on).
+    return jnp.array([0., 1., 0.], dtype=_float_dtype())
 
 
 def _no_rotation_matrix():

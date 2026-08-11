@@ -8,10 +8,12 @@ should agree with it.
 Geometry and line of sight
 --------------------------
 
-- The default line-of-sight vector is ``[0., 1., 0.]`` (the +Y axis) for a
-  single :class:`~spice.models.MeshModel`; binary-orbit utilities default to
-  ``[0., 0., -1.]``, the standard astronomical convention. Pass an explicit
-  ``los_vector`` when combining the two.
+- The line-of-sight vector defaults to ``[0., 0., -1.]`` everywhere — single
+  :class:`~spice.models.MeshModel`\ s, PHOEBE models, and the binary-orbit
+  utilities all share this standard astronomical convention (it points
+  observer → star). The default rotation axis is ``[0., 1., 0.]``, which lies
+  in the default sky plane, so a rotating star is viewed equator-on by
+  default.
 - ``mesh.mus`` is the cosine of the angle between an element's surface normal
   and the line of sight; only elements with positive ``mus`` contribute to
   synthesized flux.
@@ -44,6 +46,12 @@ Time and periods
 - Orbital elements in :func:`~spice.models.binary.add_orbit` (``P``, ``T``,
   ``reference_time``) are in **years**; PHOEBE-imported meshes carry PHOEBE's
   native **days**.
+- ``mean_anomaly`` in :func:`~spice.models.binary.add_orbit` is an *additive
+  phase offset on top of* the periastron timing (``M(t) = mean_anomaly +
+  n·(t − T)``), not "the mean anomaly at the reference epoch". Set either
+  ``mean_anomaly`` or ``T``, not both — PHOEBE-consistent values for both
+  double-count the periastron phase. ``PhoebeBinary`` is unaffected (it uses
+  PHOEBE's own precomputed orbit).
 
 Wavelengths and spectra
 -----------------------

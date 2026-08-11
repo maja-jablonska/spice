@@ -79,7 +79,7 @@ bundle's parameters, then synthesize:
                                  emu.to_parameters(dict(logteff=jnp.log10(7000), logg=4.3)),
                                  emu.stellar_parameter_names)
 
-    mt = evaluate_rotation(add_rotation(m, 100, jnp.array([0., 0., 1.])), 0.)
+    mt = evaluate_rotation(add_rotation(m, 100, jnp.array([0., 1., 0.])), 0.)
 
     vws = np.linspace(4670, 4960, 2000)
     spec_no_rot = simulate_observed_flux(emu.intensity, m, jnp.log10(vws))

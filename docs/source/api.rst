@@ -169,9 +169,11 @@ Constants
 
    List of valid parameter names for surface gravity. If the parameter name is not in this list, the surface gravity will be calculated using the mass and center positions.
 
-The default line-of-sight vector is ``[0., 1., 0.]`` (the +Y direction) and the
-default rotation axis is ``[0., 0., 1.]`` (the Z axis); both are created
-internally with the dtype matching the active precision setting.
+The default line-of-sight vector is ``[0., 0., -1.]`` (observer → star, the
+standard astronomical convention shared with the binary-orbit utilities) and
+the default rotation axis is ``[0., 1., 0.]`` (in the default sky plane, so
+rotation is viewed equator-on); both are created internally with the dtype
+matching the active precision setting.
 
 .. data:: spice.models.mesh_model.DEFAULT_MAX_PULSATION_MODE_PARAMETER
    :type: int
@@ -260,6 +262,8 @@ Binaries and Orbits
 .. autofunction:: spice.models.binary.evaluate_orbit_at_times_stacked
 
 .. autofunction:: spice.models.eclipse_utils.find_eclipses
+
+.. autofunction:: spice.models.eclipse_utils.find_binary_eclipses
 
 .. autofunction:: spice.models.orbit_utils.get_orbit_jax
 

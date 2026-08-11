@@ -83,8 +83,9 @@ You can add rotation to your model using the `add_rotation()` function:
     rm = add_rotation(
         m, # Model instance
         rotation_velocity=10., # Rotation velocity in km/s
-        rotation_axis=jnp.array([0, 0, 1]) # Rotation axis (relative to the model center)
-    )  # Rotate around z-axis
+        rotation_axis=jnp.array([0, 1, 0]) # Rotation axis (relative to the model center)
+    )  # Rotate around the y-axis (the default), which lies in the sky plane
+       # of the default line of sight [0, 0, -1]
 
     t = 1. # time in seconds
 

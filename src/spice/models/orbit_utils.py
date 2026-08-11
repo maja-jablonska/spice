@@ -139,9 +139,8 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
                ``λ_rest·(1 + vgamma/c)``.
       los_vector : 3-component line-of-sight unit vector along which to apply
                ``vgamma``. Defaults to ``[0, 0, -1]`` — the standard astronomical
-               convention used by ``eclipse_timestamps_kepler`` and by the
-               PHOEBE comparison notebooks. Pass ``[0, 1, 0]`` if you are
-               using the mesh's legacy y-axis LOS.
+               convention shared by ``MeshModel``, ``PhoebeModel``, and
+               ``eclipse_timestamps_kepler``.
 
     Returns:
       An array containing positions and velocities with shape (6, len(time), 3).
@@ -175,9 +174,12 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
     # Mean motion.
     n = 2 * jnp.pi / P
 
-    # Mean anomaly M(t).  Reference epoch and periastron time are honored:
-    #   M = M_ref + n * (t - t_ref) + n * (t_ref - T) = M_ref + n * (t - T)
-    # with M_ref = mean_anomaly at t_ref = reference_time (radians).
+    # Mean anomaly M(t) = mean_anomaly + n * (t - T): ``mean_anomaly`` acts as
+    # an *additive phase offset on top of* the periastron timing, NOT as "the
+    # mean anomaly at reference_time". Set either ``mean_anomaly`` (with
+    # T = reference_time) or ``T`` (with mean_anomaly = 0) — supplying both as
+    # PHOEBE-consistent values (where mean_anom at t_ref already equals
+    # n*(t_ref - T)) double-counts the periastron phase.
     # When reference_time = T = 0 this matches the legacy ``n*t + mean_anomaly``.
     M_anom = (mean_anomaly + n * (time - reference_time) + n * (reference_time - T))
 

@@ -4,6 +4,12 @@ Quickstart
 This page walks through the two most common workflows end to end: a single
 rotating star and an eclipsing binary. Both run with the core install only.
 
+.. note::
+
+   Every code snippet and figure on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/quickstart.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/quickstart.ipynb>`_;
+   running it end-to-end regenerates all figures below.
+
 A single rotating star
 ----------------------
 
@@ -28,6 +34,31 @@ A single rotating star
     wavelengths = np.logspace(3, 4, 1000)  # 1,000-10,000 Angstroms
     flux = simulate_observed_flux(bb.intensity, star, np.log10(wavelengths))
 
+The mesh carries the rotation as per-element line-of-sight velocities:
+
+.. image:: ../img/quickstart_rotating_mesh.png
+   :width: 600
+   :alt: Rotating star mesh colored by line-of-sight velocity
+   :class: only-light
+
+.. image:: ../img/quickstart_rotating_mesh_dark.png
+   :width: 600
+   :alt: Rotating star mesh colored by line-of-sight velocity
+   :class: only-dark
+
+and the synthesized spectrum is a blackbody continuum over the requested
+wavelength range:
+
+.. image:: ../img/quickstart_spectrum.png
+   :width: 600
+   :alt: Synthesized blackbody spectrum of the rotating star
+   :class: only-light
+
+.. image:: ../img/quickstart_spectrum_dark.png
+   :width: 600
+   :alt: Synthesized blackbody spectrum of the rotating star
+   :class: only-dark
+
 Three things to remember (all covered in detail in :doc:`conventions` and
 :doc:`spectral_synthesis`):
 
@@ -51,7 +82,7 @@ An eclipsing binary with a light curve
     from spice.spectrum.filter import GaiaG
 
     bb = Blackbody()
-    los = jnp.array([0.0, 1.0, 0.0])  # line of sight
+    los = jnp.array([0.0, 0.0, -1.0])  # line of sight (observer -> star)
 
     # Cast each component to the line of sight so occlusions can be resolved
     primary = get_mesh_view(
@@ -61,12 +92,13 @@ An eclipsing binary with a light curve
 
     binary = Binary.from_bodies(primary, secondary)
 
+    # A close, edge-on system (P ~ 3.65 days) so the components actually eclipse
     binary = add_orbit(
         binary,
-        P=1.0,                    # orbital period [years]
-        ecc=0.1,                  # eccentricity
+        P=0.01,                   # orbital period [years]
+        ecc=0.0,                  # eccentricity
         T=0.0,                    # time of periastron passage [years]
-        i=np.pi / 3,              # inclination [rad]
+        i=np.pi / 2,              # inclination [rad], edge-on
         omega=0.0,                # argument of periastron [rad]
         Omega=0.0,                # longitude of the ascending node [rad]
         mean_anomaly=0.0,         # mean anomaly at the reference time [rad]
@@ -75,8 +107,8 @@ An eclipsing binary with a light curve
         orbit_resolution_points=50,
     )
 
-    # Evaluate the orbit across phases (eclipses/occlusions resolved internally)
-    times = jnp.linspace(0.0, 1.0, 100)
+    # Evaluate the orbit across one period (eclipses/occlusions resolved internally)
+    times = jnp.linspace(0.0, 0.01, 100)
     primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
     # Combined Gaia G-band light curve
@@ -91,6 +123,42 @@ An eclipsing binary with a light curve
         )
         for p1, p2 in zip(primaries, secondaries)
     ]
+
+The two total eclipses (at phases 0.25 and 0.75) show up as dips in the
+light curve:
+
+.. image:: ../img/quickstart_light_curve.png
+   :width: 600
+   :alt: Gaia G-band light curve of the eclipsing binary
+   :class: only-light
+
+.. image:: ../img/quickstart_light_curve_dark.png
+   :width: 600
+   :alt: Gaia G-band light curve of the eclipsing binary
+   :class: only-dark
+
+Locating the eclipses
+^^^^^^^^^^^^^^^^^^^^^
+
+Rather than sampling the whole orbit densely, locate the eclipse windows
+first with :func:`~spice.models.find_binary_eclipses` — it samples a
+low-resolution orbit itself from the binary's orbital elements — and
+concentrate the synthesis time points there:
+
+.. code-block:: python
+
+    from spice.models import find_binary_eclipses
+
+    eclipses = find_binary_eclipses(binary)   # scans one period by default
+    for e in eclipses:
+        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in years
+
+    # Densely sample the first eclipse window only
+    dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 50)
+    primaries, secondaries = evaluate_orbit_at_times(binary, dense)
+
+For the system above this finds two total eclipses per period, at phases
+0.25 and 0.75.
 
 See :doc:`binaries` for the full binary-modelling guide (including PHOEBE
 import) and :doc:`synthetic_photometry` for the available filters and

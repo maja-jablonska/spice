@@ -28,7 +28,7 @@ occlusion handling), and combine:
     from spice.spectrum import simulate_observed_flux, Blackbody
 
     bb = Blackbody()
-    los = jnp.array([0.0, 1.0, 0.0])
+    los = jnp.array([0.0, 0.0, -1.0])  # line of sight (observer -> star)
 
     primary = get_mesh_view(
         IcosphereModel.construct(1000, 1.0, 1.0, bb.solar_parameters, bb.parameter_names), los)
@@ -43,10 +43,10 @@ Attach the orbit — component masses come from the meshes; the elements are:
 
     binary = add_orbit(
         binary,
-        P=1.0,                    # orbital period [years]
-        ecc=0.1,                  # eccentricity
+        P=0.01,                   # orbital period [years] (~3.65 days)
+        ecc=0.0,                  # eccentricity
         T=0.0,                    # time of periastron passage [years]
-        i=np.pi / 3,              # inclination [rad]
+        i=np.pi / 2,              # inclination [rad], edge-on so eclipses occur
         omega=0.0,                # argument of periastron [rad]
         Omega=0.0,                # longitude of the ascending node [rad]
         mean_anomaly=0.0,         # mean anomaly at the reference time [rad]
@@ -57,6 +57,16 @@ Attach the orbit — component masses come from the meshes; the elements are:
 
 ``orbit_resolution_points`` sets how densely the orbit is precomputed for
 interpolation; increase it for very eccentric orbits.
+
+.. warning::
+
+   ``mean_anomaly`` is an *additive phase offset on top of* the periastron
+   timing — the orbit solver uses ``M(t) = mean_anomaly + n·(t − T)``. Set
+   either ``mean_anomaly`` or ``T``, not both: passing PHOEBE-style values
+   for both (where the mean anomaly at the reference epoch already encodes
+   the periastron time) double-counts the periastron phase and shifts every
+   orbital event. This does not affect ``PhoebeBinary``, which uses PHOEBE's
+   own precomputed orbit throughout.
 
 Evaluating the orbit
 ^^^^^^^^^^^^^^^^^^^^
@@ -69,7 +79,7 @@ a time array:
 
 .. code-block:: python
 
-    times = jnp.linspace(0.0, 1.0, 100)
+    times = jnp.linspace(0.0, 0.01, 100)   # one orbital period
     primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
     wavelengths = np.linspace(900, 40000, 1000)
@@ -88,11 +98,36 @@ time series show the orbital Doppler shifts (plus ``vgamma``).
 Locating eclipses
 ^^^^^^^^^^^^^^^^^
 
-:func:`~spice.models.find_eclipses` locates eclipse windows from sampled
-sky-projected positions and velocities of the two components: it returns the
-contact times (T1–T4), mid-eclipse time, and whether each event is partial,
-total, or grazing. Use it to concentrate expensive synthesis time points
-around the events instead of sampling the whole orbit densely.
+:func:`~spice.models.find_binary_eclipses` locates eclipse windows directly
+from a ``Binary`` (or ``PhoebeBinary``): it samples a low-resolution orbit
+itself from the binary's stored orbital elements, so no manual orbit
+evaluation is needed. It returns the contact times (T1–T4), the mid-eclipse
+time, and whether each event is partial, total, or grazing. Use it to
+concentrate expensive synthesis time points around the events instead of
+sampling the whole orbit densely:
+
+.. code-block:: python
+
+    from spice.models import find_binary_eclipses
+
+    eclipses = find_binary_eclipses(binary)   # scans one period by default
+    for e in eclipses:
+        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in years
+
+    # Concentrate synthesis points inside the first eclipse window
+    dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 50)
+    primaries, secondaries = evaluate_orbit_at_times(binary, dense)
+
+For the edge-on system above this finds two total eclipses per period, at
+phases 0.25 and 0.75.
+
+The sky plane defaults to the plane perpendicular to ``body1``'s line of
+sight — the same vector the occlusion resolution uses — so the finder agrees
+with what the synthesis will actually eclipse; pass ``los_vector=`` to
+override. For a ``PhoebeBinary`` the returned times are in days (the PHOEBE
+clock). The lower-level :func:`~spice.models.find_eclipses` remains available
+for orbits sampled by other means: it takes sky-projected positions and
+velocities of the two components explicitly.
 
 PHOEBE binaries
 ---------------

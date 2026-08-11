@@ -238,7 +238,8 @@ def add_rotation(mesh: MeshModel,
     Args:
         mesh (MeshModel): The mesh model to add rotation to.
         rotation_velocity (float): The velocity of the rotation.
-        rotation_axis (Float[Array, "3"]): The axis of the rotation. Defaults to the global [0., 0., 1.].
+        rotation_axis (Float[Array, "3"]): The axis of the rotation. Defaults to the global [0., 1., 0.],
+            which lies in the sky plane of the default line of sight [0., 0., -1.] (equator-on view).
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.
