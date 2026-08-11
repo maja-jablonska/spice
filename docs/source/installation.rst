@@ -66,5 +66,5 @@ Platform notes
 - On macOS, SPICE forces ``JAX_PLATFORMS=cpu`` unless you set the variable
   yourself — the experimental Metal backend is slower than CPU for this
   workload and numerically unreliable.
-- Double precision is opt-in via
+- Double precision is highly encouraged via
   ``jax.config.update("jax_enable_x64", True)``; see :doc:`conventions`.
