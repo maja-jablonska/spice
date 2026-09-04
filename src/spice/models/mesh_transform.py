@@ -211,18 +211,62 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
 
 
 @jax.jit
+def _axis_perpendicular_to_los(los_vector: Float[Array, "3"]) -> Float[Array, "3"]:
+    """A unit rotation axis guaranteed perpendicular to ``los_vector``.
+
+    Takes the module default when that is already perpendicular (the usual
+    case), and otherwise rejects the LOS component from it -- falling back to a
+    second seed axis if the default happens to be parallel to the LOS.
+
+    A rotation axis parallel to the line of sight projects to *zero* radial
+    velocity, so the star is seen pole-on and rotational broadening vanishes
+    silently. That is easy to hit whenever a caller overrides one of the two
+    defaults but not the other: `tz_fornacis_spectra.py` hardcodes
+    LOS = [0, 0, -1] while inheriting the default axis, which on a checkout
+    whose default axis is [0, 0, 1] gave exactly 0 km/s of broadening for a
+    38 km/s star.
+    """
+    los = los_vector / jnp.linalg.norm(los_vector)
+    primary = _default_rotation_axis()
+    # If the default is (nearly) parallel to the LOS, seed from another axis.
+    seed = jnp.where(
+        jnp.abs(jnp.dot(primary, los)) > 0.99,
+        jnp.array([1.0, 0.0, 0.0], dtype=primary.dtype),
+        primary,
+    )
+    seed = jnp.where(
+        jnp.abs(jnp.dot(seed, los)) > 0.99,
+        jnp.array([0.0, 1.0, 0.0], dtype=primary.dtype),
+        seed,
+    )
+    perp = seed - jnp.dot(seed, los) * los          # reject the LOS component
+    return perp / jnp.linalg.norm(perp)
+
+
 def _add_rotation(mesh: MeshModel,
                   rotation_velocity: float,
                   rotation_axis: Float[Array, "3"] = None) -> MeshModel:
     if rotation_axis is None:
-        rotation_axis = _default_rotation_axis()
+        rotation_axis = _axis_perpendicular_to_los(mesh.los_vector)
     rot_matrix = rotation_matrix(rotation_axis)
     rot_matrix_grad = rotation_matrix_prim(rotation_axis)
 
-    return mesh._replace(rotation_axis=rotation_axis,
+    mesh = mesh._replace(rotation_axis=rotation_axis,
                          rotation_matrix=rot_matrix,
                          rotation_matrix_prim=rot_matrix_grad,
                          rotation_velocity=rotation_velocity)
+
+    # Populate the per-element velocity field straight away. It used to be filled
+    # only by evaluate_rotation(), so a mesh with add_rotation() applied looked
+    # configured but produced NO rotational broadening. binary.py never calls
+    # evaluate_rotation, so every binary synthesis silently lost v sin i --
+    # measured on a 38 km/s star, line FWHM stayed at 16.19 km/s (the
+    # non-rotating value) instead of broadening to 64.20 km/s.
+    # Evaluating at t = 0 is a no-op for the geometry: theta = v*0/R = 0 and
+    # evaluate_rotation_matrix(R, 0) is the identity, so this only fills
+    # rotation_velocities and callers may still call evaluate_rotation(mesh, t)
+    # afterwards at any time.
+    return _evaluate_rotation(mesh, 0.0)
 
 
 def add_rotation(mesh: MeshModel,
@@ -251,7 +295,14 @@ def add_rotation(mesh: MeshModel,
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
     if rotation_axis is None:
-        rotation_axis = _default_rotation_axis()
+        # Derive the default from the mesh's own line of sight rather than a
+        # module constant, so it can never come out parallel to it. A parallel
+        # axis projects to zero radial velocity: the star is seen pole-on and
+        # rotational broadening vanishes silently. That is exactly what happened
+        # to tz_fornacis_spectra.py, which hardcodes LOS = [0, 0, -1] while
+        # inheriting a default axis of [0, 0, 1] on the geometry-provenance
+        # branch -- 0 km/s of broadening for a 38 km/s star.
+        rotation_axis = _axis_perpendicular_to_los(mesh.los_vector)
     return _add_rotation(mesh, rotation_velocity, rotation_axis)
 
 

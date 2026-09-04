@@ -318,6 +318,16 @@ class IcosphereModel(MeshModel):
             "IcosphereModel constructed in {elapsed:.1f} s",
         ):
             vertices, faces, areas, centers = icosphere(n_vertices)
+            # The packaged icosphere pickles were dumped from a float32 session,
+            # so under jax_enable_x64 they come back float32 while every other
+            # field below is built at _float_dtype(). The mismatch is invisible
+            # until something branches on the model: get_mesh_view's lax.cond
+            # traces one branch through _add_rotation (which promotes to float64)
+            # and the other unchanged, and jax rejects the pair. Normalize here
+            # so a model's dtype never depends on how its cache was written.
+            vertices = jnp.asarray(vertices, dtype=_float_dtype())
+            areas = jnp.asarray(areas, dtype=_float_dtype())
+            centers = jnp.asarray(centers, dtype=_float_dtype())
             vertices = vertices * radius
             centers = centers * radius
 

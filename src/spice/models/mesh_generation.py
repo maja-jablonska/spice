@@ -245,8 +245,19 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
                 data = pkgutil.get_data('spice', name)
             except (FileNotFoundError, OSError):
                 data = None
-            if data is not None:
-                return pickle.loads(data)
+            # An empty packaged file (icosphere_6_compat.pickle ships as 0 bytes)
+            # passes an `is not None` check but blows up in ``pickle.loads`` with
+            # a bare EOFError -- which click reports as an inscrutable
+            # "Aborted!". Treat empty or unreadable data as "no cache" and fall
+            # through to the user cache / generation path, exactly as the
+            # per-user branch below already does.
+            if data:
+                try:
+                    return pickle.loads(data)
+                except (EOFError, pickle.UnpicklingError) as exc:
+                    warnings.warn(
+                        f"Ignoring unreadable packaged icosphere cache {name}: {exc}"
+                    )
         # Writable per-user cache for subdivisions not shipped with the package.
         user_cache_path = os.path.join(
             _user_icosphere_cache_dir(), f"icosphere_{subdivs}.pickle"

@@ -34,6 +34,14 @@ from spice.constants import SOLAR_MASS_KG, SOLAR_RAD_CM, SOLAR_RAD_M
 YEAR_TO_SECONDS = 3.154e7
 DAY_TO_YEAR = 0.0027378507871321013
 DEFAULT_N_NEIGHBOURS = 32
+# Lower bound for the adaptive neighbour count. The heuristic below maps
+# triangles onto a fixed 50x50 grid, so once a mesh has more faces than grid
+# points most triangles contain no grid point, the counts collapse and the
+# estimate pins to this floor (measured: k=21 at 1280 faces but k=8 at 5120).
+# A starved neighbour search silently under-counts occlusion -- measured on the
+# TZ For geometry, k=8 loses 2.6% of the blocked flux at 5120 faces and 3.1% at
+# 20480, while k>=20 is accurate to 0.04%. See tests/test_occlusion_accuracy.py.
+MIN_N_NEIGHBOURS = 24
 
 def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:
     return jk.build_tree(jnp.zeros(points_shape))
@@ -87,12 +95,12 @@ class Binary(NamedTuple):
         triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body1)
         points_in_circles = construct_points_in_circles(grid_points, jnp.max(body2.cast_vertex_bounding_circle_radii))
         triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours1 = n_neighbours1 or jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
+        n_neighbours1 = n_neighbours1 or jnp.clip(1.5*np.max(triangle_counts), MIN_N_NEIGHBOURS, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
         
         triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body2)
         points_in_circles = construct_points_in_circles(grid_points, jnp.max(body1.cast_vertex_bounding_circle_radii))
         triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours2 = n_neighbours2 or jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
+        n_neighbours2 = n_neighbours2 or jnp.clip(1.5*np.max(triangle_counts), MIN_N_NEIGHBOURS, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
