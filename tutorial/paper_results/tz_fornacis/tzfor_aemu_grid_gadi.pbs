@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=200GB
+#PBS -l walltime=08:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N tzfor_aemu_grid
+#PBS -j oe
+
+# All-free-parameter grid for the TZ For spectral fit. Each grid point shifts
+# the per-element teff/logg on the existing PHOEBE meshes (gravity darkening and
+# rotation preserved) and synthesises ONE component at ONE out-of-eclipse
+# reference epoch; orbital motion is a rigid shift applied at fit time.
+set -euo pipefail
+: "${PYTHON_BIN:=/g/data/y89/mj8805/miniforge/envs/astro/bin/python}"
+: "${RUN_DIR:=/scratch/y89/mj8805/spice_docsexp/run}"
+: "${PYTHONPATH:=/scratch/y89/mj8805/spice_docsexp/src}"
+: "${MESHES:=${RUN_DIR}/tzfor_aemu_roche_n1500_spectra_meshes.pkl}"
+: "${OUT_DIR:=/scratch/y89/mj8805/tzfor_aemu_grid_out}"
+: "${N_PER_WINDOW:=2000}"
+: "${DTEFF:=-300,-150,0,150,300}"
+: "${DLOGG:=-0.3,0,0.3}"
+: "${FEH:=-0.5,-0.3,-0.1}"
+
+export PYTHONPATH
+export JAX_ENABLE_X64=1
+mkdir -p "${OUT_DIR}"
+nvidia-smi --query-gpu=name --format=csv,noheader || true
+"${PYTHON_BIN}" -c "import jax; print('jax devices:', jax.devices())"
+
+"${PYTHON_BIN}" "${RUN_DIR}/tzfor_phoebe_aemu_photometry.py" \
+    --mode grid --meshes "${MESHES}" --n-mesh 1500 --distortion roche \
+    --n-per-window "${N_PER_WINDOW}" \
+    --dteff="${DTEFF}" --dlogg="${DLOGG}" --feh="${FEH}" \
+    --output "${OUT_DIR}"

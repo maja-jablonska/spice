@@ -64,6 +64,7 @@ SRC = HERE.parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))   # shared emulator_params helper
 
 import numpy as np
 import jax.numpy as jnp
@@ -86,6 +87,7 @@ from cepheid_bundles import (  # noqa: E402  (sys.path patched above)
     simulate_line_spectra,
     save_pickle,
 )
+import emulator_params as ep  # noqa: E402  (sys.path patched above)
 from cepheid_phase import (  # noqa: E402  (sys.path patched above)
     fourier_series,
     xi_micro_deltaCep,
@@ -425,23 +427,33 @@ def build_emulators(
 PHASE_MODIFIER_NAMES = ("teff", "logg", "vmicro")
 
 
+class _NamedParameters:
+    """Stand-in exposing ``stellar_parameter_names`` for emulators that lack it."""
+
+    def __init__(self, names):
+        self.stellar_parameter_names = list(names)
+
+
 def _phase_modifiers_for(emulator, teff_at, logg_at, vmicro_at):
     """Build a ``[(param_index, fn), ...]`` modifier list for ``emulator``.
 
-    Looks up each phase-dependent parameter by name in the emulator's
-    ``stellar_parameter_names`` and skips any that are not present (e.g.
-    aemu bundles that don't carry vmicro).
+    Names are resolved through ``emulator_params``, so a bundle that calls the
+    temperature ``marcs_teff`` (the Aug-2026 TPayne-spice-harps retrain) or
+    ``logteff`` gets its modifier — and in the ``logteff`` case the phase
+    function is composed with log10. Parameters the emulator genuinely lacks
+    (e.g. an aemu bundle without vmicro) are skipped, but a missing Teff or
+    log g raises: holding those constant would silently turn a pulsating star
+    into a static one.
     """
-    name_to_fn = {"teff": teff_at, "logg": logg_at, "vmicro": vmicro_at}
-    names = list(getattr(emulator, "stellar_parameter_names", []))
-    if not names:
+    if not ep.emulator_parameter_names(emulator):
         # Last-resort fallback: assume the canonical zarr ordering.
         names = INTENSITY_PARAMS[:-1] if "intensity" in repr(type(emulator)) else FLUX_PARAMS
-    out = []
-    for n, fn in name_to_fn.items():
-        if n in names:
-            out.append((names.index(n), fn))
-    return out
+        emulator = _NamedParameters(names)
+    return ep.phase_modifiers(
+        emulator,
+        [("teff", teff_at), ("logg", logg_at), ("vmicro", vmicro_at)],
+        required=("teff", "logg"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +631,7 @@ def build_one(
             continue
         print(f"  building {name}…")
         bundles[name] = base_cache[eid] = build_bundle(
-            emul, emul.to_parameters(sp),
+            emul, ep.to_parameters(emul, sp),
             fourier_params=fourier,
             period=config.period, timeseries=timeseries,
             n_mesh=n_mesh_used, radius=config.radius, mass=config.mass,

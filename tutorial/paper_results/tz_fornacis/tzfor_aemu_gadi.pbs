@@ -1,0 +1,49 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=200GB
+#PBS -l walltime=06:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N tzfor_aemu
+#PBS -j oe
+
+# TZ For photometry: PHOEBE meshes (built off-node, shipped as a pickle) put
+# through the aemu intensity emulator. PHOEBE is NOT installed in this env and
+# is not needed -- PhoebeModel's PHOEBE guard lives in `construct`, not
+# `__new__`, so the pickled models rehydrate without it.
+#
+# gpursaa enforces ncpus = 14 x ngpus; the older tz_fornacis_spectra.pbs asks
+# for 12 and declares -P mk27 -q gpuvolta, which is restricted for this account.
+
+set -euo pipefail
+
+: "${PYTHON_BIN:=/g/data/y89/mj8805/miniforge/envs/astro/bin/python}"
+: "${RUN_DIR:=/scratch/y89/mj8805/spice_docsexp/run}"
+: "${PYTHONPATH:=/scratch/y89/mj8805/spice_docsexp/src}"
+: "${MESHES:=${RUN_DIR}/tzfor_aemu_roche_n1500_meshes.pkl}"
+: "${OUT_DIR:=/scratch/y89/mj8805/tzfor_aemu_out}"
+: "${N_WAVELENGTHS:=1500}"
+
+export PYTHONPATH
+# The transformer_payne core refuses to build without this.
+export JAX_ENABLE_X64=1
+# aemu ignores HF_HOME; it honours ASTRO_EMU_CACHE_DIR, else ~/.cache. The home
+# copy is already at the correct revision (3df764e), so leave it there.
+
+mkdir -p "${OUT_DIR}"
+echo "python : ${PYTHON_BIN}"
+echo "meshes : ${MESHES}"
+echo "out    : ${OUT_DIR}"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+"${PYTHON_BIN}" -c "import jax; print('jax devices:', jax.devices())"
+
+"${PYTHON_BIN}" "${RUN_DIR}/tzfor_phoebe_aemu_photometry.py" \
+    --mode synth \
+    --meshes "${MESHES}" \
+    --n-wavelengths "${N_WAVELENGTHS}" \
+    --distortion roche \
+    --n-mesh 1500 \
+    --output "${OUT_DIR}"

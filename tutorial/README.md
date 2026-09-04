@@ -17,6 +17,7 @@ recommended but not strictly required.
 | [`custom_filter.ipynb`](custom_filter.ipynb) | Defining a custom photometric filter / passband |
 | [`synphot.ipynb`](synphot.ipynb) | Synthetic photometry via `synphot` |
 | [`solar_oscillations_physical_line.ipynb`](solar_oscillations_physical_line.ipynb) | Solar-like oscillations with the Physical Line Emulator |
+| [`aemu_harps_test.ipynb`](aemu_harps_test.ipynb) | Smoke test of the `RozanskiT/TPayne-spice-harps` aemu bundle (`[aemu]` extra) |
 
 ## Pulsation & visualization — [`pulsation/`](pulsation/)
 

@@ -20,21 +20,31 @@ import numpy as np
 # Speed of light [km/s].
 C_KMS = 299_792.458
 
+def _env_float(name: str, default: float) -> float:
+    """Literature default, overridable via environment for fit experiments.
+
+    Same pattern as TZ_FOR_FIRST_BJD / TZ_FOR_ORBIT_RESOLUTION below: defaults
+    are the published values, so behaviour is unchanged unless a variable is set.
+    Used to re-run the synthesis at fitted parameters without editing this file.
+    """
+    return float(os.environ.get(name, default))
+
+
 # --- Masses, radii, temperatures, gravities ---
 PRIMARY_MASS = 2.057       # Msun
-PRIMARY_RADIUS = 8.28      # Rsun
-PRIMARY_TEFF = 4930        # K
-PRIMARY_LOGG = 2.91        # cgs
+PRIMARY_RADIUS = _env_float("TZ_FOR_PRIMARY_RADIUS", 8.28)      # Rsun
+PRIMARY_TEFF = _env_float("TZ_FOR_PRIMARY_TEFF", 4930)          # K
+PRIMARY_LOGG = _env_float("TZ_FOR_PRIMARY_LOGG", 2.91)          # cgs
 SECONDARY_MASS = 1.958     # Msun
-SECONDARY_RADIUS = 3.94    # Rsun
-SECONDARY_TEFF = 6650      # K
-SECONDARY_LOGG = 3.35      # cgs
+SECONDARY_RADIUS = _env_float("TZ_FOR_SECONDARY_RADIUS", 3.94)  # Rsun
+SECONDARY_TEFF = _env_float("TZ_FOR_SECONDARY_TEFF", 6650)      # K
+SECONDARY_LOGG = _env_float("TZ_FOR_SECONDARY_LOGG", 3.35)      # cgs
 
 # --- Orbit ---
 PERIOD_DAYS = 75.66647     # Gallenne et al. 2016
 PERIOD_YR = PERIOD_DAYS / 365.25  # Julian year (matches astropy day->year exactly)
 ECC = 0.0
-INCL_DEG = 85.68
+INCL_DEG = _env_float("TZ_FOR_INCL_DEG", 85.68)
 PER0_DEG = 65.99           # argument of periastron
 LONG_AN_DEG = 269.0        # longitude of ascending node
 DISTANCE_PC = 182.8        # pc (Gaia)
