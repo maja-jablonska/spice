@@ -13,7 +13,43 @@ from spice.constants import C_KM_S, SOLAR_RAD_CM
 
 from jaxtyping import Array, Float
 
-DEFAULT_CHUNK_SIZE: int = 1024
+# Surface elements evaluated per jit-compiled chunk. This is a *compile-time*
+# width: the intensity function is vmapped this wide and inlined into the scan
+# body, so the cost of raising it is paid in tracing/compilation, not runtime.
+# For a cheap closed-form intensity (Blackbody) the value barely matters, but
+# for a neural emulator the whole network graph is replicated, and 1024 (the
+# value used until 2026-09) did not finish compiling in 20 minutes for an aemu
+# transformer bundle. 256 compiles in seconds and is, if anything, marginally
+# faster at runtime for Blackbody too (0.609 s vs 0.680 s for 20480 elements x
+# 2000 wavelengths), with results identical to 8 significant figures.
+DEFAULT_CHUNK_SIZE: int = 256
+
+# Wavelengths per chunk, used only as an upper bound -- see
+# ``_resolve_wavelength_chunk_size``. Bounds peak memory for very long grids
+# without inflating short ones.
+DEFAULT_WAVELENGTH_CHUNK_SIZE: int = 1024
+
+
+def _resolve_wavelength_chunk_size(wavelengths_chunk_size, n_wavelengths: int) -> int:
+    """Wavelength chunk width, defaulting to "never pad beyond the grid".
+
+    The wavelength chunkers pad the grid *up* to a whole number of chunks
+    (``n_padding = (-n_wavelengths) % wavelengths_chunk_size``) and evaluate the
+    intensity function on the padding too, discarding it afterwards. A fixed
+    default therefore made short grids pay for wavelengths they never asked for:
+    250 points against the old default of 1024 computed 1024, a 4.1x waste that
+    is invisible in the output because the padding is sliced off at the end.
+
+    Passing ``None`` (now the default) resolves to ``min(n_wavelengths, cap)``,
+    so a grid at or under the cap is evaluated exactly once with no padding, and
+    a longer one still gets chunked to bound peak memory. An explicit value is
+    honoured unchanged.
+    """
+    if wavelengths_chunk_size is None:
+        return max(1, min(int(n_wavelengths), DEFAULT_WAVELENGTH_CHUNK_SIZE))
+    return int(wavelengths_chunk_size)
+
+
 C: float = C_KM_S  # km/s
 SOL_RAD_CM = SOLAR_RAD_CM  # cm
 
@@ -209,7 +245,7 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
                            log_wavelengths: Float[Array, "n_wavelengths"],
                            distance: float = 10.0,
                            chunk_size: int = DEFAULT_CHUNK_SIZE,
-                           wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
+                           wavelengths_chunk_size: Optional[int] = None,
                            disable_doppler_shift: bool = False,
                            ld_law: Optional[str] = None,
                            ld_coeffs: Optional[ArrayLike] = None) -> Float[Array, "n_wavelengths 2"]:
@@ -224,8 +260,14 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
         m (MeshModel): The mesh model containing geometry and physical parameters
         log_wavelengths (Float[Array, "n_wavelengths"]): Log of wavelength points to evaluate
         distance (float, optional): Distance to object in parsecs. Defaults to 10.0.
-        chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
-        wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
+        chunk_size (int, optional): Surface elements per compiled chunk. Defaults to
+            ``DEFAULT_CHUNK_SIZE`` (256). Raising it widens the vmap that ``intensity_fn``
+            is inlined into, which costs compile time rather than runtime — expensive for
+            a neural emulator, immaterial for a closed-form one.
+        wavelengths_chunk_size (int, optional): Wavelengths per chunk. Defaults to None,
+            meaning ``min(len(log_wavelengths), 1024)`` — the grid is never padded up to a
+            larger chunk, which would evaluate ``intensity_fn`` on wavelengths that are
+            then discarded.
         disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
         ld_law (str, optional): Limb-darkening law name passed as a kwarg to ``intensity_fn``
             (e.g. ``"linear"``, ``"quadratic"``, ``"nonlinear_4"``). Only effective when
@@ -252,7 +294,9 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
                                         log_wavelengths,
                                         distance,
                                         chunk_size,
-                                        wavelengths_chunk_size,
+                                        _resolve_wavelength_chunk_size(
+                                            wavelengths_chunk_size,
+                                            jnp.shape(log_wavelengths)[0]),
                                         disable_doppler_shift)
 
 
@@ -363,7 +407,7 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
                                       m: MeshModel,
                                       log_wavelengths: Float[Array, "n_wavelengths"],
                                       chunk_size: int = DEFAULT_CHUNK_SIZE,
-                                      wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE,
+                                      wavelengths_chunk_size: Optional[int] = None,
                                       disable_doppler_shift: bool = False) -> Float[Array, "n_wavelengths 2"]:
     """Simulate the monochromatic luminosity from a mesh model.
 
@@ -376,8 +420,10 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
             Function that computes flux given wavelengths and parameters
         m (MeshModel): The mesh model containing geometry and physical parameters
         log_wavelengths (Float[Array, "n_wavelengths"]): Log of wavelength points to evaluate
-        chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
-        wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
+        chunk_size (int, optional): Surface elements per compiled chunk. Defaults to
+            ``DEFAULT_CHUNK_SIZE`` (256); raising it costs compile time, not runtime.
+        wavelengths_chunk_size (int, optional): Wavelengths per chunk. Defaults to None,
+            meaning ``min(n_wavelengths, 1024)`` so the grid is never padded up.
         disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
 
     Returns:
@@ -391,7 +437,9 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
                                            _adjust_dim(m.los_velocities, chunk_size),
                                            _adjust_dim(m.parameters, chunk_size),
                                            chunk_size,
-                                           wavelengths_chunk_size,
+                                           _resolve_wavelength_chunk_size(
+                                               wavelengths_chunk_size,
+                                               jnp.shape(log_wavelengths)[0]),
                                            disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)[:len(log_wavelengths), :]
 
 
@@ -400,7 +448,7 @@ def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n
                model: MeshModel,
                wavelengths: Float[Array, "n_wavelengths"],
                chunk_size: int = DEFAULT_CHUNK_SIZE,
-               wavelengths_chunk_size: int = DEFAULT_CHUNK_SIZE) -> float:
+               wavelengths_chunk_size: Optional[int] = None) -> float:
     """Calculate the bolometric luminosity of the model.
 
     This function computes the total bolometric luminosity by integrating the monochromatic luminosity
@@ -411,8 +459,10 @@ def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n
             Function that computes flux given wavelengths and parameters
         model (MeshModel): The mesh model containing geometry and physical parameters
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points to evaluate [Angstrom]
-        chunk_size (int, optional): Size of chunks for parallel processing. Defaults to 1024.
-        wavelengths_chunk_size (int, optional): Chunk size for wavelength array. Defaults to 1024.
+        chunk_size (int, optional): Surface elements per compiled chunk. Defaults to
+            ``DEFAULT_CHUNK_SIZE`` (256); raising it costs compile time, not runtime.
+        wavelengths_chunk_size (int, optional): Wavelengths per chunk. Defaults to None,
+            meaning ``min(n_wavelengths, 1024)`` so the grid is never padded up.
 
     Returns:
         float: Total bolometric luminosity [erg/s]
