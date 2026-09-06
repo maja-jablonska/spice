@@ -97,7 +97,6 @@ def __spectrum_flash_sum(intensity_fn,
 
     n = math.ceil(n_areas / chunk_size)
 
-    @partial(jax.checkpoint, prevent_cse=False)
     def chunk_scanner(carries, x):
         chunk_idx, atmo_sum = carries
 
@@ -122,31 +121,49 @@ def __spectrum_flash_sum(intensity_fn,
                                     (chunk_idx, 0),
                                     (k_chunk_sizes, n_parameters))
 
-        # Shape: (CHUNK_SIZE, log_wavelengths)
-        shifted_log_wavelengths = jax.lax.cond(disable_doppler_shift,
-                                               lambda lv, _: jnp.repeat(lv[jnp.newaxis, :], chunk_size, axis=0),
-                                               v_apply_vrad_log,
-                                               log_wavelengths, vrad_chunk)
+        # The checkpoint sits INSIDE the cond branch, not around the scan body:
+        # a lax.cond inside a checkpointed body is not rematerialised, so the
+        # backward pass keeps every chunk's network activations (60 GB on an
+        # A100 for 1800 elements x 2000 wavelengths, vs 27 GB this way).
+        @partial(jax.checkpoint, prevent_cse=False)
+        def evaluate_chunk(_):
+            # Shape: (CHUNK_SIZE, log_wavelengths)
+            shifted_log_wavelengths = jax.lax.cond(disable_doppler_shift,
+                                                   lambda lv, _: jnp.repeat(lv[jnp.newaxis, :], chunk_size, axis=0),
+                                                   v_apply_vrad_log,
+                                                   log_wavelengths, vrad_chunk)
 
-        # atmosphere_mul is the spectrum simulated for the corresponding wavelengths and optionally given parameters of mu, logg, and T.
-        # It is then multiplied by the observed area to scale the contributions of spectra chunks
+            # atmosphere_mul is the spectrum simulated for the corresponding wavelengths and optionally given parameters of mu, logg, and T.
+            # It is then multiplied by the observed area to scale the contributions of spectra chunks
 
-        # Shape: (n_vertices, 2, n_wavelengths)
-        # Areas should be rescaled by mus
-        # 2 corresponds to the two components: continuum and full spectrum with lines
-        # n_wavelengths, n_verices, 2 (continuum+spectrum), 1
+            # Shape: (n_vertices, 2, n_wavelengths)
+            # Areas should be rescaled by mus
+            # 2 corresponds to the two components: continuum and full spectrum with lines
+            # n_wavelengths, n_verices, 2 (continuum+spectrum), 1
 
-        # shifted_log_wavelengths (CHUNK_SIZE, n_wavelengths)
-        # m_chunk (CHUNK_SIZE)
-        # p_chunk (CHUNK_SIZE, n_parameters)
-        v_in = v_intensity(shifted_log_wavelengths,  # (n,)
-                           m_chunk[:, jnp.newaxis],
-                           p_chunk)
-        atmosphere_mul = jnp.multiply(
-            (a_chunk)[:, jnp.newaxis, jnp.newaxis],
-            v_in)
-        
-        new_atmo_sum = atmo_sum + jnp.sum(atmosphere_mul, axis=0)
+            # shifted_log_wavelengths (CHUNK_SIZE, n_wavelengths)
+            # m_chunk (CHUNK_SIZE)
+            # p_chunk (CHUNK_SIZE, n_parameters)
+            v_in = v_intensity(shifted_log_wavelengths,  # (n,)
+                               m_chunk[:, jnp.newaxis],
+                               p_chunk)
+            atmosphere_mul = jnp.multiply(
+                (a_chunk)[:, jnp.newaxis, jnp.newaxis],
+                v_in)
+            return jnp.sum(atmosphere_mul, axis=0).astype(atmo_sum.dtype)
+
+        # A chunk whose every element has zero projected area (far hemisphere,
+        # occluded faces, chunk padding) contributes nothing, so don't pay for
+        # ``intensity_fn`` on it. For a single star half the mesh is invisible,
+        # and ``_simulate_observed_flux_impl`` orders visible elements first so
+        # those elements collect into whole chunks that this cond skips. Under
+        # an outer vmap the cond lowers to a select and both branches run --
+        # still correct, just without the saving.
+        chunk_sum = lax.cond(jnp.any(a_chunk > 0),
+                             evaluate_chunk,
+                             lambda _: jnp.zeros_like(atmo_sum),
+                             operand=None)
+        new_atmo_sum = atmo_sum + chunk_sum
 
         return (chunk_idx + k_chunk_sizes, new_atmo_sum), chunk_idx+k_chunk_sizes
 
@@ -225,15 +242,22 @@ def _simulate_observed_flux_impl(intensity_fn,
                                  chunk_size: int,
                                  wavelengths_chunk_size: int,
                                  disable_doppler_shift: bool):
+    # Put the elements that actually contribute first. Far-side and occluded
+    # elements have zero cast area; grouping them at the end lets
+    # ``__spectrum_flash_sum`` skip whole chunks of them instead of running
+    # ``intensity_fn`` on half the mesh for nothing. The disc sum is order
+    # independent and the permutation is a plain gather, so jit/grad are unaffected.
+    areas = m.visible_cast_areas
+    order = jnp.argsort(jnp.where(areas > 0, 0, 1), stable=True)
     # `visible_cast_areas` is already in R_sun^2 (cast_vertices come from
     # `vertices * radius` with no later normalisation), so the prefactor below
     # is just the dimensionless solid-angle dilution (R_sun/pc)^2 / d_pc^2.
     return jnp.nan_to_num(__spectrum_flash_sum_with_padding(intensity_fn,
                                                log_wavelengths,
-                                               _adjust_dim(m.visible_cast_areas, chunk_size),
-                                               _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.), chunk_size),
-                                               _adjust_dim(m.los_velocities, chunk_size),
-                                               _adjust_dim(m.parameters, chunk_size),
+                                               _adjust_dim(areas[order], chunk_size),
+                                               _adjust_dim(jnp.where(m.mus > 0, m.mus, 0.)[order], chunk_size),
+                                               _adjust_dim(m.los_velocities[order], chunk_size),
+                                               _adjust_dim(m.parameters[order], chunk_size),
                                                chunk_size,
                                                wavelengths_chunk_size,
                                                disable_doppler_shift) * 5.08326693599739e-16 / (
