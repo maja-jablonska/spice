@@ -158,15 +158,17 @@ def build_synthesis_kernel(mesh: MeshModel,
 def kernel_flux(intensity_fn: Callable[[Float[Array, "n_w"], float, Float[Array, "n_p"]], Float[Array, "n_w 2"]],
                 kernel: SynthesisKernel,
                 parameters: Float[Array, "n_p"],
-                distance: float = 10.0) -> Float[Array, "n_w 2"]:
+                distance: float = 10.0,
+                wavelength_chunk_size: int = 32768) -> Float[Array, "n_w 2"]:
     """Observed flux for one parameter row through a prebuilt kernel.
 
     Same units and distance scaling as ``simulate_observed_flux``
     (erg/s/cm^2/Angstrom at ``distance`` pc), both output channels of
     ``intensity_fn`` convolved separately. Differentiable in ``parameters``;
-    the emulator is evaluated once per ``mu`` node on the fine grid with
-    per-node rematerialisation and an FFT convolution, so memory does not grow
-    with ``n_mu`` or with the kernel width.
+    the emulator is evaluated once per ``mu`` node on the fine grid, in
+    ``wavelength_chunk_size`` pieces, each rematerialised, and the disc sum is
+    an FFT convolution -- so memory grows with neither ``n_mu``, the kernel
+    width, nor the grid length.
     """
     x_fine = kernel.fine_log_wavelengths
     params = jnp.asarray(parameters)
@@ -180,10 +182,18 @@ def kernel_flux(intensity_fn: Callable[[Float[Array, "n_w"], float, Float[Array,
     n_fft = 1 << int(math.ceil(math.log2(n_fine + k - 1)))
     kern_f = jnp.fft.rfft(kernel.kernels, n=n_fft, axis=1)         # (n_mu, n_fft//2+1)
 
+    # The emulator's backward pass keeps every layer's activations for the
+    # points it was called on; over the full HARPS range that is ~37 GB for a
+    # single mu node. Evaluate it in wavelength chunks, each rematerialised.
+    chunk = int(min(wavelength_chunk_size, n_fine))
+    n_chunks = -(-n_fine // chunk)
+    x_chunks = jnp.pad(x_fine, (0, n_chunks * chunk - n_fine), mode="edge").reshape(n_chunks, chunk)
+
     @jax.checkpoint
     def node(carry, inputs):
         mu, kf = inputs
-        spec = intensity_fn(x_fine, mu, params)                     # (n_fine, 2)
+        spec = jax.lax.map(jax.checkpoint(lambda xc: intensity_fn(xc, mu, params)), x_chunks)
+        spec = spec.reshape(n_chunks * chunk, -1)[:n_fine]         # (n_fine, 2)
         return carry + jnp.fft.rfft(spec, n=n_fft, axis=0) * kf[:, None], None
 
     acc0 = jnp.zeros((n_fft // 2 + 1, 2), dtype=jnp.result_type(kern_f.dtype, jnp.float64 if jax.config.jax_enable_x64 else jnp.float32))
