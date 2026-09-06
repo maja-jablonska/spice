@@ -47,10 +47,42 @@ MESH_COLUMNS = ["teffs", "loggs", "mus", "visibilities", "areas",
 # HARPS sampling is far too expensive per surface element, so use two compact
 # diagnostic regions at ~0.02 A (Nyquist for R = 115000). The emulator is
 # wavelength-conditioned, so a non-contiguous grid is fine.
+# The bundle's training grid is 3780-6910 A (source_log10_wavelength). Stromgren
+# u (3150-3850) is 90% outside it and the emulator still returns confident finite
+# values there, so hybrid photometry is restricted to v/b/y. v clips a 30 A edge.
+HYBRID_PHOT_BANDS = ("Stromgren:v", "Stromgren:b", "Stromgren:y")
+HYBRID_PHOT_RANGE = (3780.0, 5900.0)
+
 SPECTRAL_WINDOWS = [
     (5160.0, 5200.0, "Mg b triplet + Fe I"),
     (6540.0, 6580.0, "H-alpha"),
 ]
+
+
+def phoebe_filter(phoebe_name, non_photonic=True):
+    """A SPICE ``Filter`` built from PHOEBE's own transmission table.
+
+    Using PHOEBE's curves on both sides removes passband definition as a free
+    variable. Two traps this avoids:
+
+    * ``ptf_table['wl']`` is in **metres**, and PHOEBE's bolometric passband is
+      named in nanometres -- ``Bolometric:900-40000`` really spans 9000-400000 A.
+    * ``non_photonic=True`` selects the energy-weighted branch of
+      ``AB_passband_luminosity``, matching PHOEBE's default
+      ``intens_weighting='energy'``; the photon-counting default adds a factor
+      of lambda to the integrand.
+
+    The tables come out of FITS big-endian ('>f8'), which JAX rejects.
+    """
+    import jax.numpy as jnp
+    from phoebe.atmospheres import passbands as pbs
+    from spice.spectrum.filter import Filter
+
+    pb = pbs.get_passband(phoebe_name)
+    wl_a = np.asarray(pb.ptf_table["wl"]).astype(np.float64) * 1e10  # m -> A
+    tr = np.asarray(pb.ptf_table["fl"]).astype(np.float64)
+    return Filter(jnp.array([wl_a, tr]), name=f"PHOEBE {phoebe_name}",
+                  non_photonic=non_photonic)
 
 
 def harps_epochs(data_dir):
@@ -330,6 +362,36 @@ def synthesize_grid(payload, emu, wavelengths, dteffs, dloggs, fehs,
     return out
 
 
+def lightcurve_times(b, n_ecl, n_out):
+    """Phases covering both eclipses densely plus an out-of-eclipse baseline.
+
+    The previous hybrid photometry run sampled only the two eclipse windows and
+    was compared against PHOEBE's own light curve, never against data. To test
+    the chain end to end we need the out-of-eclipse level too, since that is
+    what sets the magnitude zero point when fitting Clausen.
+    """
+    import jax.numpy as jnp
+    from spice.models.orbit_utils import eclipse_timestamps_kepler
+    _, t1p, _, _, t4p, _, t1s, _, _, t4s = eclipse_timestamps_kepler(
+        b.get_parameter("mass@primary@component").value,
+        b.get_parameter("mass@secondary@component").value,
+        b.get_parameter("period@binary@component").value * DAYS_TO_YR,
+        b.get_parameter("ecc@binary@component").value,
+        b.get_parameter("t0_perpass@binary@component").value * DAYS_TO_YR,
+        jnp.deg2rad(b.get_parameter("incl@binary@component").value),
+        b.get_parameter("per0@binary@component").value * 0.017453292519943295,
+        b.get_parameter("long_an@binary@component").value * 0.017453292519943295,
+        b.get_parameter("requiv@primary@component").value,
+        b.get_parameter("requiv@secondary@component").value,
+        pad=1.25, los_vector=jnp.array([0.0, 0.0, -1.0]))
+    e = [float(x) / DAYS_TO_YR for x in (t1p, t4p, t1s, t4s)]
+    P = b.get_parameter("period@binary@component").value
+    t0 = b.get_value("t0_supconj@binary@component")
+    out = t0 + np.linspace(0.05, 0.45, n_out) * P      # clear of both eclipses
+    return np.sort(np.concatenate([np.linspace(e[0], e[1], n_ecl),
+                                   np.linspace(e[2], e[3], n_ecl), out]))
+
+
 def report_teff_spread(teff_spread):
     """Guard the reason for importing a PHOEBE mesh at all.
 
@@ -347,7 +409,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mode", default="all",
                     choices=["export", "synth", "all",
-                             "export-spectra", "synth-spectra", "grid"],
+                             "export-spectra", "synth-spectra", "grid",
+                             "export-lc", "synth-lc"],
                     help="'export'/'synth' are the photometry pair; "
                          "'export-spectra'/'synth-spectra' are the same split "
                          "for the HARPS comparison (meshes at the observed "
@@ -356,6 +419,11 @@ def main():
                          "and is what goes to Gadi.")
     ap.add_argument("--data-dir", default=str(Path(__file__).parent / "data"),
                     help="HARPS ADP*.fits archive, for --mode export-spectra")
+    ap.add_argument("--teff2", type=float, default=None,
+                    help="override Teff2 (export-lc): the hybrid has only ever "
+                         "run at the 6650 default and never against real data")
+    ap.add_argument("--n-out", type=int, default=12,
+                    help="out-of-eclipse epochs, needed to set the zero point")
     ap.add_argument("--dteff", default="-300,-150,0,150,300",
                     help="grid mode: Teff offsets [K] applied per star")
     ap.add_argument("--dlogg", default="-0.3,0,0.3",
@@ -384,8 +452,86 @@ def main():
 
     out = Path(args.output); out.mkdir(parents=True, exist_ok=True)
     stem = f"tzfor_aemu_{args.distortion}_n{args.n_mesh}"
-    suffix = "_spectra_meshes.pkl" if "spectra" in args.mode else "_meshes.pkl"
+    if "spectra" in args.mode:
+        suffix = "_spectra_meshes.pkl"
+    elif args.mode in ("export-lc", "synth-lc"):
+        suffix = f"_lc{'' if args.teff2 is None else int(args.teff2)}_meshes.pkl"
+    else:
+        suffix = "_meshes.pkl"
     meshes = Path(args.meshes) if args.meshes else out / f"{stem}{suffix}"
+
+    # ---- hybrid light curve vs the OBSERVED photometry ---------------------
+    if args.mode == "export-lc":
+        from spice.spectrum.aemu_spectrum_emulator import (
+            IntensityPretrainedAemuSpectrumEmulator)
+        names = IntensityPretrainedAemuSpectrumEmulator(BUNDLE).stellar_parameter_names
+        b = build_bundle(args.n_mesh, args.distortion,
+                         gravity_darkening=not args.no_gravity_darkening,
+                         irradiation=not args.no_irradiation)
+        if args.teff2 is not None:
+            b.set_value("teff@secondary@component", float(args.teff2))
+        T2 = b.get_value("teff@secondary@component")
+        times = lightcurve_times(b, args.n_per_eclipse, args.n_out)
+        b.add_dataset("mesh", compute_times=times, columns=MESH_COLUMNS, dataset="mesh01")
+        print(f"Teff2={T2:.0f} K, {len(times)} epochs "
+              f"({args.n_per_eclipse} per eclipse + {args.n_out} out)", flush=True)
+        t0 = time.time()
+        b.run_compute(irrad_method="none" if args.no_irradiation else "horvat",
+                      ltte=False)
+        print(f"  PHOEBE {time.time()-t0:.1f} s", flush=True)
+        payload = export_meshes(b, times, names, meshes)
+        payload["teff2"] = float(T2); payload["args"] = vars(args)
+        # PHOEBE is not installed on the GPU nodes, so carry its transmission
+        # curves in the payload rather than importing phoebe there.
+        from phoebe.atmospheres import passbands as pbs
+        payload["passbands"] = {
+            n: (np.asarray(pbs.get_passband(n).ptf_table["wl"]).astype(np.float64)*1e10,
+                np.asarray(pbs.get_passband(n).ptf_table["fl"]).astype(np.float64))
+            for n in HYBRID_PHOT_BANDS}
+        with open(meshes, "wb") as f:
+            pickle.dump(payload, f, protocol=4)
+        report_teff_spread(payload["teff_spread"])
+        print(f"\nwrote {meshes} ({meshes.stat().st_size/1e6:.1f} MB)")
+        return
+
+    if args.mode == "synth-lc":
+        import jax.numpy as jnp
+        from spice.spectrum.aemu_spectrum_emulator import (
+            IntensityPretrainedAemuSpectrumEmulator)
+        from spice.spectrum.spectrum import AB_passband_luminosity, simulate_observed_flux
+        with open(meshes, "rb") as f:
+            payload = pickle.load(f)
+        report_teff_spread(payload["teff_spread"])
+        emu = IntensityPretrainedAemuSpectrumEmulator(BUNDLE)
+        from spice.spectrum.filter import Filter
+        # Rebuilt from the curves carried in the payload; non_photonic=True to
+        # match PHOEBE's energy weighting.
+        filters = {n.split(":")[1]: Filter(jnp.array([w, f]), name=f"PHOEBE {n}",
+                                           non_photonic=True)
+                   for n, (w, f) in payload["passbands"].items()}
+        lo, hi = HYBRID_PHOT_RANGE
+        wavelengths = jnp.linspace(lo, hi, args.n_wavelengths)
+        log_wl = jnp.log10(wavelengths)
+        print(f"\nsynthesizing {len(payload['times'])} epochs, "
+              f"{args.n_wavelengths} wavelengths, bands {list(filters)}", flush=True)
+        mags = {k: [] for k in filters}
+        t0 = time.time()
+        for i, (m1, m2) in enumerate(payload["models"]):
+            te = time.time()
+            s1 = simulate_observed_flux(emu.intensity, m1, log_wl, disable_doppler_shift=True)
+            s2 = simulate_observed_flux(emu.intensity, m2, log_wl, disable_doppler_shift=True)
+            tot = s1[:, 0] + s2[:, 0]
+            for k, f in filters.items():
+                mags[k].append(float(AB_passband_luminosity(f, wavelengths, tot)))
+            print(f"  epoch {i+1}/{len(payload['times'])} {time.time()-te:6.1f} s", flush=True)
+        print(f"  done in {time.time()-t0:.1f} s", flush=True)
+        res = out / f"tzfor_hybrid_lc_T{payload['teff2']:.0f}.pkl"
+        with open(res, "wb") as f:
+            pickle.dump({"times": payload["times"], "teff2": payload["teff2"],
+                         "mags": {k: np.array(v) for k, v in mags.items()},
+                         "args": vars(args)}, f, protocol=4)
+        print(f"\nwrote {res}")
+        return
 
     # ---- spectra: PHOEBE meshes at the observed HARPS epochs ---------------
     if args.mode == "export-spectra":
