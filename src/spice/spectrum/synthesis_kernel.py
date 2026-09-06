@@ -165,18 +165,30 @@ def kernel_flux(intensity_fn: Callable[[Float[Array, "n_w"], float, Float[Array,
     (erg/s/cm^2/Angstrom at ``distance`` pc), both output channels of
     ``intensity_fn`` convolved separately. Differentiable in ``parameters``;
     the emulator is evaluated once per ``mu`` node on the fine grid with
-    per-node rematerialisation, so memory does not grow with ``n_mu``.
+    per-node rematerialisation and an FFT convolution, so memory does not grow
+    with ``n_mu`` or with the kernel width.
     """
     x_fine = kernel.fine_log_wavelengths
     params = jnp.asarray(parameters)
+    n_fine = x_fine.shape[0]
+    k = kernel.kernels.shape[1]
+    n_core = n_fine - k + 1
+    # Linear convolution via FFT: a direct convolution's backward pass
+    # materialises an (n_fine x k) intermediate per mu node, which is 37 GB for
+    # the full HARPS range. The mu sum is accumulated in the frequency domain
+    # one node at a time, so memory stays at a single node's worth.
+    n_fft = 1 << int(math.ceil(math.log2(n_fine + k - 1)))
+    kern_f = jnp.fft.rfft(kernel.kernels, n=n_fft, axis=1)         # (n_mu, n_fft//2+1)
 
-    def at_node(mu):
-        return intensity_fn(x_fine, mu, params)                     # (n_fine, 2)
-    intensities = jax.lax.map(jax.checkpoint(at_node), kernel.mu_nodes)  # (n_mu, n_fine, 2)
+    @jax.checkpoint
+    def node(carry, inputs):
+        mu, kf = inputs
+        spec = intensity_fn(x_fine, mu, params)                     # (n_fine, 2)
+        return carry + jnp.fft.rfft(spec, n=n_fft, axis=0) * kf[:, None], None
 
-    def convolve_node(spec, kern):                                  # spec (n_fine, 2)
-        return jax.vmap(lambda ch: jnp.convolve(ch, kern, mode="valid"), in_axes=1, out_axes=1)(spec)
-
-    fine = jnp.sum(jax.vmap(convolve_node)(intensities, kernel.kernels), axis=0)   # (n_core, 2)
+    acc0 = jnp.zeros((n_fft // 2 + 1, 2), dtype=jnp.result_type(kern_f.dtype, jnp.float64 if jax.config.jax_enable_x64 else jnp.float32))
+    acc, _ = jax.lax.scan(node, acc0, (kernel.mu_nodes, kern_f))
+    full = jnp.fft.irfft(acc, n=n_fft, axis=0)
+    fine = full[k - 1:k - 1 + n_core]                               # the 'valid' segment
     flux = fine[::kernel.oversample]                                # caller grid is a subset: no interpolation
     return flux * (_RSUN_PER_PC_SQ / distance ** 2)
