@@ -13,6 +13,8 @@ _lazy_imports = {
     "SynthesisKernel": ".synthesis_kernel",
     "build_synthesis_kernel": ".synthesis_kernel",
     "kernel_flux": ".synthesis_kernel",
+    "kernel_flux_multi": ".synthesis_kernel",
+    "gravity_darkened_rows": ".synthesis_kernel",
     # utils.py
     "ERG_S_TO_W": ".utils",
     "SPHERE_STERADIAN": ".utils",
