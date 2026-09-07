@@ -94,6 +94,7 @@ def main():
     ap.add_argument("--n-lc-epochs", type=int, default=None, help="smoke tests: first N light-curve epochs")
     ap.add_argument("--skip-validation", action="store_true")
     ap.add_argument("--chunk", type=int, default=32768)
+    ap.add_argument("--n-phot-wl", type=int, default=16000, help="wavelength samples for the passband integrals (16000 converges to 0.05 mmag)")
     args = ap.parse_args()
     print("devices:", jax.devices(), flush=True)
 
@@ -158,7 +159,10 @@ def main():
               for _, m2 in SP["models"]]
         spec_k[wi] = (k1, k2)
     # ---- kernels: photometry (per light-curve epoch, per star) ----
-    lw_ph = jnp.linspace(math.log10(4300.0), math.log10(5900.0), 200)
+    # The aemu spectrum is line-rich at R = 115000: passband integrals sampled
+    # every ~10 A alias lines into 3-5 mmag epoch-to-epoch errors (Clausen's
+    # noise is 4 mmag). 16000 points (0.1 A) converge b and y to 0.05 mmag.
+    lw_ph = jnp.linspace(math.log10(4300.0), math.log10(5900.0), args.n_phot_wl)
     ph_k1 = [build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, element_coordinate=jnp.asarray(m1.parameters)[:, iG], coordinate_nodes=gnodes1)
              for m1, _ in LC["models"]]
     ph_k2 = [build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, element_coordinate=jnp.asarray(m2.parameters)[:, iG], coordinate_nodes=gnodes2)
