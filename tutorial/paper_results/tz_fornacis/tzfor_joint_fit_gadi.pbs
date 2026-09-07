@@ -25,7 +25,7 @@ cd "${RUN_DIR}"
 "${PYTHON_BIN}" -u "${RUN_DIR}/tzfor_joint_fit.py" \
     --lc-meshes "${RUN_DIR}/tzfor_aemu_roche_n1200_lc6650_meshes.pkl" \
     --spec-meshes "${RUN_DIR}/tzfor_aemu_roche_n1500_spectra_meshes.pkl" \
-    --harps "${RUN_DIR}/harps_windows.npz" \
+    --harps "${HARPS:-${RUN_DIR}/harps_windows.npz}" \
     --photometry "${RUN_DIR}/tzfor_lightcurve.csv" \
     --out "${OUT_DIR}/joint_fit_result${TAG:-}.pkl" ${EXTRA_ARGS}
 echo "===== DONE ====="
