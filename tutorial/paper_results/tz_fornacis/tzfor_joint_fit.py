@@ -161,6 +161,8 @@ def main():
     ap.add_argument("--maxiter", type=int, default=200)
     ap.add_argument("--surrogate-tol", type=float, default=0.01, help="abort if surrogate vs exact max error exceeds this")
     ap.add_argument("--n-epochs", type=int, default=None, help="use only the first N spectral epochs (smoke tests)")
+    ap.add_argument("--windows", type=float, nargs="+", default=None, metavar="A",
+                    help="keep only these windows (lo hi lo hi ...) of the HARPS file; operators are built for them alone")
     ap.add_argument("--mask", type=float, nargs="+", default=[], metavar="A",
                     help="wavelength ranges (lo hi lo hi ...) excluded from the spectroscopic term, e.g. the LTE H-alpha core")
     ap.add_argument("--skip-validation", action="store_true")
@@ -206,8 +208,22 @@ def main():
         return loss_ph_rel(rel) * N_ph
 
     # ---- spectroscopy: operators ----
-    wl_out = np.asarray(H["wavelengths"]); n_out = wl_out.size
-    windows = [(5160., 5200.), (6540., 6580.)]
+    wl_out = np.asarray(H["wavelengths"])
+    windows = [tuple(w) for w in np.asarray(H["windows"])] if "windows" in H else [(5160., 5200.), (6540., 6580.)]
+    if args.windows:
+        assert len(args.windows) % 2 == 0, "--windows takes pairs: lo hi [lo hi ...]"
+        keep_w = list(zip(args.windows[::2], args.windows[1::2]))
+        windows = [w for w in windows if any(abs(w[0] - lo) < 1 and abs(w[1] - hi) < 1 for lo, hi in keep_w)]
+        assert windows, f"none of {keep_w} matches the file's windows"
+        sel = np.zeros(wl_out.size, bool)
+        for lo, hi in windows:
+            sel |= (wl_out >= lo) & (wl_out <= hi)
+        wl_out = wl_out[sel]; H["obs"] = H["obs"][:, sel]
+        if "sigma_win" in H:
+            wi = [i for i, w in enumerate(np.asarray(H["windows"])) if any(abs(w[0] - lo) < 1 for lo, hi in windows)]
+            H["sigma"] = np.nanmedian(H["sigma_win"][:, wi], axis=1)
+    print("windows:", windows, flush=True)
+    n_out = wl_out.size
     ov = args.oversample
     wl_fine = np.concatenate([np.linspace(lo - 2, hi + 2, int((hi - lo + 4) / 0.02 * ov)) for lo, hi in windows])
     lwf = jnp.log10(wl_fine); mu_nodes = jnp.linspace(0.0, 1.0, args.n_mu)
