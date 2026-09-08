@@ -66,6 +66,10 @@ def main():
     ap.add_argument("--mask-epochs", default="all", choices=["all", "odd", "even"]); ap.add_argument("--fit-epochs", default="all", choices=["all", "odd", "even"])
     ap.add_argument("--delta", action="store_true"); ap.add_argument("--delta-sigma", type=float, default=0.03); ap.add_argument("--delta-smooth", type=float, default=1.0)
     ap.add_argument("--delta-alternations", type=int, default=3); ap.add_argument("--delta-maxiter", type=int, default=60)
+    ap.add_argument("--delta-mode", default="joint", choices=["joint", "fit-only", "fixed"],
+                    help="joint: alternate theta and delta (degenerate: delta can mimic the primary's line profiles); "
+                         "fit-only: fit delta once at the warm-start theta on --fit-epochs and stop; fixed: use delta from --result-in unchanged")
+    ap.add_argument("--delta-in", default=None, help="result pkl whose delta map is used (delta-mode fixed)")
     ap.add_argument("--jackknife-blocks", type=int, default=0)
     ap.add_argument("--maxiter", type=int, default=150); ap.add_argument("--n-phot-wl", type=int, default=16000); ap.add_argument("--chunk", type=int, default=32768)
     ap.add_argument("--n-epochs", type=int, default=None); ap.add_argument("--n-lc-epochs", type=int, default=None); ap.add_argument("--skip-validation", action="store_true")
@@ -140,7 +144,7 @@ def main():
     # ---- parameter vector ----
     pnames = ["Teff1", "Teff2", "feh", "dphi"]; theta0 = [T0[0], T0[1], feh0, 0.1585]; S = [100., 100., 0.1, 0.001]; lo = [3800., 3800., -1.5, 0.10]; hi = [6900., 6900., 0.5, 0.22]
     if args.free_vmacro: pnames += ["vmac1", "vmac2"]; theta0 += list(args.vmacro0); S += [1., 1.]; lo += [0.5, 0.5]; hi += [20., 20.]
-    if args.free_vsini: pnames += ["vsini_scale1", "vsini_scale2"]; theta0 += [1.0, 1.0]; S += [0.1, 0.1]; lo += [0.2, 0.2]; hi += [2.5, 2.5]
+    if args.free_vsini: pnames += ["vsini_scale1", "vsini_scale2"]; theta0 += [1.0, 1.0]; S += [0.1, 0.1]; lo += [0.5, 0.5]; hi += [2.0, 2.0]
     theta0 = np.array(theta0); S = np.array(S); n_par = len(pnames)
     delta0 = np.zeros(n)
     if args.result_in:
@@ -249,16 +253,23 @@ def main():
         d = np.asarray(r.x); print(f"delta fit: {r.nit} it, {time.time() - t:.0f}s, rms delta {100 * d.std():.2f}% (prior {100 * args.delta_sigma:.0f}%)", flush=True)
         return jnp.asarray(d)
 
-    x, th, aux = fit_theta(x0, dlt, blocks_all, args.maxiter, "pass 1 (delta = 0)")
-    th_nodelta = th.copy()
-    if args.delta:
-        for it in range(args.delta_alternations):
-            dlt = fit_delta(x, dlt, args.delta_maxiter)
-            x, th, aux = fit_theta(x, dlt, blocks_all, 40, f"alternation {it + 1}: theta | delta")
-        print("delta effect on theta: " + " ".join(f"{nm} {b - a:+.4g}" for nm, a, b in zip(pnames, th_nodelta, th)), flush=True)
+    if args.delta and args.delta_mode == "fixed":
+        dlt = jnp.asarray(pickle.load(open(args.delta_in, "rb"))["delta"]); print(f"delta held fixed from {args.delta_in} (rms {100 * float(jnp.std(dlt)):.2f}%)", flush=True)
+    if args.delta and args.delta_mode == "fit-only":
+        dlt = fit_delta(x0, dlt, args.delta_maxiter); th = theta0.copy(); x = x0
+        (_, aux), _ = vg_theta(jnp.asarray(x0), dlt, blocks_all); th_nodelta = th.copy()
+        print("delta fitted at the warm-start theta; theta not refitted (use delta-mode fixed on the other epoch subset)", flush=True)
+    else:
+        x, th, aux = fit_theta(x0, dlt, blocks_all, args.maxiter, "pass 1" + (" (delta fixed)" if args.delta and args.delta_mode == "fixed" else " (delta = 0)"))
+        th_nodelta = th.copy()
+        if args.delta and args.delta_mode == "joint":
+            for it in range(args.delta_alternations):
+                dlt = fit_delta(x, dlt, args.delta_maxiter)
+                x, th, aux = fit_theta(x, dlt, blocks_all, 40, f"alternation {it + 1}: theta | delta")
+            print("delta effect on theta: " + " ".join(f"{nm} {b - a:+.4g}" for nm, a, b in zip(pnames, th_nodelta, th)), flush=True)
 
     result = dict(pnames=pnames, theta=th, theta_nodelta=th_nodelta, x=x, S=S, theta0=theta0, chi2_phot=float(aux[0]), chi2_spec=float(aux[1]), N_ph=N_ph, N_sp=N_sp,
-                  delta=(np.asarray(dlt) if args.delta else None), args=vars(args), rv=rv, fit_epochs=fit_e, beta=args.beta)
+                  delta=(np.asarray(dlt) if args.delta else None), args=vars(args), rv=rv, fit_epochs=fit_e, beta=args.beta, delta_mode=args.delta_mode)
     pickle.dump(result, open(args.out, "wb"), protocol=4)
 
     # ---- residual stack -> learned mask (optional) ----
