@@ -141,9 +141,12 @@ def star_model(s, T, f):
     i0, wT = locate(jnp.asarray(T_nodes[s]), T); j0, wF = locate(jnp.asarray(F_nodes), f)
     return [interp2(g, i0, wT, j0, wF) for g in GRID_SPEC[s]], interp2(GRID_BAND[s], i0, wT, j0, wF)
 
+CONT_ORDER = int(A.get("continuum_order", 1))
 def continuum_fix(model, ob, gd, x):
-    w = jnp.where(gd, 1.0, 0.0); Am = jnp.stack([model, model * x], 1) * w[:, None]
-    coef = jnp.linalg.solve(Am.T @ Am + 1e-12 * jnp.eye(2), Am.T @ (ob * w)); return model * (coef[0] + coef[1] * x)
+    """Same polynomial continuum correction as the fit that produced the optimum."""
+    w = jnp.where(gd, 1.0, 0.0); basis = jnp.stack([x ** k for k in range(CONT_ORDER + 1)], 1)
+    Am = model[:, None] * basis * w[:, None]
+    coef = jnp.linalg.solve(Am.T @ Am + 1e-12 * jnp.eye(basis.shape[1]), Am.T @ (ob * w)); return model * (basis @ coef)
 
 def spectra_chi2(T1, T2, f):
     s1, _ = star_model(0, T1, f); s2, _ = star_model(1, T2, f); out = []
