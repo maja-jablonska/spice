@@ -128,7 +128,7 @@ def main():
     fit_e = epoch_subset(n_ep, args.fit_epochs); ep_w = np.zeros(n_ep); ep_w[fit_e] = 1.0
     edges = np.asarray(H["block_edges"]); blk = np.clip(np.searchsorted(edges, wl) - 1, 0, edges.size - 2)
     sig_np = np.hypot(np.nan_to_num(H["sigma_blocks"][:n_ep, blk], nan=0.01), args.spec_floor)
-    obs = jnp.asarray(np.where(good_np, obs_np, 1.0)); good = jnp.asarray(good_np); sig = jnp.asarray(sig_np); ep_w = jnp.asarray(ep_w)
+    obs = jnp.asarray(np.where(good_np, obs_np, 1.0)); good = jnp.asarray(good_np); sig = jnp.asarray(sig_np); ep_w = jnp.asarray(ep_w); blk_j = jnp.asarray(blk)
     N_sp = int(good_np[fit_e].sum())
     kn = np.arange(lw_obs[0], lw_obs[-1], math.log10(1 + args.knot_spacing / 5500.0)); interior = kn[(kn > lw_obs[0] + 1e-9) & (kn < lw_obs[-1] - 1e-9)]
     t_kn = np.concatenate([[lw_obs[0]] * 4, interior, [lw_obs[-1]] * 4])      # clamped cubic knot vector: k+1 copies at each end
@@ -187,7 +187,7 @@ def main():
     def chi2_spec(theta, delta, block_w):
         mod = jax.vmap(continuum_fix)(spectra(theta, delta), obs, good)
         r = jnp.where(good, (obs - mod) / sig, 0.0)
-        return jnp.sum(ep_w[:, None] * block_w[None, :] * r ** 2)
+        return jnp.sum(ep_w[:, None] * block_w[blk_j][None, :] * r ** 2)     # block weights mapped to pixels
 
     def chi2_phot(theta):
         r = []
