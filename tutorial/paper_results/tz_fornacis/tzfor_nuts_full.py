@@ -25,7 +25,7 @@ ap.add_argument("--photometry", default=str(HERE / "tzfor_lightcurve.csv")); ap.
 ap.add_argument("--teff-halfwidth", type=float, default=200.0); ap.add_argument("--teff-step", type=float, default=25.0)
 ap.add_argument("--feh", type=float, nargs=3, default=(-0.5, 0.1, 0.1)); ap.add_argument("--n-blocks", type=int, default=6)
 ap.add_argument("--num-warmup", type=int, default=400); ap.add_argument("--num-samples", type=int, default=1500); ap.add_argument("--chains", type=int, default=4)
-ap.add_argument("--out", required=True)
+ap.add_argument("--out", required=True); ap.add_argument("--n-epochs", type=int, default=None); ap.add_argument("--n-lc-epochs", type=int, default=None)
 args = ap.parse_args()
 print("devices:", jax.devices(), flush=True)
 
@@ -33,6 +33,10 @@ R = pickle.load(open(args.result, "rb")); A = R["args"]; pn = R["pnames"]; th = 
 emu = GI.make_emulator(); SP = pickle.load(open(args.spec_meshes, "rb")); LC = pickle.load(open(args.lc_meshes, "rb"))
 H = np.load(args.harps, allow_pickle=True); H = {k: H[k] for k in H.files}
 names = SP["parameter_names"]; iT, iG, iF = names.index("marcs_teff"), names.index("marcs_logg"), names.index("feh")
+if args.n_epochs:
+    SP["models"] = SP["models"][:args.n_epochs]; SP["times"] = SP["times"][:args.n_epochs]; H["obs"] = H["obs"][:args.n_epochs]; H["sigma_blocks"] = H["sigma_blocks"][:args.n_epochs]
+if args.n_lc_epochs:
+    LC["models"] = LC["models"][:args.n_lc_epochs]; LC["times"] = LC["times"][:args.n_lc_epochs]
 n_ep, n_lc = len(SP["models"]), len(LC["models"]); lw_obs = np.asarray(H["logwl"], float); n = lw_obs.size; wl = 10.0 ** lw_obs; dlog = float(H["dlog"])
 shift_sys = math.log10(1.0 + A["dv_sys"] / C_KMS); lw_model = jnp.asarray(lw_obs - shift_sys); beta = R["beta"]
 delta = jnp.asarray(R["delta"]) if R.get("delta") is not None else jnp.zeros(n)
