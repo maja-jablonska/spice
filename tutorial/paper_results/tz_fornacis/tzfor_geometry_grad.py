@@ -46,8 +46,9 @@ phases = jnp.array([0.25, 0.5])              # out of eclipse, and conjunction (
 try:
     t = time.time(); f0 = jax.block_until_ready(flux_b(R2_0, INCL0, phases)); print(f"forward ok in {time.time()-t:.0f}s: flux ratio conj/quadrature = {float(f0[1]/f0[0]):.4f}", flush=True)
     depth = lambda R2, incl: 1.0 - flux_b(R2, incl, phases)[1] / flux_b(R2, incl, phases)[0]
-    t = time.time(); g = jax.jit(jax.grad(depth, argnums=(0, 1)))(R2_0, INCL0); jax.block_until_ready(g); print(f"grad ok in {time.time()-t:.0f}s: d depth/dR2 = {float(g[0]):+.5f} per Rsun, d depth/d incl = {float(g[1]):+.5f} per deg", flush=True)
-    dj = jax.jit(depth)
+    # no outer jit: icosphere() needs a concrete vertex count
+    t = time.time(); g = jax.grad(depth, argnums=(0, 1))(R2_0, INCL0); jax.block_until_ready(g); print(f"grad ok in {time.time()-t:.0f}s: d depth/dR2 = {float(g[0]):+.5f} per Rsun, d depth/d incl = {float(g[1]):+.5f} per deg", flush=True)
+    dj = depth
     h = 0.02; fd_r = (dj(R2_0 + h, INCL0) - dj(R2_0 - h, INCL0)) / (2 * h)
     h = 0.05; fd_i = (dj(R2_0, INCL0 + h) - dj(R2_0, INCL0 - h)) / (2 * h)
     print(f"finite differences: d depth/dR2 = {float(fd_r):+.5f}, d depth/d incl = {float(fd_i):+.5f}", flush=True)

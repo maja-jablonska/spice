@@ -70,7 +70,8 @@ if args.mask_in: good_np &= ~np.asarray(np.load(args.mask_in, allow_pickle=True)
 edges = np.asarray(H["block_edges"]); blk = np.clip(np.searchsorted(edges, wl) - 1, 0, edges.size - 2)
 sig = jnp.asarray(np.hypot(np.nan_to_num(H["sigma_blocks"][:n_ep, blk], nan=0.01), A["spec_floor"])); obs = jnp.asarray(np.where(good_np, obs_np, 1.0)); good = jnp.asarray(good_np)
 jblk = jnp.asarray(np.minimum(blk * args.n_blocks // (edges.size - 1), args.n_blocks - 1))
-kn = np.arange(lw_obs[0], lw_obs[-1] + 1e-12, math.log10(1 + A["knot_spacing"] / 5500.0)); t_kn = np.concatenate([[lw_obs[0]] * 3, kn, [lw_obs[-1]] * 3])
+kn = np.arange(lw_obs[0], lw_obs[-1], math.log10(1 + A["knot_spacing"] / 5500.0)); interior = kn[(kn > lw_obs[0] + 1e-9) & (kn < lw_obs[-1] - 1e-9)]
+t_kn = np.concatenate([[lw_obs[0]] * 4, interior, [lw_obs[-1]] * 4])      # clamped cubic knot vector: k+1 copies at each end
 Bmat = jnp.asarray(BSpline.design_matrix(lw_obs, t_kn, 3).toarray()); nB = Bmat.shape[1]
 ph_o, mag_o = load_photometry(args.photometry); sig_ph = {"b": 0.0041, "y": 0.0035}
 model_phase = ((np.asarray(LC["times"]) - K.T_P_HJD) % K.PERIOD_DAYS) / K.PERIOD_DAYS; order = np.argsort(model_phase); mph = jnp.asarray(model_phase[order])

@@ -130,7 +130,8 @@ def main():
     sig_np = np.hypot(np.nan_to_num(H["sigma_blocks"][:n_ep, blk], nan=0.01), args.spec_floor)
     obs = jnp.asarray(np.where(good_np, obs_np, 1.0)); good = jnp.asarray(good_np); sig = jnp.asarray(sig_np); ep_w = jnp.asarray(ep_w)
     N_sp = int(good_np[fit_e].sum())
-    kn = np.arange(lw_obs[0], lw_obs[-1] + 1e-12, math.log10(1 + args.knot_spacing / 5500.0)); t_kn = np.concatenate([[lw_obs[0]] * 3, kn, [lw_obs[-1]] * 3])
+    kn = np.arange(lw_obs[0], lw_obs[-1], math.log10(1 + args.knot_spacing / 5500.0)); interior = kn[(kn > lw_obs[0] + 1e-9) & (kn < lw_obs[-1] - 1e-9)]
+    t_kn = np.concatenate([[lw_obs[0]] * 4, interior, [lw_obs[-1]] * 4])      # clamped cubic knot vector: k+1 copies at each end
     Bmat = jnp.asarray(BSpline.design_matrix(lw_obs, t_kn, 3).toarray()); nB = Bmat.shape[1]
     print(f"continuum: {nB} cubic B-spline coefficients per epoch ({args.knot_spacing} A knots); fitting {len(fit_e)} epochs, {N_sp} pixels", flush=True)
     ph_o, mag_o = load_photometry(args.photometry); sig_ph = {"b": 0.0041, "y": 0.0035}; N_ph = sum(len(v) for v in mag_o.values())
