@@ -22,6 +22,7 @@ ap.add_argument("--spec-meshes", default=str(HERE / "tzfor_aemu_out" / "tzfor_ae
 ap.add_argument("--harps", default=str(HERE / "tzfor_aemu_out" / "harps_windows_log.npz"))
 ap.add_argument("--photometry", default=str(HERE / "tzfor_lightcurve.csv"))
 ap.add_argument("--epoch", type=int, default=12, help="spectral epoch to export (12 = phase 0.25)")
+ap.add_argument("--line-mask", default=None, help="line_mask npz: masked pixels are exported for shading")
 ap.add_argument("--out", default=str(HERE / "tzfor_aemu_out" / "paper_models.npz"))
 args = ap.parse_args()
 print("devices:", jax.devices(), flush=True)
@@ -44,6 +45,12 @@ dlog = float(H["dlog"]); shift_sys = math.log10(1.0 + A["dv_sys"] / C_KMS)
 br1, br2 = broadener(dlog, A["vmacro"][0]), broadener(dlog, A["vmacro"][1])
 
 out = {"theta": th, "epoch": args.epoch, "phase": ((SP["times"][args.epoch] - K.T_P_HJD) % K.PERIOD_DAYS) / K.PERIOD_DAYS}
+LM = np.load(args.line_mask, allow_pickle=True) if args.line_mask else None
+EXTRA = R.get("extra", [])
+if EXTRA:
+    iX = [names.index(k) for k in EXTRA]
+    b1 = b1.at[jnp.asarray(iX[:5])].set(jnp.asarray(th[6:11])); b2 = b2.at[iX[5]].set(th[11])
+    r1 = gravity_darkened_rows(b1.at[iF].set(th[2]), iT, iG, gn1, th[0], gref1, th[3]); r2 = gravity_darkened_rows(b2.at[iF].set(th[2]), iT, iG, gn2, th[1], gref2, th[4])
 e = args.epoch; m1, m2 = SP["models"][e]
 for wi in keep:
     lw = jnp.asarray(H[f"logwl_{wi}"] - shift_sys)
@@ -52,12 +59,15 @@ for wi in keep:
     s1 = kernel_flux_multi(emu.intensity, [k1], r1)[0]; s2 = kernel_flux_multi(emu.intensity, [k2], r2)[0]
     mod = np.asarray((br1(s1[:, 0]) + br2(s2[:, 0])) / (br1(s1[:, 1]) + br2(s2[:, 1])))
     ob = np.asarray(H[f"obs_{wi}"][e], float); g = np.isfinite(ob); x = np.linspace(-1, 1, ob.size)
-    Am = np.stack([mod, mod * x], 1)[g]; coef = np.linalg.lstsq(Am, ob[g], rcond=None)[0]; modc = mod * (coef[0] + coef[1] * x)
+    msk = np.asarray(LM[f"mask_{wi}"][e], bool) if (LM is not None and f"mask_{wi}" in LM.files) else np.zeros(ob.size, bool)
+    order = int(A.get("continuum_order", 1)); basis = np.stack([x ** k for k in range(order + 1)], 1)
+    Am = (mod[:, None] * basis)[g & ~msk]; coef = np.linalg.lstsq(Am, ob[g & ~msk], rcond=None)[0]; modc = mod * (basis @ coef)
+    out[f"mask_{wi}"] = msk
     # component contributions (continuum-normalised to the blend) for the figure
     c1 = np.asarray(br1(s1[:, 1])); c2 = np.asarray(br2(s2[:, 1])); f1 = np.asarray(br1(s1[:, 0])); f2 = np.asarray(br2(s2[:, 0]))
     out[f"wl_{wi}"] = 10.0 ** np.asarray(H[f"logwl_{wi}"]); out[f"obs_{wi}"] = ob; out[f"model_{wi}"] = modc
     out[f"primary_{wi}"] = f1 / (c1 + c2) * (coef[0] + coef[1] * x); out[f"secondary_{wi}"] = f2 / (c1 + c2) * (coef[0] + coef[1] * x)
-    print(f"window {all_windows[wi][0]:.0f}: rms residual {100 * np.sqrt(np.mean((ob[g] - modc[g]) ** 2)):.2f}%", flush=True)
+    print(f"window {all_windows[wi][0]:.0f}: rms residual {100 * np.sqrt(np.mean((ob[g] - modc[g]) ** 2)):.2f}% (unmasked pixels {100 * np.sqrt(np.mean((ob - modc)[g & ~msk] ** 2)):.2f}%)", flush=True)
 out["windows"] = np.array([all_windows[i] for i in keep])
 
 # light curves
