@@ -59,6 +59,13 @@ def base_row(models, s):
     return jnp.asarray(np.average(np.asarray(m0.parameters)[vis], axis=0, weights=a))
 base_sp = [base_row(SP["models"], 0), base_row(SP["models"], 1)]
 base_lc = [base_row(LC["models"], 0), base_row(LC["models"], 1)]
+# extra emulator inputs fitted by tzfor_kernel_fit --free-abundances (primary a, c, n, o, vmicro; secondary vmicro): hold at the optimum
+EXTRA = R.get("extra", [])
+if EXTRA:
+    iX = [names.index(k) for k in EXTRA]; vals = th[6:6 + len(EXTRA)]
+    for lst in (base_sp, base_lc):
+        lst[0] = lst[0].at[jnp.asarray(iX[:5])].set(jnp.asarray(vals[:5])); lst[1] = lst[1].at[iX[5]].set(vals[5])
+    print("holding fitted abundances/vmicro:", dict(zip(["a1", "c1", "n1", "o1", "vmic1", "vmic2"], np.round(vals, 3))), flush=True)
 
 # ---- kernels ----
 t0 = time.time()

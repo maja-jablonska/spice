@@ -94,6 +94,10 @@ def main():
     ap.add_argument("--n-lc-epochs", type=int, default=None, help="smoke tests: first N light-curve epochs")
     ap.add_argument("--skip-validation", action="store_true")
     ap.add_argument("--chunk", type=int, default=32768)
+    ap.add_argument("--free-abundances", action="store_true",
+                    help="also fit the primary's alpha, C, N, O and both stars' microturbulence (emulator inputs); "
+                         "the K giant's post-dredge-up C/N pattern is the dominant spectral residual")
+    ap.add_argument("--continuum-order", type=int, default=1, help="polynomial order of the per-epoch, per-window continuum correction (1 = linear)")
     ap.add_argument("--line-mask", default=None, help="line_mask.npz from tzfor_line_mask.py: per-window (n_epoch, n_pix) pixels to drop")
     ap.add_argument("--n-phot-wl", type=int, default=16000, help="wavelength samples for the passband integrals (16000 converges to 0.05 mmag)")
     args = ap.parse_args()
@@ -141,8 +145,15 @@ def main():
     print(f"start: Teff1 {T1_0:.1f} (logg_ref {gref1:.3f}, nodes {np.asarray(gnodes1).round(3)})  "
           f"Teff2 {T2_0:.1f} (logg_ref {gref2:.3f}, nodes {np.asarray(gnodes2).round(3)})  [Fe/H] {feh_0:+.2f}", flush=True)
 
+    EXTRA = ["a", "c", "n", "o", "vmicro", "vmicro"] if args.free_abundances else []
+    iX = [names.index(k) for k in EXTRA]
+    n_par = 6 + len(EXTRA)
+
     def rows(theta):
         b1 = base1.at[iF].set(theta[2]); b2 = base2.at[iF].set(theta[2])
+        if EXTRA:
+            b1 = b1.at[iX[0]].set(theta[6]).at[iX[1]].set(theta[7]).at[iX[2]].set(theta[8]).at[iX[3]].set(theta[9]).at[iX[4]].set(theta[10])
+            b2 = b2.at[iX[5]].set(theta[11])
         r1 = gravity_darkened_rows(b1, iT, iG, gnodes1, theta[0], gref1, theta[3])
         r2 = gravity_darkened_rows(b2, iT, iG, gnodes2, theta[1], gref2, theta[4])
         return r1, r2
@@ -218,10 +229,14 @@ def main():
         return (br1(s1[..., 0]) + br2(s2[..., 0])) / (br1(s1[..., 1]) + br2(s2[..., 1]))
 
     def continuum_fix(model, ob, gd, x):
+        """Closed-form polynomial rescale of the model (order args.continuum_order): absorbs the
+        observed spectrum's normalisation residual, which is broad (>3 A) and present in
+        every rest frame, without touching line-scale information."""
         w = jnp.where(gd, 1.0, 0.0)
-        A = jnp.stack([model, model * x], 1) * w[:, None]
-        coef = jnp.linalg.solve(A.T @ A + 1e-12 * jnp.eye(2), A.T @ (ob * w))
-        return model * (coef[0] + coef[1] * x)
+        basis = jnp.stack([x ** k for k in range(args.continuum_order + 1)], 1)     # (n, K)
+        A = model[:, None] * basis * w[:, None]
+        coef = jnp.linalg.solve(A.T @ A + 1e-12 * jnp.eye(basis.shape[1]), A.T @ (ob * w))
+        return model * (basis @ coef)
 
     def chi2_spec(theta, active):
         r1, r2 = rows(theta)
@@ -233,8 +248,10 @@ def main():
             tot = tot + active[wi] * jnp.sum(res ** 2)
         return tot
 
-    theta0 = jnp.array([T1_0, T2_0, feh_0, 0.08, 0.08, 0.158])
-    S = jnp.array([100., 100., 0.1, 0.1, 0.1, 0.001])
+    theta0 = jnp.array([T1_0, T2_0, feh_0, 0.08, 0.08, 0.158] + ([float(base1[iX[0]]), float(base1[iX[1]]), float(base1[iX[2]]), float(base1[iX[3]]), float(base1[iX[4]]), float(base2[iX[5]])] if EXTRA else []))
+    S = jnp.array([100., 100., 0.1, 0.1, 0.1, 0.001] + ([0.1, 0.1, 0.1, 0.1, 0.5, 0.5] if EXTRA else []))
+    if EXTRA:
+        print(f"free abundances: start a1 {theta0[6]:+.2f} c1 {theta0[7]:+.2f} n1 {theta0[8]:+.2f} o1 {theta0[9]:+.2f} vmic1 {theta0[10]:.2f} vmic2 {theta0[11]:.2f}", flush=True)
 
     def total(x, active):
         th = theta0 + x * S
@@ -254,6 +271,11 @@ def main():
             p = jnp.asarray(mm.parameters); logg = p[:, iG]
             teff = T * jnp.power(10.0, beta * (logg - gref))
             p = p.at[:, iT].set(teff).at[:, iF].set(theta[2])
+            if EXTRA:
+                if mm is m1:
+                    p = p.at[:, iX[0]].set(theta[6]).at[:, iX[1]].set(theta[7]).at[:, iX[2]].set(theta[8]).at[:, iX[3]].set(theta[9]).at[:, iX[4]].set(theta[10])
+                else:
+                    p = p.at[:, iX[5]].set(theta[11])
             return simulate_observed_flux(emu.intensity, mm._replace(parameters=p), lw0, chunk_size=256)
         s1 = one(m1, base1, gref1, theta[0], theta[3], br1); s2 = one(m2, base2, gref2, theta[1], theta[4], br2)
         return (br1(s1[:, 0]) + br2(s2[:, 0])) / (br1(s1[:, 1]) + br2(s2[:, 1]))
@@ -274,15 +296,22 @@ def main():
 
     # ---- optimisation ----
     active_all = {wi: 1.0 for wi in keep}
-    t = time.time(); (v0, aux0), g0 = vg(jnp.zeros(6), active_all); jax.block_until_ready(g0)
+    t = time.time(); (v0, aux0), g0 = vg(jnp.zeros(n_par), active_all); jax.block_until_ready(g0)
     print(f"first value+grad (compile) {time.time() - t:.0f}s", flush=True)
-    t = time.time(); jax.block_until_ready(vg(jnp.zeros(6), active_all)[1]); print(f"warm value+grad {time.time() - t:.2f}s", flush=True)
+    t = time.time(); jax.block_until_ready(vg(jnp.zeros(n_par), active_all)[1]); print(f"warm value+grad {time.time() - t:.2f}s", flush=True)
     print(f"start: chi2_phot/N {float(aux0[0]) / N_ph:.3f}  chi2_spec/N {float(aux0[1]) / N_sp:.3f}", flush=True)
 
     lo = [(3800 - T1_0) / 100, (3800 - T2_0) / 100, (-1.5 - feh_0) / 0.1, -0.08 / 0.1, -0.08 / 0.1, (-0.05 - 0.158) / 0.001]
     hi = [(6900 - T1_0) / 100, (6900 - T2_0) / 100, (0.5 - feh_0) / 0.1, 0.22 / 0.1, 0.22 / 0.1, (0.35 - 0.158) / 0.001]
     if args.fix_beta:
         lo[3] = hi[3] = 0.0; lo[4] = hi[4] = 0.0
+    if EXTRA:
+        # emulator training ranges, from the bundle's reference scaling (with a small margin)
+        bn = emu._bundle_parameter_names(); mn = np.asarray(emu.ref["min_tree"]["parameters"]).ravel(); mx = np.asarray(emu.ref["max_tree"]["parameters"]).ravel()
+        for j, k in enumerate(EXTRA):
+            b = [i for i, n in enumerate(bn) if n == k][0]
+            lo.append((mn[b] + 0.02 * (mx[b] - mn[b]) - float(theta0[6 + j])) / float(S[6 + j])); hi.append((mx[b] - 0.02 * (mx[b] - mn[b]) - float(theta0[6 + j])) / float(S[6 + j]))
+        print("abundance / vmicro bounds:", {k: (round(float(mn[[i for i, n in enumerate(bn) if n == k][0]]), 2), round(float(mx[[i for i, n in enumerate(bn) if n == k][0]]), 2)) for k in dict.fromkeys(EXTRA)}, flush=True)
 
     def fit(x0, active, maxiter, label):
         hist = []
@@ -293,11 +322,12 @@ def main():
         (_, aux), _ = vg(jnp.asarray(r.x), active)
         th = np.asarray(theta0) + np.asarray(r.x) * np.asarray(S)
         print(f"{label}: {r.nit} it, {len(hist)} eval, {time.time() - t:.0f}s, {r.message[:40]} | chi2_phot/N {float(aux[0]) / N_ph:.3f} "
-              f"chi2_spec/N {float(aux[1]) / N_sp:.3f} | Teff1 {th[0]:.0f} Teff2 {th[1]:.0f} [Fe/H] {th[2]:+.3f} beta1 {th[3]:.3f} beta2 {th[4]:.3f} dphi {th[5]:.4f}", flush=True)
+              f"chi2_spec/N {float(aux[1]) / N_sp:.3f} | Teff1 {th[0]:.0f} Teff2 {th[1]:.0f} [Fe/H] {th[2]:+.3f} beta1 {th[3]:.3f} beta2 {th[4]:.3f} dphi {th[5]:.4f}"
+              + (f" | a1 {th[6]:+.2f} c1 {th[7]:+.2f} n1 {th[8]:+.2f} o1 {th[9]:+.2f} vmic1 {th[10]:.2f} vmic2 {th[11]:.2f}" if EXTRA else ""), flush=True)
         return r, th, aux
 
-    r, th, aux = fit(np.zeros(6), active_all, args.maxiter, "all windows")
-    result = dict(theta=th, x=np.asarray(r.x), S=np.asarray(S), chi2_phot=float(aux[0]), chi2_spec=float(aux[1]),
+    r, th, aux = fit(np.zeros(n_par), active_all, args.maxiter, "all windows")
+    result = dict(theta=th, x=np.asarray(r.x), S=np.asarray(S), chi2_phot=float(aux[0]), chi2_spec=float(aux[1]), extra=EXTRA,
                   N_ph=N_ph, N_sp=N_sp, windows=[all_windows[i] for i in keep], args=vars(args),
                   gnodes=(np.asarray(gnodes1), np.asarray(gnodes2)), logg_ref=(gref1, gref2))
     with open(args.out, "wb") as fh:
@@ -327,7 +357,7 @@ def main():
             jk[all_windows[wi]] = thj
         A = np.array(list(jk.values())); n = A.shape[0]
         jk_err = np.sqrt((n - 1) / n * np.sum((A - A.mean(0)) ** 2, axis=0))
-        print(f"jackknife error: Teff1 {jk_err[0]:.0f} K  Teff2 {jk_err[1]:.0f} K  [Fe/H] {jk_err[2]:.3f}  beta1 {jk_err[3]:.3f}  beta2 {jk_err[4]:.3f}", flush=True)
+        print(f"jackknife error: Teff1 {jk_err[0]:.0f} K  Teff2 {jk_err[1]:.0f} K  [Fe/H] {jk_err[2]:.3f}  beta1 {jk_err[3]:.3f}  beta2 {jk_err[4]:.3f}" + (f"  a1 {jk_err[6]:.3f} c1 {jk_err[7]:.3f} n1 {jk_err[8]:.3f} o1 {jk_err[9]:.3f} vmic1 {jk_err[10]:.2f} vmic2 {jk_err[11]:.2f}" if EXTRA else ""), flush=True)
         result["jackknife"] = jk; result["jackknife_err"] = jk_err
     with open(args.out, "wb") as fh:
         pickle.dump(result, fh, protocol=4)
