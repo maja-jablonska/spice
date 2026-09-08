@@ -94,6 +94,7 @@ def main():
     ap.add_argument("--n-lc-epochs", type=int, default=None, help="smoke tests: first N light-curve epochs")
     ap.add_argument("--skip-validation", action="store_true")
     ap.add_argument("--chunk", type=int, default=32768)
+    ap.add_argument("--line-mask", default=None, help="line_mask.npz from tzfor_line_mask.py: per-window (n_epoch, n_pix) pixels to drop")
     ap.add_argument("--n-phot-wl", type=int, default=16000, help="wavelength samples for the passband integrals (16000 converges to 0.05 mmag)")
     args = ap.parse_args()
     print("devices:", jax.devices(), flush=True)
@@ -199,8 +200,13 @@ def main():
     br1, br2 = broadener(dlog, args.vmacro[0]), broadener(dlog, args.vmacro[1])
     obs, good, sig, xw = {}, {}, {}, {}
     N_sp = 0
+    LM = np.load(args.line_mask, allow_pickle=True) if args.line_mask else None
     for wi in keep:
         o = np.array(H[f"obs_{wi}"], float); g = np.isfinite(o)
+        if LM is not None and f"mask_{wi}" in LM.files:
+            m = np.asarray(LM[f"mask_{wi}"], bool)[:o.shape[0]]
+            g &= ~m
+            print(f"line mask window {all_windows[wi][0]:.0f}: dropping {100 * m[np.isfinite(o)].mean():.1f}% of pixels", flush=True)
         obs[wi] = jnp.asarray(np.where(g, o, 1.0)); good[wi] = jnp.asarray(g)
         sig[wi] = jnp.asarray(np.hypot(H["sigma_win"][:, wi], args.spec_floor))[:, None]
         xw[wi] = jnp.linspace(-1.0, 1.0, o.shape[1]); N_sp += int(g.sum())
