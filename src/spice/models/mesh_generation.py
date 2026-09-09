@@ -6,6 +6,7 @@ import pkgutil
 import pickle
 import numpy as np
 import jax.numpy as jnp
+import math
 import jax
 
 # Define ArrayLike type alias since jax.typing.ArrayLike is causing issues
@@ -233,7 +234,9 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
     Returns:
         Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
     """
-    subdivs = int(jnp.ceil(.5*jnp.log2(points/5)-1))
+    # plain Python arithmetic: under jit a jnp expression on this constant is staged into a
+    # tracer and the int() cast fails, which made IcosphereModel.construct untraceable
+    subdivs = int(math.ceil(0.5 * math.log2(points / 5) - 1))
 
     user_cache_path = None
     if use_cache:
