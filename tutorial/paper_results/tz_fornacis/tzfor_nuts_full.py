@@ -139,11 +139,15 @@ def model():
     numpyro.factor("phot", jnp.sum(-0.5 * phot_chi2(T1, T2, f, dphi) * jnp.exp(-2 * ls_b) - N_b * ls_b))
 mcmc = MCMC(NUTS(model, target_accept_prob=0.85, max_tree_depth=8), num_warmup=args.num_warmup, num_samples=args.num_samples, num_chains=args.chains, chain_method="sequential", progress_bar=False)
 t0 = time.time(); mcmc.run(jax.random.PRNGKey(0)); print(f"NUTS: {args.chains} x ({args.num_warmup} + {args.num_samples}) in {time.time() - t0:.0f}s", flush=True)
-# Pull the samples to the host and save BEFORE anything else touches the GPU: with the frozen
-# grids resident, even a tiny new executable can fail to load ("Failed to load in-memory CUBIN").
+# The compiled NUTS executable holds the frozen grids as constants, so the GPU carries two
+# copies and even numpyro's own get_samples (a device-side stack) can fail to load its kernel
+# ("Failed to load in-memory CUBIN ... out of memory"). Drop the grids and every compiled
+# executable first (the PBS wrapper sets XLA_PYTHON_CLIENT_ALLOCATOR=platform so the memory
+# really returns to CUDA), then pull the samples to the host and save immediately.
+del GS, GB
+import gc; gc.collect(); jax.clear_caches(); gc.collect()
 S = {k: np.asarray(jax.device_get(v)) for k, v in mcmc.get_samples(group_by_chain=True).items()}
 np.savez(args.out, **S, theta_map=th, pnames=np.array(pn)); print("saved", args.out, flush=True)
-del GS, GB
 try:
     mcmc.print_summary()
 except Exception as e:  # noqa: BLE001
