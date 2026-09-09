@@ -25,7 +25,7 @@ ap.add_argument("--photometry", default=str(HERE / "tzfor_lightcurve.csv")); ap.
 ap.add_argument("--teff-halfwidth", type=float, default=200.0); ap.add_argument("--teff-step", type=float, default=25.0)
 ap.add_argument("--feh", type=float, nargs=3, default=(-0.5, 0.1, 0.1)); ap.add_argument("--n-blocks", type=int, default=6)
 ap.add_argument("--num-warmup", type=int, default=400); ap.add_argument("--num-samples", type=int, default=1500); ap.add_argument("--chains", type=int, default=4)
-ap.add_argument("--out", required=True); ap.add_argument("--n-epochs", type=int, default=None); ap.add_argument("--n-lc-epochs", type=int, default=None)
+ap.add_argument("--out", required=True); ap.add_argument("--resume", action="store_true", help="continue from the chains already saved in --out"); ap.add_argument("--n-epochs", type=int, default=None); ap.add_argument("--n-lc-epochs", type=int, default=None)
 args = ap.parse_args()
 print("devices:", jax.devices(), flush=True)
 
@@ -147,13 +147,20 @@ def model():
 # the GPU (JAX raises it asynchronously, at the first host sync). With num_chains=1 there is no
 # stack, get_samples(group_by_chain=True) returns the stored states without a new executable,
 # and device_get copies them out. Compiled functions are reused across the runs.
+# Even so, the pooled allocator grew to 36 of 40 GB during a chain and the next chain's first
+# small kernel could not be loaded: the job must cap the pool (XLA_PYTHON_CLIENT_MEM_FRACTION)
+# and every chain is saved as soon as it is done so that --resume continues from the last one.
 mcmc = MCMC(NUTS(model, target_accept_prob=0.85, max_tree_depth=8), num_warmup=args.num_warmup, num_samples=args.num_samples, num_chains=1, progress_bar=False)
 _mem("before NUTS")
 chains = []; t0 = time.time()
-for c in range(args.chains):
+if args.resume and os.path.exists(args.out):
+    prev = np.load(args.out); keys = [k for k in prev.files if k not in ("theta_map", "pnames")]
+    chains = [{k: prev[k][i] for k in keys} for i in range(prev[keys[0]].shape[0])]
+    print(f"resuming: {len(chains)} chain(s) already in {args.out}", flush=True)
+for c in range(len(chains), args.chains):
     mcmc.run(jax.random.PRNGKey(c))
     chains.append({k: np.asarray(jax.device_get(v)) for k, v in mcmc.get_samples(group_by_chain=True).items()})
-    print(f"chain {c + 1}/{args.chains} done ({time.time() - t0:.0f}s)", flush=True)
+    print(f"chain {c + 1}/{args.chains} done ({time.time() - t0:.0f}s)", flush=True); _mem(f"after chain {c + 1}")
     np.savez(args.out, **{k: np.stack([ch[k] for ch in chains]) for k in chains[0]}, theta_map=th, pnames=np.array(pn))
 print(f"NUTS: {args.chains} x ({args.num_warmup} + {args.num_samples}) in {time.time() - t0:.0f}s; saved {args.out}", flush=True)
 S = {k: np.stack([ch[k] for ch in chains]) for k in chains[0]}
