@@ -33,7 +33,7 @@ import tzfor_grad_inference as GI, tzfor_constants as K
 from tzfor_kernel_fit import load_photometry, C_KMS, R_HARPS
 from spice.spectrum.synthesis_kernel import build_synthesis_kernel, gravity_darkened_rows, kernel_flux_multi
 from spice.models import IcosphereModel
-from spice.models.binary import Binary, add_orbit, evaluate_orbit
+from spice.models.binary import Binary, add_orbit, _evaluate_orbit
 
 
 class Geom(NamedTuple):
@@ -161,13 +161,21 @@ def main():
     @jax.checkpoint
     def spice_phase_kernels(bn, t):
         """Both stars' kernels at one time, checkpointed: the reverse pass through the occlusion then holds one phase at a time."""
-        m1, m2 = evaluate_orbit(bn, t)
+        m1, m2 = _evaluate_orbit(bn, t, n_neighbors1=NN1, n_neighbors2=NN2)
         return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH)
 
+    def spice_bodies(R1, R2, rows_plain):
+        return (IcosphereModel.construct(args.geo_n_vert, R1, K.PRIMARY_MASS, rows_plain[0], names),
+                IcosphereModel.construct(args.geo_n_vert, R2, K.SECONDARY_MASS, rows_plain[1], names))
+    if args.free_geometry:
+        # neighbour counts of the occlusion search: from_bodies needs concrete geometry, so fix them here (1.5x margin for larger radii)
+        _b1, _b2 = spice_bodies(K.PRIMARY_RADIUS, K.SECONDARY_RADIUS, base_lc); _ref = Binary.from_bodies(_b1, _b2)
+        NN1, NN2 = min(64, int(math.ceil(1.5 * int(_ref.n_neighbours1)))), min(64, int(math.ceil(1.5 * int(_ref.n_neighbours2)))); print(f"occlusion neighbour counts: {NN1}, {NN2}", flush=True)
+
     def spice_binary(R1, R2, inc_deg, rows_plain):
-        b1 = IcosphereModel.construct(args.geo_n_vert, R1, K.PRIMARY_MASS, rows_plain[0], names)
-        b2 = IcosphereModel.construct(args.geo_n_vert, R2, K.SECONDARY_MASS, rows_plain[1], names)
-        return add_orbit(Binary.from_bodies(b1, b2), K.PERIOD_YR, 0.0, 0.0, jnp.deg2rad(inc_deg), 0.0, 0.0, args.geo_mean_anom, 0.0, 0.0, 400)
+        b1, b2 = spice_bodies(R1, R2, rows_plain)
+        bn = Binary(b1, b2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., jnp.zeros_like(b1.centers), jnp.zeros_like(b2.centers), jnp.zeros_like(b1.velocities), jnp.zeros_like(b2.velocities), NN1, NN2)
+        return add_orbit(bn, K.PERIOD_YR, 0.0, 0.0, jnp.deg2rad(inc_deg), 0.0, 0.0, args.geo_mean_anom, 0.0, 0.0, 400)
 
     # ---- parameter vector ----
     pnames = ["Teff1", "Teff2", "feh", "dphi"]; theta0 = [T0[0], T0[1], feh0, 0.1585]; S = [100., 100., 0.1, 0.001]; lo = [3800., 3800., -1.5, 0.10]; hi = [6900., 6900., 0.5, 0.22]

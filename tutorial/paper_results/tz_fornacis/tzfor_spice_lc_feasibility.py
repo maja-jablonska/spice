@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent; sys.path.insert(0, str(HERE))
 import numpy as np, jax, jax.numpy as jnp
 import tzfor_grad_inference as GI, tzfor_constants as K
 from spice.models import IcosphereModel
-from spice.models.binary import Binary, add_orbit, evaluate_orbit
+from spice.models.binary import Binary, add_orbit, _evaluate_orbit
 from spice.spectrum.synthesis_kernel import build_synthesis_kernel, kernel_flux_multi
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -61,17 +61,29 @@ ks_ph = [[build_synthesis_kernel(pair[s], lw_ph, args.n_mu, 1) for pair in LC["m
 t = time.time(); m_ph = {b: np.asarray(v) for b, v in mags_from_kernels(ks_ph[0], ks_ph[1]).items()}; print(f"PHOEBE-mesh model: {len(ph_lc)} phases in {time.time() - t:.0f}s", flush=True)
 
 # ---- SPICE binary ----
+def make_binary(b1, b2, nn1, nn2):
+    """``Binary.from_bodies`` without its concrete-only neighbour search: the counts come from the reference geometry."""
+    return Binary(b1, b2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., jnp.zeros_like(b1.centers), jnp.zeros_like(b2.centers), jnp.zeros_like(b1.velocities), jnp.zeros_like(b2.velocities), int(nn1), int(nn2))
+
+def neighbour_counts(b1, b2, margin=1.5):
+    """Neighbour counts of the occlusion search at a concrete geometry, inflated so that larger radii in the fit stay covered."""
+    ref = Binary.from_bodies(b1, b2)
+    return min(64, int(math.ceil(margin * int(ref.n_neighbours1)))), min(64, int(math.ceil(margin * int(ref.n_neighbours2))))
+
+NN = {}
 def binary_at(n_vert, R1, R2, inc_deg, mean_anom=0.0):
     b1 = IcosphereModel.construct(n_vert, R1, M1, rows[0], names)
     b2 = IcosphereModel.construct(n_vert, R2, M2, rows[1], names)
-    return add_orbit(Binary.from_bodies(b1, b2), P_yr, 0.0, 0.0, jnp.deg2rad(inc_deg), 0.0, 0.0, mean_anom, 0.0, 0.0, 400)
+    if n_vert not in NN:   # first call is at the concrete reference geometry
+        NN[n_vert] = neighbour_counts(b1, b2); print(f"neighbour counts ({n_vert} vertices): {NN[n_vert]}", flush=True)
+    return add_orbit(make_binary(b1, b2, *NN[n_vert]), P_yr, 0.0, 0.0, jnp.deg2rad(inc_deg), 0.0, 0.0, mean_anom, 0.0, 0.0, 400)
 
 HW_PH = 24   # orbital + rotational velocities reach ~100 km/s = 17 px on the 16000-point photometric grid
 
 @jax.checkpoint
 def _phase_kernels(binary, t):
     """Kernels of both stars at one time; checkpointed so the reverse pass through the occlusion holds one phase at a time."""
-    m1, m2 = evaluate_orbit(binary, t)
+    m1, m2 = _evaluate_orbit(binary, t, n_neighbors1=binary.n_neighbours1, n_neighbors2=binary.n_neighbours2)
     return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH)
 
 def kernels_at(binary, phases):
