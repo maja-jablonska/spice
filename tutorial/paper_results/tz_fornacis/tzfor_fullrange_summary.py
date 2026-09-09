@@ -11,13 +11,15 @@ import numpy as np
 HERE = Path(__file__).resolve().parent; OUT = HERE / "tzfor_aemu_out"
 ROWS = [  # (file, label)
     ("fullrange_pass1.pkl", "all epochs, no mask (pass 1)"),
-    ("fullrange_pass1_lowvsini.pkl", "  same, vsini_1 bound 0.1"),
+    ("fullrange_pass1_hp.pkl", "  same, full float32 matmul precision + jackknife"),
+    ("fullrange_pass1_lowvsini.pkl", "  same, vsini_1 bound 0.1 (no better point found)"),
     ("fullrange_sync.pkl", "  same, synchronous rotation (vsini scale = 1)"),
     ("fullrange_odd_plain.pkl", "odd epochs, no mask"),
     ("fullrange_even_plain.pkl", "even epochs, no mask"),
     ("fullrange_even_maskodd.pkl", "even epochs, mask from odd (circularity test)"),
     ("fullrange_maskall.pkl", "all epochs, 5% mask (all epochs)"),
     ("fullrange_maskall_v2.pkl", "  same, stall-safe optimiser + jackknife"),
+    ("fullrange_maskall_hp.pkl", "  same, full float32 matmul precision + jackknife"),
     ("fullrange_maskall_sync.pkl", "  same, synchronous rotation"),
     ("fullrange_delta_odd.pkl", "delta map derived on odd epochs (theta held)"),
     ("fullrange_even_deltaodd.pkl", "even epochs, delta from odd held fixed"),
@@ -49,7 +51,7 @@ def main():
         A = np.array(list(teff2.values()))
         print(f"\nTreatment spread over {len(teff2)} full-epoch fits: Teff1 {A[:, 0].min():.0f}-{A[:, 0].max():.0f} K (std {A[:, 0].std():.0f}), "
               f"Teff2 {A[:, 1].min():.0f}-{A[:, 1].max():.0f} K (std {A[:, 1].std():.0f}), [Fe/H] {A[:, 2].min():.3f}..{A[:, 2].max():.3f} (std {A[:, 2].std():.3f})")
-    for f in ("fullrange_pass1.pkl", "fullrange_maskall.pkl", "fullrange_maskall_v2.pkl"):
+    for f in ("fullrange_pass1.pkl", "fullrange_pass1_hp.pkl", "fullrange_maskall.pkl", "fullrange_maskall_v2.pkl", "fullrange_maskall_hp.pkl"):
         d = load(f)
         if d is None or d.get("jackknife") is None: continue
         J = np.asarray(d["jackknife"]); th = np.asarray(d["theta"]); same = [j for j in range(J.shape[0]) if np.allclose(J[j], th, rtol=0, atol=1e-6)]
