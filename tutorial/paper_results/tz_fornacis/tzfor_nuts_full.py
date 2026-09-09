@@ -157,12 +157,13 @@ _mem("before NUTS")
 chains = []; t0 = time.time()
 if args.resume and os.path.exists(args.out):
     prev = np.load(args.out); keys = [k for k in prev.files if k not in ("theta_map", "pnames")]
-    chains = [{k: prev[k][i] for k in keys} for i in range(prev[keys[0]].shape[0])]
+    def _sq(a): return a[:, 0] if a.ndim >= 3 and a.shape[1] == 1 else a      # older files kept the singleton chain axis
+    chains = [{k: _sq(prev[k])[i] for k in keys} for i in range(prev[keys[0]].shape[0])]
     print(f"resuming: {len(chains)} chain(s) already in {args.out}", flush=True)
 n_stop = args.chains if args.chains_per_run is None else min(args.chains, len(chains) + args.chains_per_run)
 for c in range(len(chains), n_stop):
     mcmc.run(jax.random.PRNGKey(c))
-    chains.append({k: np.asarray(jax.device_get(v)) for k, v in mcmc.get_samples(group_by_chain=True).items()})
+    chains.append({k: np.asarray(jax.device_get(v))[0] for k, v in mcmc.get_samples(group_by_chain=True).items()})   # (1, n, ...) -> (n, ...)
     print(f"chain {c + 1}/{args.chains} done ({time.time() - t0:.0f}s)", flush=True); _mem(f"after chain {c + 1}")
     np.savez(args.out, **{k: np.stack([ch[k] for ch in chains]) for k in chains[0]}, theta_map=th, pnames=np.array(pn))
 if len(chains) < args.chains:
