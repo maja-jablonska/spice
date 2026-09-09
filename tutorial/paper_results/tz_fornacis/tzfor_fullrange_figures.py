@@ -54,8 +54,8 @@ def main():
             for a, b in zip(edges[::2], edges[1::2]):
                 ax.axvspan(wl[a], wl[min(b, wl.size - 1)], color="C3", alpha=0.12, lw=0)
         r_all = np.sqrt(np.nanmean(res[sel & usable] ** 2)); r_fit = np.sqrt(np.nanmean(res[sel & good[e]] ** 2))
-        ax.text(0.01, 0.04, f"rms {100 * r_all:.1f}% all, {100 * r_fit:.1f}% unmasked; {100 * m.sum() / max((sel & usable).sum(), 1):.0f}% masked (shaded)",
-                transform=ax.transAxes, fontsize=9)
+        note = f"rms {100 * r_all:.1f}% all, {100 * r_fit:.1f}% unmasked; {100 * m.sum() / max((sel & usable).sum(), 1):.0f}% masked (shaded)" if masked.any() else f"rms {100 * r_all:.1f}% (no mask)"
+        ax.text(0.01, 0.04, note, transform=ax.transAxes, fontsize=9)
         ax.set_xlim(w0, w1); ax.set_ylim(0.1, 1.07); ax.set_ylabel("normalised flux"); ax.grid(alpha=0.3)
     axes[0].legend(loc="lower right", ncol=5, fontsize=8); axes[-1].set_xlabel("wavelength [Å]")
     axes[0].set_title(f"TZ For at phase {phase[e]:.2f}: {args.label} (Teff1 {T1:.0f} K, Teff2 {T2:.0f} K, [Fe/H] {feh:+.2f}) vs HARPS")
