@@ -32,6 +32,8 @@ from scipy.interpolate import BSpline
 import tzfor_grad_inference as GI, tzfor_constants as K
 from tzfor_kernel_fit import load_photometry, C_KMS, R_HARPS
 from spice.spectrum.synthesis_kernel import build_synthesis_kernel, gravity_darkened_rows, kernel_flux_multi
+from spice.models import IcosphereModel
+from spice.models.binary import Binary, add_orbit, evaluate_orbit
 
 
 class Geom(NamedTuple):
@@ -58,6 +60,9 @@ def main():
     ap.add_argument("--beta", type=float, default=0.079, help="gravity-darkening exponent on g, fixed (unconstrained on TZ For)")
     ap.add_argument("--vmacro0", type=float, nargs=2, default=(5.0, 6.0)); ap.add_argument("--free-vmacro", action="store_true")
     ap.add_argument("--free-vsini", action="store_true")
+    ap.add_argument("--free-geometry", action="store_true", help="free R1, R2, inclination: light curves from SPICE's own binary (icospheres + occlusion) inside the loss; spectral kernels rescaled by R^2")
+    ap.add_argument("--geo-n-vert", type=int, default=1000); ap.add_argument("--geo-mean-anom", type=float, default=0.0, help="mean anomaly [rad] that puts the deep eclipse at SPICE phase 0 (from tzfor_spice_lc_feasibility.py)")
+    ap.add_argument("--geo-eclipse-halfwidth", type=float, default=0.025); ap.add_argument("--geo-n-eclipse", type=int, default=25, help="model phases per eclipse (spheres: the out-of-eclipse flux is constant, one quadrature phase covers it)")
     ap.add_argument("--dv-sys", type=float, default=0.25)
     ap.add_argument("--knot-spacing", type=float, default=40.0, help="continuum spline knot spacing [A]")
     ap.add_argument("--spec-floor", type=float, default=0.005)
@@ -114,14 +119,16 @@ def main():
     dfine = dlog / args.oversample
     HW = [int(math.ceil(math.log10(1.0 + (max(abs(E[s][e][4]) for e in range(n_ep)) + 2.5 * max(float(jnp.max(jnp.abs(E[s][e][2] - E[s][e][4]))) for e in range(n_ep)) + 3.0) / C_KMS) / dfine)) + 1 for s in (0, 1)]
 
-    def kernels_for(s, vscale):
+    R_0 = [K.PRIMARY_RADIUS, K.SECONDARY_RADIUS]
+    def kernels_for(s, vscale, rscale=1.0):
+        """Per-epoch spectral kernels of star s; ``rscale`` = R/R_0 scales the projected areas (light ratio) of the well-detached, near-spherical star."""
         ks = []
         for e in range(n_ep):
             a, mu, v, g, v_orb = E[s][e]
             los = v_orb + vscale * (v - v_orb)
-            ks.append(build_synthesis_kernel(Geom(a, mu, los), lw_model, args.n_mu, args.oversample, half_width=HW[s], element_coordinate=g, coordinate_nodes=gn[s]))
+            ks.append(build_synthesis_kernel(Geom(a * rscale ** 2, mu, los), lw_model, args.n_mu, args.oversample, half_width=HW[s], element_coordinate=g, coordinate_nodes=gn[s]))
         return ks
-    fixed_kernels = None if args.free_vsini else [kernels_for(0, 1.0), kernels_for(1, 1.0)]
+    fixed_kernels = None if (args.free_vsini or args.free_geometry) else [kernels_for(0, 1.0), kernels_for(1, 1.0)]
     lw_ph = jnp.linspace(math.log10(4300.0), math.log10(5900.0), args.n_phot_wl); wl_ph = 10.0 ** lw_ph
     ph_k = [[build_synthesis_kernel(pair[s], lw_ph, args.n_mu, 1, element_coordinate=jnp.asarray(pair[s].parameters)[:, iG], coordinate_nodes=gn[s]) for pair in LC["models"]] for s in (0, 1)]
     resp = {nm.split(":")[1]: jnp.interp(wl_ph, jnp.asarray(LC["passbands"][nm][0]), jnp.asarray(LC["passbands"][nm][1]), left=0., right=0.) for nm in ("Stromgren:b", "Stromgren:y")}
@@ -143,11 +150,22 @@ def main():
     print(f"continuum: {nB} cubic B-spline coefficients per epoch ({args.knot_spacing} A knots); fitting {len(fit_e)} epochs, {N_sp} pixels", flush=True)
     ph_o, mag_o = load_photometry(args.photometry); sig_ph = {"b": 0.0041, "y": 0.0035}; N_ph = sum(len(v) for v in mag_o.values())
     model_phase = ((np.asarray(LC["times"]) - K.T_P_HJD) % K.PERIOD_DAYS) / K.PERIOD_DAYS; order = np.argsort(model_phase); mph = jnp.asarray(model_phase[order])
+    if args.free_geometry:
+        # SPICE binary clock: deep eclipse at phase 0 (--geo-mean-anom), shallow at 0.5; spheres -> flat outside eclipses
+        hw, ne = args.geo_eclipse_halfwidth, args.geo_n_eclipse
+        geo_phases = np.unique(np.concatenate([np.linspace(-hw, hw, ne) % 1.0, 0.5 + np.linspace(-hw, hw, ne), [0.25]])); mph = jnp.asarray(geo_phases)
+        print(f"free geometry: {geo_phases.size} model phases, {args.geo_n_vert} vertices per star, mean anomaly {args.geo_mean_anom:.4f}", flush=True)
+
+    def spice_binary(R1, R2, inc_deg, rows_plain):
+        b1 = IcosphereModel.construct(args.geo_n_vert, R1, K.PRIMARY_MASS, rows_plain[0], names)
+        b2 = IcosphereModel.construct(args.geo_n_vert, R2, K.SECONDARY_MASS, rows_plain[1], names)
+        return add_orbit(Binary.from_bodies(b1, b2), K.PERIOD_YR, 0.0, 0.0, jnp.deg2rad(inc_deg), 0.0, 0.0, args.geo_mean_anom, 0.0, 0.0, 400)
 
     # ---- parameter vector ----
     pnames = ["Teff1", "Teff2", "feh", "dphi"]; theta0 = [T0[0], T0[1], feh0, 0.1585]; S = [100., 100., 0.1, 0.001]; lo = [3800., 3800., -1.5, 0.10]; hi = [6900., 6900., 0.5, 0.22]
     if args.free_vmacro: pnames += ["vmac1", "vmac2"]; theta0 += list(args.vmacro0); S += [1., 1.]; lo += [0.5, 0.5]; hi += [20., 20.]
     if args.free_vsini: pnames += ["vsini_scale1", "vsini_scale2"]; theta0 += [1.0, 1.0]; S += [0.1, 0.1]; lo += [0.5, 0.5]; hi += [2.0, 2.0]
+    if args.free_geometry: pnames += ["R1", "R2", "incl"]; theta0 += [K.PRIMARY_RADIUS, K.SECONDARY_RADIUS, K.INCL_DEG]; S += [0.1, 0.05, 0.1]; lo += [6.0, 2.5, 78.0]; hi += [11.0, 6.0, 90.0]
     theta0 = np.array(theta0); S = np.array(S); n_par = len(pnames)
     delta0 = np.zeros(n)
     if args.result_in:
@@ -181,7 +199,10 @@ def main():
 
     def spectra_parts(theta, delta):
         """Broadened line and continuum channels of each star: (F1, F2, C) with C the summed continuum."""
-        r = rows(theta); ks = fixed_kernels if fixed_kernels is not None else [kernels_for(0, theta[P["vsini_scale1"]]), kernels_for(1, theta[P["vsini_scale2"]])]
+        r = rows(theta)
+        vs = [theta[P["vsini_scale1"]], theta[P["vsini_scale2"]]] if args.free_vsini else [1.0, 1.0]
+        rs = [theta[P["R1"]] / R_0[0], theta[P["R2"]] / R_0[1]] if args.free_geometry else [1.0, 1.0]
+        ks = fixed_kernels if fixed_kernels is not None else [kernels_for(0, vs[0], rs[0]), kernels_for(1, vs[1], rs[1])]
         vm = [theta[P["vmac1"]], theta[P["vmac2"]]] if args.free_vmacro else list(args.vmacro0)
         s1 = kernel_flux_multi(intensity_with_delta(delta), ks[0], r[0], wavelength_chunk_size=args.chunk)
         s2 = kernel_flux_multi(emu.intensity, ks[1], r[1], wavelength_chunk_size=args.chunk)
@@ -204,13 +225,22 @@ def main():
 
     def phot_model(theta):
         """Per band: (model curve on the model phases, model at the observed phases, observed mags on the model's zero point, residuals)."""
-        r = []
-        for s in (0, 1):
-            b = base_lc[s].at[iF].set(theta[P["feh"]]); r.append(gravity_darkened_rows(b, iT, iG, gn[s], theta[P[f"Teff{s+1}"]], gref[s], args.beta))
-        flux = kernel_flux_multi(emu.intensity, ph_k[0], r[0])[..., 0] + kernel_flux_multi(emu.intensity, ph_k[1], r[1])[..., 0]
+        if args.free_geometry:
+            # spheres: one emulator row per star (gravity darkening is a <20 K intra-star effect on TZ For), kernels from SPICE's occlusion
+            rp = [base_lc[s].at[iT].set(theta[P[f"Teff{s+1}"]]).at[iF].set(theta[P["feh"]]) for s in (0, 1)]
+            bn = spice_binary(theta[P["R1"]], theta[P["R2"]], theta[P["incl"]], rp); ks = [[], []]
+            for ph in geo_phases:
+                m1, m2 = evaluate_orbit(bn, float(ph) * K.PERIOD_YR)
+                ks[0].append(build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=8)); ks[1].append(build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=8))
+            flux = kernel_flux_multi(emu.intensity, ks[0], rp[0])[..., 0] + kernel_flux_multi(emu.intensity, ks[1], rp[1])[..., 0]
+        else:
+            r = []
+            for s in (0, 1):
+                b = base_lc[s].at[iF].set(theta[P["feh"]]); r.append(gravity_darkened_rows(b, iT, iG, gn[s], theta[P[f"Teff{s+1}"]], gref[s], args.beta))
+            flux = kernel_flux_multi(emu.intensity, ph_k[0], r[0])[..., 0] + kernel_flux_multi(emu.intensity, ph_k[1], r[1])[..., 0]
         out = {}
         for b, rr in resp.items():
-            mags = jax.vmap(lambda f: GI.passband_mag(f, wl_ph, rr))(flux)[order]; mags = mags - jnp.median(mags)
+            mags = jax.vmap(lambda f: GI.passband_mag(f, wl_ph, rr))(flux); mags = (mags if args.free_geometry else mags[order]); mags = mags - jnp.median(mags)
             mi = jnp.interp((ph_o - theta[P["dphi"]]) % 1.0, mph, mags, period=1.0); res = mag_o[b] - mi; zp = jnp.median(res); res = res - zp
             out[b] = (mags, mi, mag_o[b] - zp, res)
         return out
