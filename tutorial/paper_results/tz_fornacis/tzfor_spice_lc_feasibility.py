@@ -66,33 +66,37 @@ def binary_at(n_vert, R1, R2, inc_deg, mean_anom=0.0):
     b2 = IcosphereModel.construct(n_vert, R2, M2, rows[1], names)
     return add_orbit(Binary.from_bodies(b1, b2), P_yr, 0.0, 0.0, jnp.deg2rad(inc_deg), 0.0, 0.0, mean_anom, 0.0, 0.0, 400)
 
+HW_PH = 24   # orbital + rotational velocities reach ~100 km/s = 17 px on the 16000-point photometric grid
+
+@jax.checkpoint
+def _phase_kernels(binary, t):
+    """Kernels of both stars at one time; checkpointed so the reverse pass through the occlusion holds one phase at a time."""
+    m1, m2 = evaluate_orbit(binary, t)
+    return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH)
+
 def kernels_at(binary, phases):
     ks1, ks2 = [], []
     for ph in phases:
-        m1, m2 = evaluate_orbit(binary, ph * P_yr)
-        ks1.append(build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=8)); ks2.append(build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=8))
+        k1, k2 = _phase_kernels(binary, ph * P_yr); ks1.append(k1); ks2.append(k2)
     return ks1, ks2
 
 out = dict(ph_phoebe=ph_lc, b_phoebe=m_ph["b"], y_phoebe=m_ph["y"], theta=np.asarray(R["theta"]), pnames=np.array(R["pnames"]))
 for nv in args.n_vert:
     print(f"\n===== SPICE binary, {nv} vertices per star =====", flush=True)
     # 1. coarse scan: where are the eclipses in SPICE's clock?
-    coarse = np.linspace(0.0, 1.0, 100, endpoint=False); bin0 = binary_at(nv, R1_0, R2_0, INC0)
-    t = time.time(); k1, k2 = kernels_at(bin0, coarse); mc = {b: np.asarray(v) for b, v in mags_from_kernels(k1, k2).items()}
-    print(f"coarse scan: 100 phases in {time.time() - t:.0f}s ({(time.time() - t) / 100:.2f} s/phase incl. compile)", flush=True)
-    i_deep = int(np.argmax(mc["b"])); ph_deep = coarse[i_deep]; depth_b = mc["b"][i_deep] - np.median(mc["b"])
-    others = np.abs(((coarse - ph_deep + 0.5) % 1.0) - 0.5) > 0.1; i_sh = int(np.argmax(np.where(others, mc["b"], -np.inf))); ph_sh = coarse[i_sh]
-    print(f"deep minimum at SPICE phase {ph_deep:.2f} (depth {depth_b:.3f} mag in b), shallow at {ph_sh:.2f} (depth {mc['b'][i_sh] - np.median(mc['b']):.3f})", flush=True)
+    ph_deep = 0.75   # measured by the first run of this job: with mean anomaly 0 the deep eclipse (secondary occulted) is at SPICE phase 0.75
     # 2. aligned clock (deep eclipse at phase 0) and a dense light curve at the PHOEBE-mesh phases + eclipse profiles
     mean_anom = 2.0 * math.pi * ph_deep; bin_al = binary_at(nv, R1_0, R2_0, INC0, mean_anom)
     dense = np.unique(np.concatenate([ph_lc, np.linspace(-0.03, 0.03, 61) % 1.0, 0.5 + np.linspace(-0.03, 0.03, 61)]))
     t = time.time(); k1, k2 = kernels_at(bin_al, dense); md = {b: np.asarray(v) for b, v in mags_from_kernels(k1, k2).items()}
     print(f"dense light curve: {dense.size} phases in {time.time() - t:.0f}s", flush=True)
+    outside = lambda ph: (np.abs(((ph + 0.5) % 1.0) - 0.5) > 0.03) & (np.abs(ph - 0.5) > 0.03)
     for b in ("b", "y"):
-        s_sp = np.interp(ph_lc, dense, md[b] - np.median(md[b]), period=1.0); s_ph = m_ph[b] - np.median(m_ph[b])
-        d = s_sp - s_ph; ecl = (np.abs(((ph_lc + 0.5) % 1.0) - 0.5) < 0.02) | (np.abs(ph_lc - 0.5) < 0.02)
-        print(f"  {b}: SPICE - PHOEBE at the 56 mesh phases: rms {1000 * np.sqrt(np.mean(d ** 2)):.2f} mmag (in eclipse {1000 * np.sqrt(np.mean(d[ecl] ** 2)):.2f}, outside {1000 * np.sqrt(np.mean(d[~ecl] ** 2)):.2f}); "
-              f"deep-eclipse depth SPICE {s_sp[np.argmin(np.abs(ph_lc))]:.4f} vs PHOEBE {s_ph[np.argmin(np.abs(ph_lc))]:.4f}", flush=True)
+        lev_s, lev_p = np.median(md[b][outside(dense)]), np.median(m_ph[b][outside(ph_lc)])        # each curve on its own out-of-eclipse level
+        s_sp = np.interp(ph_lc, dense, md[b] - lev_s, period=1.0); s_ph = m_ph[b] - lev_p
+        d = s_sp - s_ph; ecl = ~outside(ph_lc)
+        print(f"  {b}: level offset SPICE-PHOEBE {1000 * (lev_s - lev_p):+.1f} mmag; after matching levels rms {1000 * np.sqrt(np.mean(d ** 2)):.2f} mmag (in eclipse {1000 * np.sqrt(np.mean(d[ecl] ** 2)):.2f}); "
+              f"deep-eclipse depth SPICE {s_sp[np.argmin(np.abs(((ph_lc + 0.5) % 1.0) - 0.5))]:.4f} vs PHOEBE {s_ph[np.argmin(np.abs(((ph_lc + 0.5) % 1.0) - 0.5))]:.4f}; shallow SPICE {s_sp[np.argmin(np.abs(ph_lc - 0.5))]:.4f} vs PHOEBE {s_ph[np.argmin(np.abs(ph_lc - 0.5))]:.4f}", flush=True)
     out[f"ph_spice_{nv}"] = dense; out[f"b_spice_{nv}"] = md["b"]; out[f"y_spice_{nv}"] = md["y"]; out[f"mean_anom_{nv}"] = mean_anom
     np.savez(args.out, **out)
     # 3. gradient timing through the occlusion: chi2 of the in-eclipse points against the PHOEBE-mesh model

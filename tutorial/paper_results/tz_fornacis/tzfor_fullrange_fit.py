@@ -156,6 +156,14 @@ def main():
         geo_phases = np.unique(np.concatenate([np.linspace(-hw, hw, ne) % 1.0, 0.5 + np.linspace(-hw, hw, ne), [0.25]])); mph = jnp.asarray(geo_phases)
         print(f"free geometry: {geo_phases.size} model phases, {args.geo_n_vert} vertices per star, mean anomaly {args.geo_mean_anom:.4f}", flush=True)
 
+    HW_PH = 24   # orbital + rotational velocities reach ~100 km/s = 17 px on the photometric grid
+
+    @jax.checkpoint
+    def spice_phase_kernels(bn, t):
+        """Both stars' kernels at one time, checkpointed: the reverse pass through the occlusion then holds one phase at a time."""
+        m1, m2 = evaluate_orbit(bn, t)
+        return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH)
+
     def spice_binary(R1, R2, inc_deg, rows_plain):
         b1 = IcosphereModel.construct(args.geo_n_vert, R1, K.PRIMARY_MASS, rows_plain[0], names)
         b2 = IcosphereModel.construct(args.geo_n_vert, R2, K.SECONDARY_MASS, rows_plain[1], names)
@@ -230,8 +238,7 @@ def main():
             rp = [base_lc[s].at[iT].set(theta[P[f"Teff{s+1}"]]).at[iF].set(theta[P["feh"]]) for s in (0, 1)]
             bn = spice_binary(theta[P["R1"]], theta[P["R2"]], theta[P["incl"]], rp); ks = [[], []]
             for ph in geo_phases:
-                m1, m2 = evaluate_orbit(bn, float(ph) * K.PERIOD_YR)
-                ks[0].append(build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=8)); ks[1].append(build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=8))
+                k1, k2 = spice_phase_kernels(bn, float(ph) * K.PERIOD_YR); ks[0].append(k1); ks[1].append(k2)
             flux = kernel_flux_multi(emu.intensity, ks[0], rp[0])[..., 0] + kernel_flux_multi(emu.intensity, ks[1], rp[1])[..., 0]
         else:
             r = []
