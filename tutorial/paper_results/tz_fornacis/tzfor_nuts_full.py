@@ -138,9 +138,18 @@ def model():
     numpyro.factor("spec", jnp.sum(-0.5 * spec_chi2_blocks(T1, T2, f) * jnp.exp(-2 * ls_w) - N_blk * ls_w))
     numpyro.factor("phot", jnp.sum(-0.5 * phot_chi2(T1, T2, f, dphi) * jnp.exp(-2 * ls_b) - N_b * ls_b))
 mcmc = MCMC(NUTS(model, target_accept_prob=0.85, max_tree_depth=8), num_warmup=args.num_warmup, num_samples=args.num_samples, num_chains=args.chains, chain_method="sequential", progress_bar=False)
-t0 = time.time(); mcmc.run(jax.random.PRNGKey(0)); print(f"NUTS: {args.chains} x ({args.num_warmup} + {args.num_samples}) in {time.time() - t0:.0f}s", flush=True); mcmc.print_summary()
-S = mcmc.get_samples(group_by_chain=True); flat = {k: np.asarray(v).reshape(-1, *np.asarray(v).shape[2:]) for k, v in S.items()}
+t0 = time.time(); mcmc.run(jax.random.PRNGKey(0)); print(f"NUTS: {args.chains} x ({args.num_warmup} + {args.num_samples}) in {time.time() - t0:.0f}s", flush=True)
+# Pull the samples to the host and save BEFORE anything else touches the GPU: with the frozen
+# grids resident, even a tiny new executable can fail to load ("Failed to load in-memory CUBIN").
+S = {k: np.asarray(jax.device_get(v)) for k, v in mcmc.get_samples(group_by_chain=True).items()}
+np.savez(args.out, **S, theta_map=th, pnames=np.array(pn)); print("saved", args.out, flush=True)
+del GS, GB
+try:
+    mcmc.print_summary()
+except Exception as e:  # noqa: BLE001
+    print("print_summary skipped:", type(e).__name__)
+flat = {k: v.reshape(-1, *v.shape[2:]) for k, v in S.items()}
 print(f"posterior: Teff1 {flat['Teff1'].mean():.0f} +- {flat['Teff1'].std():.0f}   Teff2 {flat['Teff2'].mean():.0f} +- {flat['Teff2'].std():.0f}   [Fe/H] {flat['feh'].mean():+.3f} +- {flat['feh'].std():.3f}")
 C = np.corrcoef(np.stack([flat["Teff1"], flat["Teff2"], flat["feh"]])); print(f"corr(Teff1,Teff2) {C[0,1]:+.2f}  corr(Teff2,feh) {C[1,2]:+.2f}")
 print("noise inflation per block:", np.round(np.exp(flat["log_s_spec"].mean(0)), 2), " photometry:", np.round(np.exp(flat["log_s_phot"].mean(0)), 2))
-np.savez(args.out, **{k: np.asarray(v) for k, v in S.items()}, theta_map=th, pnames=np.array(pn)); print("saved", args.out)
+print("done", args.out)
