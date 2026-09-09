@@ -71,6 +71,8 @@ def main():
                          "fit-only: fit delta once at the warm-start theta on --fit-epochs and stop; fixed: use delta from --result-in unchanged")
     ap.add_argument("--delta-in", default=None, help="result pkl whose delta map is used (delta-mode fixed)")
     ap.add_argument("--jackknife-blocks", type=int, default=0)
+    ap.add_argument("--noise-check", action="store_true", help="measure the float32 roundoff of the objective and compare AD with finite differences at the start point")
+    ap.add_argument("--stall-retries", type=int, default=2, help="L-BFGS-B restarts from a perturbed point when a fit stalls in its first line search")
     ap.add_argument("--maxiter", type=int, default=150); ap.add_argument("--n-phot-wl", type=int, default=16000); ap.add_argument("--chunk", type=int, default=32768)
     ap.add_argument("--n-epochs", type=int, default=None); ap.add_argument("--n-lc-epochs", type=int, default=None); ap.add_argument("--skip-validation", action="store_true")
     args = ap.parse_args()
@@ -191,7 +193,8 @@ def main():
     def chi2_spec(theta, delta, block_w):
         mod = jax.vmap(continuum_fix)(spectra(theta, delta), obs, good)
         r = jnp.where(good, (obs - mod) / sig, 0.0)
-        return jnp.sum(ep_w[:, None] * block_w[blk_j][None, :] * r ** 2)     # block weights mapped to pixels
+        per_epoch = jnp.sum(block_w[blk_j][None, :] * r ** 2, axis=1)      # block weights mapped to pixels
+        return jnp.sum(ep_w * per_epoch)                                     # two-level sum: float32 roundoff ~1e-6 of chi2, not 1e-5
 
     def chi2_phot(theta):
         r = []
@@ -235,12 +238,32 @@ def main():
     t = time.time(); jax.block_until_ready(vg_theta(jnp.asarray(x0), dlt, blocks_all)[1]); print(f"warm value+grad {time.time() - t:.1f}s", flush=True)
     print(f"start: chi2_phot/N {float(aux[0]) / N_ph:.3f}  chi2_spec/N {float(aux[1]) / N_sp:.3f}", flush=True)
     bounds = list(zip((np.array(lo) - theta0) / S, (np.array(hi) - theta0) / S))
+    if args.noise_check:
+        fval = lambda x_: float(vg_theta(jnp.asarray(x_), dlt, blocks_all)[0][0])
+        rep = [fval(x0) for _ in range(3)]; print(f"noise check: 3 repeat evaluations {rep} -> spread {max(rep) - min(rep):.3g} (chi2 total {rep[0]:.6g})", flush=True)
+        for i, nm in enumerate(pnames):
+            for h in (1e-3, 1e-2, 1e-1):
+                xp = x0.copy(); xp[i] += h; xm = x0.copy(); xm[i] -= h; fp, fm = fval(xp), fval(xm)
+                print(f"  {nm:12s} h={h:<5g} f(+h)-f(-h) = {fp - fm:+11.4g}   FD grad {(fp - fm) / (2 * h):+12.6g}   AD grad {float(g[i]):+12.6g}", flush=True)
 
     def fit_theta(x_start, dlt, block_w, maxiter, label):
         hist = []
         def f(x):
             (v, _), g = vg_theta(jnp.asarray(x), dlt, block_w); hist.append(float(v)); return float(v), np.asarray(g, float)
-        t = time.time(); r = minimize(f, x_start, jac=True, method="L-BFGS-B", bounds=bounds, options=dict(maxiter=maxiter))
+        # L-BFGS-B stalls ("ABNORMAL", 0-1 iterations) when the start is already within the float32 roundoff of the
+        # objective (~10 units of chi2 out of 1e7): the achievable decrease along the first steepest-descent line is below
+        # the noise. Restart from a perturbed point (0.3 scaled units: 30 K, 0.03 dex, 0.3 km/s) so the fit re-enters the
+        # basin with real decreases and settles to the noise-limited optimum. Keep the best point seen.
+        t = time.time(); x_s = np.asarray(x_start, float); best = None; rng = np.random.default_rng(0); tries = 0; nit = 0
+        lo_b = np.array([b[0] for b in bounds]); hi_b = np.array([b[1] for b in bounds])
+        while True:
+            r = minimize(f, x_s, jac=True, method="L-BFGS-B", bounds=bounds, options=dict(maxiter=maxiter)); nit += r.nit
+            if best is None or r.fun < best.fun: best = r
+            stalled = r.nit <= 1 and "ABNORMAL" in r.message
+            if not stalled or tries >= args.stall_retries: break
+            tries += 1; x_s = np.clip(np.asarray(best.x) + rng.normal(0.0, 0.3, size=x_s.size), lo_b, hi_b)
+            print(f"  {label}: stalled ({r.message[:30].strip()}) -> retry {tries} from a perturbed start", flush=True)
+        r = best; r.nit = nit
         (_, aux), _ = vg_theta(jnp.asarray(r.x), dlt, block_w); th = theta0 + np.asarray(r.x) * S
         print(f"{label}: {r.nit} it, {len(hist)} eval, {time.time() - t:.0f}s, {r.message[:30]} | chi2_phot/N {float(aux[0]) / N_ph:.3f} chi2_spec/N {float(aux[1]) / N_sp:.3f} | "
               + " ".join(f"{nm} {val:.4g}" for nm, val in zip(pnames, th)), flush=True)
