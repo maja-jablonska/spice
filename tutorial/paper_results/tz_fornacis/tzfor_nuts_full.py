@@ -137,21 +137,20 @@ def model():
     ls_w = numpyro.sample("log_s_spec", dist.Normal(jnp.log(2.0), 1.0).expand([args.n_blocks])); ls_b = numpyro.sample("log_s_phot", dist.Normal(0.0, 1.0).expand([2]))
     numpyro.factor("spec", jnp.sum(-0.5 * spec_chi2_blocks(T1, T2, f) * jnp.exp(-2 * ls_w) - N_blk * ls_w))
     numpyro.factor("phot", jnp.sum(-0.5 * phot_chi2(T1, T2, f, dphi) * jnp.exp(-2 * ls_b) - N_b * ls_b))
-mcmc = MCMC(NUTS(model, target_accept_prob=0.85, max_tree_depth=8), num_warmup=args.num_warmup, num_samples=args.num_samples, num_chains=args.chains, chain_method="sequential", progress_bar=False)
-t0 = time.time(); mcmc.run(jax.random.PRNGKey(0)); print(f"NUTS: {args.chains} x ({args.num_warmup} + {args.num_samples}) in {time.time() - t0:.0f}s", flush=True)
-# The compiled NUTS executable holds the frozen grids as constants, so the GPU carries two
-# copies and even numpyro's own get_samples (a device-side stack) can fail to load its kernel
-# ("Failed to load in-memory CUBIN ... out of memory"). Drop the grids and every compiled
-# executable first (the PBS wrapper sets XLA_PYTHON_CLIENT_ALLOCATOR=platform so the memory
-# really returns to CUDA), then pull the samples to the host and save immediately.
-del GS, GB
-import gc; gc.collect(); jax.clear_caches(); gc.collect()
-S = {k: np.asarray(jax.device_get(v)) for k, v in mcmc.get_samples(group_by_chain=True).items()}
-np.savez(args.out, **S, theta_map=th, pnames=np.array(pn)); print("saved", args.out, flush=True)
-try:
-    mcmc.print_summary()
-except Exception as e:  # noqa: BLE001
-    print("print_summary skipped:", type(e).__name__)
+# One chain per run: numpyro stacks sequential chains with a device-side jnp.stack at the END of
+# mcmc.run, which cannot load its kernel while the frozen grids and the compiled sampler fill
+# the GPU (JAX raises it asynchronously, at the first host sync). With num_chains=1 there is no
+# stack, get_samples(group_by_chain=True) returns the stored states without a new executable,
+# and device_get copies them out. Compiled functions are reused across the runs.
+mcmc = MCMC(NUTS(model, target_accept_prob=0.85, max_tree_depth=8), num_warmup=args.num_warmup, num_samples=args.num_samples, num_chains=1, progress_bar=False)
+chains = []; t0 = time.time()
+for c in range(args.chains):
+    mcmc.run(jax.random.PRNGKey(c))
+    chains.append({k: np.asarray(jax.device_get(v)) for k, v in mcmc.get_samples(group_by_chain=True).items()})
+    print(f"chain {c + 1}/{args.chains} done ({time.time() - t0:.0f}s)", flush=True)
+    np.savez(args.out, **{k: np.stack([ch[k] for ch in chains]) for k in chains[0]}, theta_map=th, pnames=np.array(pn))
+print(f"NUTS: {args.chains} x ({args.num_warmup} + {args.num_samples}) in {time.time() - t0:.0f}s; saved {args.out}", flush=True)
+S = {k: np.stack([ch[k] for ch in chains]) for k in chains[0]}
 flat = {k: v.reshape(-1, *v.shape[2:]) for k, v in S.items()}
 print(f"posterior: Teff1 {flat['Teff1'].mean():.0f} +- {flat['Teff1'].std():.0f}   Teff2 {flat['Teff2'].mean():.0f} +- {flat['Teff2'].std():.0f}   [Fe/H] {flat['feh'].mean():+.3f} +- {flat['feh'].std():.3f}")
 C = np.corrcoef(np.stack([flat["Teff1"], flat["Teff2"], flat["feh"]])); print(f"corr(Teff1,Teff2) {C[0,1]:+.2f}  corr(Teff2,feh) {C[1,2]:+.2f}")
