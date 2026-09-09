@@ -71,6 +71,7 @@ def main():
                          "fit-only: fit delta once at the warm-start theta on --fit-epochs and stop; fixed: use delta from --result-in unchanged")
     ap.add_argument("--delta-in", default=None, help="result pkl whose delta map is used (delta-mode fixed)")
     ap.add_argument("--jackknife-blocks", type=int, default=0)
+    ap.add_argument("--dump-model", default=None, help="npz with the continuum-matched model spectra, observations, mask and light-curve model at the fitted theta (for figures)")
     ap.add_argument("--noise-check", action="store_true", help="measure the float32 roundoff of the objective and compare AD with finite differences at the start point")
     ap.add_argument("--stall-retries", type=int, default=2, help="L-BFGS-B restarts from a perturbed point when a fit stalls in its first line search")
     ap.add_argument("--maxiter", type=int, default=150); ap.add_argument("--n-phot-wl", type=int, default=16000); ap.add_argument("--chunk", type=int, default=32768)
@@ -196,17 +197,21 @@ def main():
         per_epoch = jnp.sum(block_w[blk_j][None, :] * r ** 2, axis=1)      # block weights mapped to pixels
         return jnp.sum(ep_w * per_epoch)                                     # two-level sum: float32 roundoff ~1e-6 of chi2, not 1e-5
 
-    def chi2_phot(theta):
+    def phot_model(theta):
+        """Per band: (model curve on the model phases, model at the observed phases, observed mags on the model's zero point, residuals)."""
         r = []
         for s in (0, 1):
             b = base_lc[s].at[iF].set(theta[P["feh"]]); r.append(gravity_darkened_rows(b, iT, iG, gn[s], theta[P[f"Teff{s+1}"]], gref[s], args.beta))
         flux = kernel_flux_multi(emu.intensity, ph_k[0], r[0])[..., 0] + kernel_flux_multi(emu.intensity, ph_k[1], r[1])[..., 0]
-        tot = 0.0
+        out = {}
         for b, rr in resp.items():
             mags = jax.vmap(lambda f: GI.passband_mag(f, wl_ph, rr))(flux)[order]; mags = mags - jnp.median(mags)
-            mi = jnp.interp((ph_o - theta[P["dphi"]]) % 1.0, mph, mags, period=1.0); res = mag_o[b] - mi; res = res - jnp.median(res)
-            tot = tot + jnp.sum(res ** 2) / sig_ph[b] ** 2
-        return tot
+            mi = jnp.interp((ph_o - theta[P["dphi"]]) % 1.0, mph, mags, period=1.0); res = mag_o[b] - mi; zp = jnp.median(res); res = res - zp
+            out[b] = (mags, mi, mag_o[b] - zp, res)
+        return out
+
+    def chi2_phot(theta):
+        return sum(jnp.sum(v[3] ** 2) / sig_ph[b] ** 2 for b, v in phot_model(theta).items())
 
     def delta_prior(delta):
         return jnp.sum((delta / args.delta_sigma) ** 2) + args.delta_smooth * jnp.sum((jnp.diff(delta, 2) / args.delta_sigma) ** 2)
@@ -294,6 +299,17 @@ def main():
     result = dict(pnames=pnames, theta=th, theta_nodelta=th_nodelta, x=x, S=S, theta0=theta0, chi2_phot=float(aux[0]), chi2_spec=float(aux[1]), N_ph=N_ph, N_sp=N_sp,
                   delta=(np.asarray(dlt) if args.delta else None), args=vars(args), rv=rv, fit_epochs=fit_e, beta=args.beta, delta_mode=args.delta_mode)
     pickle.dump(result, open(args.out, "wb"), protocol=4)
+
+    # ---- model dump for figures (optional) ----
+    if args.dump_model:
+        mod = np.asarray(jax.jit(lambda t_, d_: jax.vmap(continuum_fix)(spectra(t_, d_), obs, good))(jnp.asarray(th), dlt))
+        pm = jax.jit(phot_model)(jnp.asarray(th)); lc = {}
+        for b, (mags, mi, mo, res) in pm.items():
+            lc[f"lc_{b}_model_phase"] = np.asarray(mph); lc[f"lc_{b}_model_mag"] = np.asarray(mags); lc[f"lc_{b}_obs_phase"] = np.asarray((ph_o - th[P["dphi"]]) % 1.0)
+            lc[f"lc_{b}_obs_mag"] = np.asarray(mo); lc[f"lc_{b}_model_at_obs"] = np.asarray(mi); lc[f"lc_{b}_sigma"] = sig_ph[b]
+        np.savez(args.dump_model, logwl=lw_obs, obs=np.where(good_np, obs_np, np.nan), model=mod, good=good_np, sigma=sig_np, rv=rv, times=np.asarray(SP["times"]),
+                 fit_epochs=fit_e, theta=th, pnames=np.array(pnames), delta=(np.asarray(dlt) if args.delta else np.zeros(0)), block_edges=edges, **lc)
+        print(f"model dump: {mod.shape} spectra + {len(pm)} light curves -> {args.dump_model}", flush=True)
 
     # ---- residual stack -> learned mask (optional) ----
     if args.derive_mask_out:
