@@ -160,9 +160,15 @@ def main():
 
     @jax.checkpoint
     def spice_phase_kernels(bn, t):
-        """Both stars' kernels at one time, checkpointed: the reverse pass through the occlusion then holds one phase at a time."""
+        """Both stars' kernel arrays at one time, checkpointed and run through lax.scan: an unrolled loop let XLA keep all
+        phases' occlusion intermediates alive at once (47 GB), the scan holds one phase at a time."""
         m1, m2 = _evaluate_orbit(bn, t, n_neighbors1=NN1, n_neighbors2=NN2)
-        return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH)
+        return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH).kernels, build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH).kernels
+
+    def spice_kernels_all(bn):
+        """Lists (per phase) of SynthesisKernel for both stars, from a scan over the model phases."""
+        _, (K1, K2) = jax.lax.scan(lambda c, t: (c, spice_phase_kernels(bn, t)), None, jnp.asarray(geo_phases) * K.PERIOD_YR)
+        return [geo_tmpl[0]._replace(kernels=K1[i]) for i in range(len(geo_phases))], [geo_tmpl[1]._replace(kernels=K2[i]) for i in range(len(geo_phases))]
 
     def spice_bodies(R1, R2, rows_plain):
         return (IcosphereModel.construct(args.geo_n_vert, R1, K.PRIMARY_MASS, rows_plain[0], names),
@@ -171,6 +177,8 @@ def main():
         # neighbour counts of the occlusion search: from_bodies needs concrete geometry, so fix them here (1.5x margin for larger radii)
         _b1, _b2 = spice_bodies(K.PRIMARY_RADIUS, K.SECONDARY_RADIUS, base_lc); _ref = Binary.from_bodies(_b1, _b2)
         NN1, NN2 = min(64, int(math.ceil(1.5 * int(_ref.n_neighbours1)))), min(64, int(math.ceil(1.5 * int(_ref.n_neighbours2)))); print(f"occlusion neighbour counts: {NN1}, {NN2}", flush=True)
+        _m1, _m2 = _evaluate_orbit(add_orbit(_ref, K.PERIOD_YR, 0.0, 0.0, jnp.deg2rad(K.INCL_DEG), 0.0, 0.0, args.geo_mean_anom, 0.0, 0.0, 400), 0.25 * K.PERIOD_YR, n_neighbors1=NN1, n_neighbors2=NN2)
+        geo_tmpl = (build_synthesis_kernel(_m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(_m2, lw_ph, args.n_mu, 1, half_width=HW_PH))   # static fields template
 
     def spice_binary(R1, R2, inc_deg, rows_plain):
         b1, b2 = spice_bodies(R1, R2, rows_plain)
@@ -244,9 +252,7 @@ def main():
         if args.free_geometry:
             # spheres: one emulator row per star (gravity darkening is a <20 K intra-star effect on TZ For), kernels from SPICE's occlusion
             rp = [base_lc[s].at[iT].set(theta[P[f"Teff{s+1}"]]).at[iF].set(theta[P["feh"]]) for s in (0, 1)]
-            bn = spice_binary(theta[P["R1"]], theta[P["R2"]], theta[P["incl"]], rp); ks = [[], []]
-            for ph in geo_phases:
-                k1, k2 = spice_phase_kernels(bn, float(ph) * K.PERIOD_YR); ks[0].append(k1); ks[1].append(k2)
+            bn = spice_binary(theta[P["R1"]], theta[P["R2"]], theta[P["incl"]], rp); ks = spice_kernels_all(bn)
             flux = kernel_flux_multi(emu.intensity, ks[0], rp[0])[..., 0] + kernel_flux_multi(emu.intensity, ks[1], rp[1])[..., 0]
         else:
             r = []
