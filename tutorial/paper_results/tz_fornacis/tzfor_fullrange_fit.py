@@ -65,7 +65,7 @@ def main():
     ap.add_argument("--geo-eclipse-halfwidth", type=float, default=0.025); ap.add_argument("--geo-n-eclipse", type=int, default=25, help="model phases per eclipse (spheres: the out-of-eclipse flux is constant, one quadrature phase covers it)")
     ap.add_argument("--dv-sys", type=float, default=0.25)
     ap.add_argument("--knot-spacing", type=float, default=40.0, help="continuum spline knot spacing [A]")
-    ap.add_argument("--spec-floor", type=float, default=0.005)
+    ap.add_argument("--spec-floor", type=float, default=0.005); ap.add_argument("--spec-scale", type=float, default=1.0, help="multiply the spectral chi2 (e.g. 1/inflation^2 from NUTS) to test the photometry/spectroscopy weighting")
     ap.add_argument("--mask-in", default=None); ap.add_argument("--derive-mask-out", default=None)
     ap.add_argument("--mask-threshold", type=float, default=0.05); ap.add_argument("--mask-nsigma", type=float, default=4.0); ap.add_argument("--mask-dilate", type=int, default=2)
     ap.add_argument("--mask-epochs", default="all", choices=["all", "odd", "even"]); ap.add_argument("--fit-epochs", default="all", choices=["all", "odd", "even"])
@@ -275,7 +275,7 @@ def main():
     def total(x, dlt, block_w):
         th = jnp.asarray(theta0) + x * jnp.asarray(S)
         c_ph = chi2_phot(th); c_sp = chi2_spec(th, dlt, block_w)
-        return c_ph + c_sp + (delta_prior(dlt) if args.delta else 0.0), (c_ph, c_sp)
+        return c_ph + args.spec_scale * c_sp + (delta_prior(dlt) if args.delta else 0.0), (c_ph, c_sp)
     vg_theta = jax.jit(jax.value_and_grad(total, argnums=0, has_aux=True))
     vg_delta = jax.jit(jax.value_and_grad(total, argnums=1, has_aux=True))
     blocks_all = jnp.ones(edges.size - 1)
