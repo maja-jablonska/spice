@@ -315,7 +315,7 @@ def main():
         for b, (mags, mi, mo, res) in pm.items():
             lc[f"lc_{b}_model_phase"] = np.asarray(mph); lc[f"lc_{b}_model_mag"] = np.asarray(mags); lc[f"lc_{b}_obs_phase"] = np.asarray((ph_o - th[P["dphi"]]) % 1.0)
             lc[f"lc_{b}_obs_mag"] = np.asarray(mo); lc[f"lc_{b}_model_at_obs"] = np.asarray(mi); lc[f"lc_{b}_sigma"] = sig_ph[b]
-        np.savez(args.dump_model, logwl=lw_obs, obs=np.where(good_np, obs_np, np.nan), model=mod, primary=prim, secondary=sec, good=good_np, sigma=sig_np, rv=rv, times=np.asarray(SP["times"]),
+        np.savez(args.dump_model, logwl=lw_obs, obs=np.where(np.isfinite(obs_np), obs_np, np.nan), model=mod, primary=prim, secondary=sec, good=good_np, masked=np.isfinite(obs_np) & ~good_np, sigma=sig_np, rv=rv, times=np.asarray(SP["times"]),
                  fit_epochs=fit_e, theta=th, pnames=np.array(pnames), delta=(np.asarray(dlt) if args.delta else np.zeros(0)), block_edges=edges, **lc)
         print(f"model dump: {mod.shape} spectra + {len(pm)} light curves -> {args.dump_model}", flush=True)
 

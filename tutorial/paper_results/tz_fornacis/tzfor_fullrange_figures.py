@@ -28,13 +28,15 @@ def main():
     ap.add_argument("--dump", default=str(HERE / "tzfor_aemu_out" / "fr_model_maskall_hp.npz"))
     ap.add_argument("--out-dir", default=str(HERE.parent / "paper_plots" / "tz_fornacis"))
     ap.add_argument("--suffix", default="fullrange"); ap.add_argument("--phase", type=float, default=0.25)
-    ap.add_argument("--label", default="full-range masked joint fit")
+    ap.add_argument("--label", default="full-range masked joint fit"); ap.add_argument("--harps", default=str(HERE / "tzfor_aemu_out" / "harps_fullrange_log.npz"))
     args = ap.parse_args()
     d = np.load(args.dump, allow_pickle=True); out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
     th = d["theta"]; pn = list(d["pnames"]); T1, T2, feh = (float(th[pn.index(k)]) for k in ("Teff1", "Teff2", "feh"))
     wl = 10.0 ** d["logwl"]; obs, mod, prim, sec, good = d["obs"], d["model"], d["primary"], d["secondary"], d["good"]
     phase = ((d["times"] - K.T_P_HJD) % K.PERIOD_DAYS) / K.PERIOD_DAYS
     e = int(np.argmin(np.abs(phase - args.phase)))
+    if "masked" not in d.files:                                        # older dumps dropped the masked pixels: restore them from the HARPS file
+        H = np.load(args.harps); obs = np.asarray(H["obs"], float)[:obs.shape[0]]
     usable = np.isfinite(obs[e]); masked = usable & ~good[e]          # the mask is the only reason a usable pixel is not fitted
 
     fig, axes = plt.subplots(len(WINDOWS), 1, figsize=(15, 12))
@@ -63,7 +65,8 @@ def main():
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 6.5), gridspec_kw=dict(height_ratios=[3, 1]), sharex="col")
     for j, b in enumerate(("b", "y")):
-        mp, mm = d[f"lc_{b}_model_phase"], d[f"lc_{b}_model_mag"]; op, om, mo = d[f"lc_{b}_obs_phase"], d[f"lc_{b}_obs_mag"], d[f"lc_{b}_model_at_obs"]
+        dphi = float(th[pn.index("dphi")])                             # model phases count from conjunction; observations from T_P
+        mp, mm = (d[f"lc_{b}_model_phase"] + dphi) % 1.0, d[f"lc_{b}_model_mag"]; op, om, mo = (d[f"lc_{b}_obs_phase"] + dphi) % 1.0, d[f"lc_{b}_obs_mag"], d[f"lc_{b}_model_at_obs"]
         o = np.argsort(mp); ax = axes[0, j]
         ax.plot(op, om, ".", color="0.35", ms=3, label=f"Clausen {b}")
         ax.plot(mp[o], mm[o], color="C3", lw=1.2, label=f"{args.label} model")
