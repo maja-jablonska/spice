@@ -179,13 +179,18 @@ def main():
             b = base[s].at[iF].set(theta[P["feh"]]); r.append(gravity_darkened_rows(b, iT, iG, gn[s], theta[P[f"Teff{s+1}"]], gref[s], args.beta))
         return r
 
-    def spectra(theta, delta):
+    def spectra_parts(theta, delta):
+        """Broadened line and continuum channels of each star: (F1, F2, C) with C the summed continuum."""
         r = rows(theta); ks = fixed_kernels if fixed_kernels is not None else [kernels_for(0, theta[P["vsini_scale1"]]), kernels_for(1, theta[P["vsini_scale2"]])]
         vm = [theta[P["vmac1"]], theta[P["vmac2"]]] if args.free_vmacro else list(args.vmacro0)
         s1 = kernel_flux_multi(intensity_with_delta(delta), ks[0], r[0], wavelength_chunk_size=args.chunk)
         s2 = kernel_flux_multi(emu.intensity, ks[1], r[1], wavelength_chunk_size=args.chunk)
-        F = broaden(s1[..., 0], vm[0]) + broaden(s2[..., 0], vm[1]); C = broaden(s1[..., 1], vm[0]) + broaden(s2[..., 1], vm[1])
-        return F / C                                                              # (n_ep, n)
+        F1, F2 = broaden(s1[..., 0], vm[0]), broaden(s2[..., 0], vm[1]); C = broaden(s1[..., 1], vm[0]) + broaden(s2[..., 1], vm[1])
+        return F1, F2, C
+
+    def spectra(theta, delta):
+        F1, F2, C = spectra_parts(theta, delta)
+        return (F1 + F2) / C                                                      # (n_ep, n)
 
     def continuum_fix(model, ob, gd):
         w = jnp.where(gd, 1.0, 0.0); A = model[:, None] * Bmat * w[:, None]
@@ -302,12 +307,15 @@ def main():
 
     # ---- model dump for figures (optional) ----
     if args.dump_model:
-        mod = np.asarray(jax.jit(lambda t_, d_: jax.vmap(continuum_fix)(spectra(t_, d_), obs, good))(jnp.asarray(th), dlt))
+        def _parts(t_, d_):
+            F1, F2, C = spectra_parts(t_, d_); raw = (F1 + F2) / C; fixed = jax.vmap(continuum_fix)(raw, obs, good); corr = fixed / raw
+            return fixed, F1 / C * corr, F2 / C * corr
+        mod, prim, sec = (np.asarray(a) for a in jax.jit(_parts)(jnp.asarray(th), dlt))
         pm = jax.jit(phot_model)(jnp.asarray(th)); lc = {}
         for b, (mags, mi, mo, res) in pm.items():
             lc[f"lc_{b}_model_phase"] = np.asarray(mph); lc[f"lc_{b}_model_mag"] = np.asarray(mags); lc[f"lc_{b}_obs_phase"] = np.asarray((ph_o - th[P["dphi"]]) % 1.0)
             lc[f"lc_{b}_obs_mag"] = np.asarray(mo); lc[f"lc_{b}_model_at_obs"] = np.asarray(mi); lc[f"lc_{b}_sigma"] = sig_ph[b]
-        np.savez(args.dump_model, logwl=lw_obs, obs=np.where(good_np, obs_np, np.nan), model=mod, good=good_np, sigma=sig_np, rv=rv, times=np.asarray(SP["times"]),
+        np.savez(args.dump_model, logwl=lw_obs, obs=np.where(good_np, obs_np, np.nan), model=mod, primary=prim, secondary=sec, good=good_np, sigma=sig_np, rv=rv, times=np.asarray(SP["times"]),
                  fit_epochs=fit_e, theta=th, pnames=np.array(pnames), delta=(np.asarray(dlt) if args.delta else np.zeros(0)), block_edges=edges, **lc)
         print(f"model dump: {mod.shape} spectra + {len(pm)} light curves -> {args.dump_model}", flush=True)
 
