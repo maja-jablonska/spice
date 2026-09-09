@@ -80,16 +80,19 @@ def binary_at(n_vert, R1, R2, inc_deg, mean_anom=0.0):
 
 HW_PH = 24   # orbital + rotational velocities reach ~100 km/s = 17 px on the 16000-point photometric grid
 
-@jax.checkpoint
-def _phase_kernels(binary, t):
+from functools import partial
+
+@partial(jax.checkpoint, static_argnums=(2, 3))
+def _phase_kernels(binary, t, nn1, nn2):
     """Kernels of both stars at one time; checkpointed so the reverse pass through the occlusion holds one phase at a time."""
-    m1, m2 = _evaluate_orbit(binary, t, n_neighbors1=binary.n_neighbours1, n_neighbors2=binary.n_neighbours2)
+    m1, m2 = _evaluate_orbit(binary, t, n_neighbors1=nn1, n_neighbors2=nn2)
     return build_synthesis_kernel(m1, lw_ph, args.n_mu, 1, half_width=HW_PH), build_synthesis_kernel(m2, lw_ph, args.n_mu, 1, half_width=HW_PH)
 
 def kernels_at(binary, phases):
+    nn1, nn2 = int(binary.n_neighbours1), int(binary.n_neighbours2)   # Python ints (set by make_binary), never traced
     ks1, ks2 = [], []
     for ph in phases:
-        k1, k2 = _phase_kernels(binary, ph * P_yr); ks1.append(k1); ks2.append(k2)
+        k1, k2 = _phase_kernels(binary, ph * P_yr, nn1, nn2); ks1.append(k1); ks2.append(k2)
     return ks1, ks2
 
 out = dict(ph_phoebe=ph_lc, b_phoebe=m_ph["b"], y_phoebe=m_ph["y"], theta=np.asarray(R["theta"]), pnames=np.array(R["pnames"]))
