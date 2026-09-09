@@ -107,5 +107,13 @@ for nv in args.n_vert:
     print(f"gradient over {len(sel)} in-eclipse phases: first call {t1:.0f}s (compile), second {t2:.1f}s; chi2 {float(v):.1f}; "
           f"d chi2/dR1 {float(g[0]):+.3g} /Rsun, d/dR2 {float(g[1]):+.3g} /Rsun, d/d i {float(g[2]):+.3g} /deg; finite {all(np.isfinite(float(x)) for x in g)}", flush=True)
     h = 0.02; fd = (chi2(R1_0 + h, R2_0, INC0) - chi2(R1_0 - h, R2_0, INC0)) / (2 * h); print(f"  finite-difference d chi2/dR1 {float(fd):+.3g}", flush=True)
-    out[f"grad_time_{nv}"] = t2; np.savez(args.out, **out)
+    out[f"grad_time_{nv}"] = t2
+    # the joint fit jits its whole value-and-grad: can the binary construction + occlusion live inside jit?
+    try:
+        vgj = jax.jit(vg); t = time.time(); (v, g) = vgj(R1_0, R2_0, INC0); jax.block_until_ready(g); tj1 = time.time() - t
+        t = time.time(); (v, g) = vgj(R1_0 + 0.01, R2_0, INC0); jax.block_until_ready(g); tj2 = time.time() - t
+        print(f"jitted value-and-grad: compile {tj1:.0f}s, second call {tj2:.1f}s; d chi2/dR1 {float(g[0]):+.3g}", flush=True); out[f"jit_grad_time_{nv}"] = tj2
+    except Exception as e:  # noqa: BLE001
+        print(f"jitted value-and-grad FAILED: {type(e).__name__}: {str(e)[:300]}", flush=True)
+    np.savez(args.out, **out)
 print("===== DONE =====")
