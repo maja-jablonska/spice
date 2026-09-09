@@ -100,6 +100,11 @@ for s in (0, 1):
             sp, bd = star_curves_j(s, float(T), float(f)); GS[s][i, j] = np.asarray(sp); GB[s][i, j] = np.asarray(bd)
     print(f"star {s + 1} grid done ({time.time() - t0:.0f}s)", flush=True)
 GS = [jnp.asarray(g) for g in GS]; GB = [jnp.asarray(g) for g in GB]
+def _mem(tag):
+    try:
+        st = jax.devices()[0].memory_stats(); print(f"GPU memory [{tag}]: in use {st['bytes_in_use']/2**30:.1f} GiB, peak {st['peak_bytes_in_use']/2**30:.1f} GiB", flush=True)
+    except Exception: pass
+_mem("grids on device")
 
 def catmull_rom(u): return jnp.stack([-0.5 * u ** 3 + u ** 2 - 0.5 * u, 1.5 * u ** 3 - 2.5 * u ** 2 + 1.0, -1.5 * u ** 3 + 2.0 * u ** 2 + 0.5 * u, 0.5 * u ** 3 - 0.5 * u ** 2])
 def locate(nodes, value):
@@ -143,6 +148,7 @@ def model():
 # stack, get_samples(group_by_chain=True) returns the stored states without a new executable,
 # and device_get copies them out. Compiled functions are reused across the runs.
 mcmc = MCMC(NUTS(model, target_accept_prob=0.85, max_tree_depth=8), num_warmup=args.num_warmup, num_samples=args.num_samples, num_chains=1, progress_bar=False)
+_mem("before NUTS")
 chains = []; t0 = time.time()
 for c in range(args.chains):
     mcmc.run(jax.random.PRNGKey(c))
