@@ -1,0 +1,33 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=200GB
+#PBS -l walltime=10:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N tzfor_hyblc
+#PBS -j oe
+
+# End-to-end test never done before: PHOEBE Roche mesh -> SPICE -> aemu,
+# compared against the OBSERVED Clausen light curve. The earlier hybrid
+# photometry ran at Teff2=6650 only and was compared to PHOEBE's own curve.
+# Bands v/b/y only: the bundle trains on 3780-6910 A, so Stromgren u is 90%
+# extrapolated (and returns confident finite values anyway).
+set -euo pipefail
+: "${PYTHON_BIN:=/g/data/y89/mj8805/miniforge/envs/astro/bin/python}"
+: "${RUN_DIR:=/scratch/y89/mj8805/spice_docsexp/run}"
+: "${PYTHONPATH:=/scratch/y89/mj8805/spice_docsexp/src}"
+: "${OUT_DIR:=/scratch/y89/mj8805/tzfor_hyblc_out}"
+: "${N_WAVELENGTHS:=1400}"
+export PYTHONPATH JAX_ENABLE_X64=1
+mkdir -p "${OUT_DIR}"
+"${PYTHON_BIN}" -c "import jax; print('jax devices:', jax.devices())"
+for T in 6650 6400; do
+  echo "=== Teff2 = ${T} ==="
+  "${PYTHON_BIN}" "${RUN_DIR}/tzfor_phoebe_aemu_photometry.py" \
+      --mode synth-lc --n-mesh 1200 --distortion roche \
+      --meshes "${RUN_DIR}/tzfor_aemu_roche_n1200_lc${T}_meshes.pkl" \
+      --n-wavelengths "${N_WAVELENGTHS}" --output "${OUT_DIR}"
+done

@@ -3,6 +3,79 @@ Synthetic Photometry
 
 SPICE provides robust capabilities for synthetic photometry calculations. This section demonstrates how to use SPICE to generate synthetic photometry for various passbands and calculate stellar luminosities.
 
+.. note::
+
+   Every code snippet on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/synthetic_photometry_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/synthetic_photometry_examples.ipynb>`_.
+
+Magnitude systems
+-----------------
+
+Three functions turn an observed spectrum (linear wavelengths in Angstroms
+plus the flux column from :func:`~spice.spectrum.simulate_observed_flux`)
+into a magnitude:
+
+- :func:`~spice.spectrum.AB_passband_luminosity` — AB system; supported by
+  every filter.
+- :func:`~spice.spectrum.ST_passband_luminosity` — ST system; **not
+  supported for Gaia filters** (raises ``ValueError``).
+- :func:`~spice.spectrum.Vega_passband_luminosity` — Vega system; requires
+  the filter to carry a Vega zero point (currently Gaia G/BP/RP and
+  2MASS J/H/Ks).
+
+Photonic filters (photon-counting responses, e.g. Gaia) and energy-based
+(non-photonic) responses are handled internally per filter — you never need
+to convert; PanSTARRS PS1 filters likewise route through a dedicated branch.
+At the default synthesis distance of 10 pc, the AB "apparent" magnitude of a
+model is its absolute magnitude.
+
+Available filters
+-----------------
+
+All filters live in ``spice.spectrum.filter``; transmission-curve data ships
+with the package.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 45 25
+
+   * - System
+     - Classes
+     - Notes
+   * - Johnson-Cousins
+     - ``JohnsonCousinsU/B/V/R/I``
+     -
+   * - Hipparcos/Tycho
+     - ``HipparcosHp``, ``TychoBT``, ``TychoVT``
+     -
+   * - Gaia
+     - ``GaiaG``, ``GaiaBP``, ``GaiaRP``, ``GaiaRVS``
+     - photonic; no ST magnitudes; Vega zero points for G/BP/RP
+   * - SDSS
+     - ``SDSSu/g/r/i/z``
+     -
+   * - 2MASS
+     - ``TWOMASSJ/H/K``
+     - Vega zero points available
+   * - GALEX
+     - ``GALEXFUV``, ``GALEXNUV``
+     -
+   * - LSST
+     - ``LSSTu/g/r/i/z/y``
+     -
+   * - PanSTARRS PS1
+     - ``PANSTARRS_PS1_g/r/i/z/y/w/open``
+     - dedicated non-photonic handling
+   * - Strömgren
+     - ``Stromgrenu/v/b/y``
+     -
+   * - Bolometric
+     - ``Bolometric``
+     - flat response over the full wavelength range
+
+Custom passbands can be built directly from a transmission curve via the
+:class:`~spice.spectrum.Filter` base class.
+
 Passband Luminosities
 ---------------------
 
@@ -45,10 +118,9 @@ SPICE includes utilities to calculate luminosity offsets for blackbody models wi
 .. code-block:: python
 
     from spice.models import IcosphereModel
-    from spice.spectrum import simulate_observed_flux, luminosity, absolute_bol_luminosity
+    from spice.spectrum import simulate_observed_flux, luminosity, absolute_bol_luminosity, Blackbody
     from spice.spectrum.filter import JohnsonCousinsB, JohnsonCousinsI, GaiaG, JohnsonCousinsV
     from spice.spectrum.spectrum import AB_passband_luminosity, ST_passband_luminosity
-    from transformer_payne import Blackbody
 
     def calculate_blackbody_luminosity(n_vertices):
         bb = Blackbody()
@@ -65,7 +137,8 @@ SPICE includes utilities to calculate luminosity offsets for blackbody models wi
             'absolute_bol_luminosity': absolute_bol_luminosity(solar_luminosity),
             'AB_solar_apparent_mag_B': AB_passband_luminosity(JohnsonCousinsB(), wavelengths, flux[:, 0]),
             'AB_solar_apparent_mag_V': AB_passband_luminosity(JohnsonCousinsV(), wavelengths, flux[:, 0]),
-            'ST_solar_apparent_mag_G': ST_passband_luminosity(GaiaG(), wavelengths, flux[:, 0]),
+            # Gaia filters are photonic and not supported for ST magnitudes
+            'ST_solar_apparent_mag_V': ST_passband_luminosity(JohnsonCousinsV(), wavelengths, flux[:, 0]),
         }
 
     # Calculate for different resolutions

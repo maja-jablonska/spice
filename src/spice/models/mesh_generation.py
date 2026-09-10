@@ -6,6 +6,7 @@ import pkgutil
 import pickle
 import numpy as np
 import jax.numpy as jnp
+import math
 import jax
 
 # Define ArrayLike type alias since jax.typing.ArrayLike is causing issues
@@ -233,7 +234,9 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
     Returns:
         Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
     """
-    subdivs = int(jnp.ceil(.5*jnp.log2(points/5)-1))
+    # plain Python arithmetic: under jit a jnp expression on this constant is staged into a
+    # tracer and the int() cast fails, which made IcosphereModel.construct untraceable
+    subdivs = int(math.ceil(0.5 * math.log2(points / 5) - 1))
 
     user_cache_path = None
     if use_cache:
@@ -245,8 +248,19 @@ def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike
                 data = pkgutil.get_data('spice', name)
             except (FileNotFoundError, OSError):
                 data = None
-            if data is not None:
-                return pickle.loads(data)
+            # An empty packaged file (icosphere_6_compat.pickle ships as 0 bytes)
+            # passes an `is not None` check but blows up in ``pickle.loads`` with
+            # a bare EOFError -- which click reports as an inscrutable
+            # "Aborted!". Treat empty or unreadable data as "no cache" and fall
+            # through to the user cache / generation path, exactly as the
+            # per-user branch below already does.
+            if data:
+                try:
+                    return pickle.loads(data)
+                except (EOFError, pickle.UnpicklingError) as exc:
+                    warnings.warn(
+                        f"Ignoring unreadable packaged icosphere cache {name}: {exc}"
+                    )
         # Writable per-user cache for subdivisions not shipped with the package.
         user_cache_path = os.path.join(
             _user_icosphere_cache_dir(), f"icosphere_{subdivs}.pickle"

@@ -9,6 +9,12 @@ _lazy_imports = {
     "ST_passband_luminosity": ".spectrum",
     "Vega_passband_luminosity": ".spectrum",
     "absolute_bol_luminosity": ".spectrum",
+    # synthesis_kernel.py
+    "SynthesisKernel": ".synthesis_kernel",
+    "build_synthesis_kernel": ".synthesis_kernel",
+    "kernel_flux": ".synthesis_kernel",
+    "kernel_flux_multi": ".synthesis_kernel",
+    "gravity_darkened_rows": ".synthesis_kernel",
     # utils.py
     "ERG_S_TO_W": ".utils",
     "SPHERE_STERADIAN": ".utils",

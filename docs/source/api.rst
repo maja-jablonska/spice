@@ -142,7 +142,7 @@ IcosphereModel
    :show-inheritance:
    :exclude-members: count, index, construct
 
-   .. method:: construct(n_vertices: int, radius: float, mass: float, parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]], parameter_names: List[str], max_pulsation_mode: int = 5, max_fourier_order: int = 5, override_log_g: bool = True, log_g_index: Optional[int] = None) -> IcosphereModel
+   .. method:: construct(n_vertices: int, radius: float, mass: float, parameters: Union[float, Float[Array, "n_mesh_elements n_parameters"]], parameter_names: List[str], max_pulsation_mode: int = 5, max_fourier_order: int = 5, override_log_g: bool = False, log_g_index: Optional[int] = None) -> IcosphereModel
       
       Constructs an IcosphereModel with specified stellar and mesh properties.
 
@@ -157,8 +157,8 @@ IcosphereModel
       :param parameter_names: Names of the parameters, used for identifying log g parameter
       :param max_pulsation_mode: Maximum pulsation mode for the model, defaults to 5
       :param max_fourier_order: Maximum order of Fourier series for pulsation calculation, defaults to 5
-      :param override_log_g: Whether to override the log g values based on model's mass and centers, defaults to True
-      :param log_g_index: Index of the log g parameter in parameters array. Required if override_log_g is True and specific log g parameter name not in parameter_names
+      :param override_log_g: If False (default), log g parameters are computed by SPICE from the model's mass and per-element radius. If True, explicitly passed log g values are kept as-is and a warning is issued.
+      :param log_g_index: Index of the log g parameter in parameters array. Only needed when no name in parameter_names matches one of the recognized log g names (see LOG_G_NAMES)
       :return: An instance of IcosphereModel initialized with the specified properties
 
 Constants
@@ -169,9 +169,11 @@ Constants
 
    List of valid parameter names for surface gravity. If the parameter name is not in this list, the surface gravity will be calculated using the mass and center positions.
 
-The default line-of-sight vector is ``[0., 1., 0.]`` (the +Y direction) and the
-default rotation axis is ``[0., 0., 1.]`` (the Z axis); both are created
-internally with the dtype matching the active precision setting.
+The default line-of-sight vector is ``[0., 0., -1.]`` (observer → star, the
+standard astronomical convention shared with the binary-orbit utilities) and
+the default rotation axis is ``[0., 1., 0.]`` (in the default sky plane, so
+rotation is viewed equator-on); both are created internally with the dtype
+matching the active precision setting.
 
 .. data:: spice.models.mesh_model.DEFAULT_MAX_PULSATION_MODE_PARAMETER
    :type: int
@@ -185,237 +187,201 @@ internally with the dtype matching the active precision setting.
 
    Default Fourier order for pulsations.
 
-Helper Functions
-~~~~~~~~~~~~~~~~
 
-.. function:: calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0)
-
-   Calculates surface gravity (log g) values for mesh elements based on mass, center positions and rotation velocities.
-
-   The surface gravity is calculated using:
-
-   .. math::
-
-      \log g = \log_{10} \left(\frac{GM}{R^2} - \frac{v_{rot}^2}{R}\right)
-
-   with the gravity expressed in cgs units (cm/s^2), the standard astronomical
-   convention, where:
-
-   - M is the mass in solar masses
-   - R is the radius at each mesh point in solar radii
-   - v_rot is the rotation velocity in km/s
-
-   :param mass: Mass of the star in solar masses
-   :param d_centers: Center positions of mesh elements relative to star center
-   :param rot_velocities: Rotation velocities of mesh elements in km/s, defaults to 0.0
-   :return: Array of log g values for each mesh element
+.. autofunction:: spice.models.mesh_model.calculate_log_gs
 
 
 Mesh Transformations
 --------------------
 
-Transform Functions
-~~~~~~~~~~~~~~~~~~~
+All transformations are functional: they return a new model and never mutate
+in place. See :doc:`conventions` for units and sign conventions.
 
-.. function:: transform(mesh: MeshModel, vector: Float[Array, "3"]) -> MeshModel
+.. autofunction:: spice.models.mesh_transform.transform
 
-   Transform the position of a mesh model based on a given vector.
+.. autofunction:: spice.models.mesh_transform.update_parameter
 
-   This function applies a transformation to the mesh model's position by updating its center
-   with the provided vector. PHOEBE models are considered read-only within SPICE.
+.. autofunction:: spice.models.mesh_transform.update_parameters
 
-   :param mesh: The mesh model to be transformed
-   :param vector: The vector by which the mesh's position is to be updated
-   :return: The transformed mesh model with its position updated
-   :raises ValueError: If the mesh model is an instance of PhoebeModel
+Rotation
+~~~~~~~~
 
-.. function:: update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], parameter_values: Float[Array, "n_mesh_elements n_parameters"], parameter_names: List[str] = None) -> MeshModel
+.. autofunction:: spice.models.mesh_transform.add_rotation
 
-   Update a specific parameter or set of parameters in the mesh model.
+.. autofunction:: spice.models.mesh_transform.evaluate_rotation
 
-   This function allows updating one or multiple parameters of the mesh model. It can handle
-   parameter specification by name (string), index (integer), or an array-like of indices.
+.. autofunction:: spice.models.mesh_transform.evaluate_rotation_at_times
 
-   :param mesh: The mesh model to be updated
-   :param parameter: The parameter(s) to update - can be name, index or array of indices
-   :param parameter_values: The new value(s) for the specified parameter(s)
-   :param parameter_names: List of parameter names used for the model
-   :return: The updated mesh model
-   :raises ValueError: If parameter name not found or mesh is PhoebeModel
+.. autofunction:: spice.models.mesh_transform.evaluate_body_orbit
 
-.. function:: update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], parameter_values: Float[Array, "n_mesh_elements n_parameters"], parameter_names: List[str] = None) -> MeshModel
+Pulsations
+~~~~~~~~~~
 
-   Update multiple parameters in the mesh model simultaneously.
+.. autofunction:: spice.models.mesh_transform.add_pulsation
 
-   More efficient than calling update_parameter multiple times when updating several parameters at once.
+.. autofunction:: spice.models.mesh_transform.add_pulsations
 
-   :param mesh: The mesh model to be updated
-   :param parameters: List of parameter names or indices to update
-   :param parameter_values: New values for the specified parameters
-   :param parameter_names: List of parameter names used for the model
-   :return: The updated mesh model
-   :raises ValueError: If parameter names not found or mesh is PhoebeModel
+.. autofunction:: spice.models.mesh_transform.evaluate_pulsations
 
-Rotation Functions
-~~~~~~~~~~~~~~~~~~
-
-.. function:: evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel
-
-   Evaluate the rotation of a mesh model at a specific time.
-
-   Updates the mesh model's rotation parameters based on the given time.
-
-   :param mesh: The mesh model to evaluate rotation for
-   :param t: The time at which to evaluate the rotation (seconds)
-   :return: The mesh model with updated rotation parameters
-   :raises ValueError: If mesh is PhoebeModel
-
-.. function:: evaluate_body_orbit(m: MeshModel, orbital_velocity: float) -> MeshModel
-
-   Evaluate the effects of an orbit on a mesh model.
-
-   :param m: Mesh model of an orbiting body
-   :param orbital_velocity: Orbital velocity in km/s
-   :return: Mesh model with updated parameters
-
-Pulsation Functions
-~~~~~~~~~~~~~~~~~~~
-
-.. function:: add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degrees: Float[Array, "n_pulsations"], periods: Float[Array, "n_pulsations"], fourier_series_parameters: Float[Array, "n_pulsations 3 n_terms 2"], pulsation_axes: Float[Array, "n_pulsations 3"] = None, pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel
-
-   Adds multiple pulsation effects to a mesh model using spherical harmonics and Fourier series parameters.
-
-   :param m: The mesh model to add pulsation effects to
-   :param m_orders: Array of orders (m) of the spherical harmonics
-   :param l_degrees: Array of degrees (l) of the spherical harmonics
-   :param periods: Array of pulsation periods in days (the same unit as the ``t`` passed to ``evaluate_pulsations``)
-   :param fourier_series_parameters: Fourier parameters of shape (n_pulsations, 3, n_terms, 2), where 3 indexes the [radial, spheroidal, toroidal] VSH components and each innermost pair is [amplitude, phase]. A legacy (n_pulsations, n_terms, 2) input is interpreted as purely radial.
-   :param pulsation_axes: Array of pulsation axes (defaults to rotation axis)
-   :param pulsation_angles: Array of pulsation angles (defaults to zero)
-   :return: The mesh model with updated pulsation parameters
-   :raises ValueError: If mesh is PhoebeModel or input arrays have inconsistent lengths
-
-.. function:: reset_pulsations(m: MeshModel) -> MeshModel
-
-   Resets the pulsation parameters of a mesh model to non-pulsating model values.
-
-   :param m: The mesh model to reset pulsation parameters for
-   :return: The mesh model with pulsation parameters reset
-   :raises ValueError: If mesh is PhoebeModel
-
-.. function:: evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool = False, dt: float = 1e-6) -> MeshModel
-
-   Evaluates and updates the mesh model with pulsation effects at a specific time.
-
-   Calculates pulsation effects using Fourier series parameters for both static and dynamic components.
-   Updates the mesh with calculated offsets and velocities.
-
-   :param m: The mesh model to evaluate pulsations for
-   :param t: The time at which to evaluate the pulsations, in days
-   :param use_numerical_derivative: Use a finite-difference velocity estimate instead of the analytic Fourier derivative
-   :param dt: Step used by the numerical derivative
-   :return: The mesh model updated with pulsation effects
-   :raises ValueError: If mesh is PhoebeModel
-
-
-Mesh View
-------------------
-
-Mesh View Functions
-~~~~~~~~~~~~~~~~~~~
-
-.. function:: get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel
-
-   Cast 3D vectors of centers and center velocities to the line-of-sight.
-
-   :param mesh: Properties to be cast (n, 3)
-   :param los_vector: LOS vector (3,)
-   :return: mesh with updated los_vector, mus, and los_velocities
-
-.. function:: visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]
-
-   Calculate the area of the polygon defined by ``vertices1`` that remains
-   visible after clipping against the polygon defined by ``vertices2``.
-
-   :param vertices1: Vertices of the (potentially occluded) polygon
-   :param vertices2: Vertices of the occluding polygon
-   :return: Scalar visible area
-
-.. function:: resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors: int) -> MeshModel
-
-   Calculate the occlusion of ``m_occluded`` by ``m_occluder``.
-
-   :param m_occluded: occluded mesh model
-   :param m_occluder: occluding mesh model
-   :param n_neighbors: number of nearest occluder faces checked per occluded face
-   :return: ``m_occluded`` with updated visible areas
-
+.. autofunction:: spice.models.mesh_transform.reset_pulsations
 
 Spots
+~~~~~
+
+.. autofunction:: spice.models.spots.add_spot
+
+.. autofunction:: spice.models.spots.add_spots
+
+.. autofunction:: spice.models.spots.add_spherical_harmonic_spot
+
+.. autofunction:: spice.models.spots.add_spherical_harmonic_spots
+
+
+Mesh View and Occlusion
+-----------------------
+
+.. autofunction:: spice.models.mesh_view.get_mesh_view
+
+.. autofunction:: spice.models.mesh_view.visible_area
+
+.. autofunction:: spice.models.mesh_view.resolve_occlusion
+
+
+Binaries and Orbits
+-------------------
+
+.. autoclass:: spice.models.binary.Binary
+   :members: from_bodies
+
+.. autofunction:: spice.models.binary.add_orbit
+
+.. autofunction:: spice.models.binary.evaluate_orbit
+
+.. autofunction:: spice.models.binary.evaluate_orbit_at_times
+
+.. autofunction:: spice.models.binary.evaluate_orbit_at_times_stacked
+
+.. autofunction:: spice.models.eclipse_utils.find_eclipses
+
+.. autofunction:: spice.models.eclipse_utils.find_binary_eclipses
+
+.. autofunction:: spice.models.orbit_utils.get_orbit_jax
+
+
+PHOEBE Integration
 ------------------
 
-Spot Functions
-~~~~~~~~~~~~~~~~~
+Available with the ``phoebe`` extra; see :doc:`phoebe_integration`.
 
-.. function:: add_spot(mesh: MeshModel, spot_center_theta: float, spot_center_phi: float, spot_radius: float, parameter_delta: float, parameter_index: int, smoothness: float = 0.0) -> MeshModel
+.. autoclass:: spice.models.binary.PhoebeBinary
+   :members: construct
 
-   Add a spot to a mesh model based on spherical coordinates and smoothness parameters.
+.. autoclass:: spice.models.phoebe_model.PhoebeModel
+   :members: construct
 
-   This function applies a modification to the mesh model's parameters to simulate the presence of a spot. The spot
-   is defined by its center (in spherical coordinates), its radius, and a differential parameter that quantifies the
-   change induced by the spot. The smoothness parameter allows for a gradual transition at the spot's edges.
+.. autoclass:: spice.models.phoebe_utils.PhoebeConfig
+   :members:
 
-   :param mesh: The mesh model to which the spot will be added
-   :param spot_center_theta: The theta (inclination) coordinate of the spot's center, in radians
-   :param spot_center_phi: The phi (azimuthal) coordinate of the spot's center, in radians 
-   :param spot_radius: The angular radius of the spot, in degrees
-   :param parameter_delta: The difference in the parameter value to be applied within the spot
-   :param parameter_index: The index of the parameter in the mesh model that will be modified
-   :param smoothness: Factor controlling the smoothness of the spot's edge, defaults to 0.0
-   :return: The modified mesh model with the spot applied
-   :raises ValueError: If mesh is a PhoebeModel
 
-.. function:: add_spots(mesh: MeshModel, spot_center_thetas: Float[Array, "n_spots"], spot_center_phis: Float[Array, "n_spots"], spot_radii: Float[Array, "n_spots"], parameter_deltas: Float[Array, "n_spots"], parameter_indices: Int[Array, "n_spots"], smoothness: Float[Array, "n_spots"] = None) -> MeshModel
+Spectral Synthesis
+------------------
 
-   Add multiple spots to a mesh model based on spherical coordinates and smoothness parameters.
+.. autofunction:: spice.spectrum.spectrum.simulate_observed_flux
 
-   :param mesh: The mesh model to which the spots will be added
-   :param spot_center_thetas: Array of theta coordinates of spot centers, in radians
-   :param spot_center_phis: Array of phi coordinates of spot centers, in radians
-   :param spot_radii: Array of angular radii of spots, in degrees
-   :param parameter_deltas: Array of parameter value differences for each spot
-   :param parameter_indices: Array of parameter indices to modify for each spot
-   :param smoothness: Array of edge smoothness factors for each spot
-   :return: The modified mesh model with all spots applied
-   :raises ValueError: If mesh is a PhoebeModel
+.. autofunction:: spice.spectrum.spectrum.simulate_monochromatic_luminosity
 
-.. function:: add_spherical_harmonic_spot(mesh: MeshModel, m_order: Union[Int, Float], l_degree: Union[Int, Float], param_delta: Float, param_index: Float, tilt_axis: Float[Array, "3"] = None, tilt_angle: Float = None) -> MeshModel
+.. autofunction:: spice.spectrum.spectrum.luminosity
 
-   Add a spherical harmonic variation to a parameter of the mesh model.
+.. autofunction:: spice.spectrum.spectrum.absolute_bol_luminosity
 
-   Creates a spot-like feature using spherical harmonic function Y_l^m(θ,φ) to modify surface parameters.
+.. autofunction:: spice.spectrum.utils.apply_spectral_resolution
 
-   :param mesh: The mesh model to modify
-   :param m_order: Order (m) of spherical harmonic, must be ≤ l_degree
-   :param l_degree: Degree (l) of spherical harmonic
-   :param param_delta: Maximum amplitude of parameter variation
-   :param param_index: Index of parameter to modify
-   :param tilt_axis: Optional axis for tilting the pattern
-   :param tilt_angle: Optional tilt angle in degrees
-   :return: Modified mesh model with spherical harmonic variation
-   :raises ValueError: If m_order > l_degree or mesh is PhoebeModel
 
-.. function:: add_spherical_harmonic_spots(mesh: MeshModel, m_orders: Float[Array, "n_orders"], n_degrees: Float[Array, "n_orders"], param_deltas: Float[Array, "n_orders"], param_indices: Float[Array, "n_orders"], tilt_axes: Optional[Float[Array, "n_orders 3"]] = None, tilt_angles: Optional[Float[Array, "n_orders"]] = None) -> MeshModel
+Emulators
+---------
 
-   Add multiple spherical harmonic spots to a mesh model.
+.. autoclass:: spice.spectrum.spectrum_emulator.SpectrumEmulator
+   :members:
 
-   :param mesh: The mesh model to modify
-   :param m_orders: Array of m indices for spherical harmonics
-   :param n_degrees: Array of n indices for spherical harmonics
-   :param param_deltas: Array of modification strengths
-   :param param_indices: Array of parameter indices to modify
-   :param tilt_axes: Optional array of tilt axes for each spot
-   :param tilt_angles: Optional array of tilt angles in radians
-   :return: Modified mesh model with all harmonic spots
-   :raises ValueError: If mesh is PhoebeModel or tilt parameters mismatched
+.. autoclass:: spice.spectrum.blackbody.Blackbody
+   :members:
 
+.. autoclass:: spice.spectrum.gaussian_line_emulator.GaussianLineEmulator
+   :members:
+
+.. autoclass:: spice.spectrum.physical_line_emulator.PhysicalLineEmulator
+   :members:
+
+.. autoclass:: spice.spectrum.user_spectrum_interpolator.UserSpectrumInterpolator
+   :members:
+
+Neural-network bundles (``aemu`` extra; see :doc:`aemu_integration`):
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.AemuSpectrumEmulator
+   :members: flux, intensity, to_parameters
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.PretrainedAemuSpectrumEmulator
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.FluxPretrainedAemuSpectrumEmulator
+
+.. autoclass:: spice.spectrum.aemu_spectrum_emulator.IntensityPretrainedAemuSpectrumEmulator
+
+
+Grid Interpolation
+------------------
+
+Available with the ``grid`` extra; see :doc:`spectral_grids`.
+
+.. autoclass:: spice.spectrum.lazy_zarr_interpolator.LazyZarrInterpolator
+   :members: to_parameters, get_weighted_batch, is_in_bounds
+
+.. autoclass:: spice.spectrum.lazy_zarr_interpolator.IntensityLazyZarrInterpolator
+   :members: intensity, flux
+
+.. autoclass:: spice.spectrum.lazy_zarr_interpolator.FluxLazyZarrInterpolator
+   :members: intensity, flux
+
+.. autoclass:: spice.spectrum.lazy_zarr_interpolator.GridIndex
+
+.. autoclass:: spice.spectrum.lazy_zarr_interpolator.SparseGridIndex
+
+.. autofunction:: spice.spectrum.generate_zarr_index.write_index_parquet
+
+.. autofunction:: spice.spectrum.generate_zarr_index.build_index_frame_from_zarr
+
+.. autofunction:: spice.spectrum.generate_zarr_index.geometry_labels_from_logg
+
+
+Synthetic Photometry
+--------------------
+
+The available passbands are listed in :doc:`synthetic_photometry`.
+
+.. autoclass:: spice.spectrum.filter.Filter
+   :members:
+
+.. autofunction:: spice.spectrum.spectrum.AB_passband_luminosity
+
+.. autofunction:: spice.spectrum.spectrum.ST_passband_luminosity
+
+.. autofunction:: spice.spectrum.spectrum.Vega_passband_luminosity
+
+
+Plotting
+--------
+
+.. autofunction:: spice.plots.plot_mesh.plot_2D
+
+.. autofunction:: spice.plots.plot_mesh.plot_3D
+
+.. autofunction:: spice.plots.plot_mesh.plot_3D_binary
+
+.. autofunction:: spice.plots.plot_mesh.plot_3D_sequence
+
+.. autofunction:: spice.plots.plot_mesh.plot_3D_mesh_and_spectrum
+
+Pulsation visualization helpers (scalar projections of
+``mesh.pulsation_velocities``):
+
+.. automodule:: spice.plots.plot_pulsations
+   :members: compute_pulsation_scalar, plot_pulsation_map, plot_pulsation_components, plot_pulsation_cross_section, plot_pulsation_phase_grid, animate_pulsation_phase

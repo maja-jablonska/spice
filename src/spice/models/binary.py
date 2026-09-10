@@ -10,7 +10,7 @@ from jax import tree_util
 from spice.models.model import Model
 from spice.models.mesh_transform import transform, evaluate_body_orbit
 from spice.models.orbit_utils import get_orbit_jax
-from spice.models.mesh_view import construct_points_in_circles, construct_triangle_to_gridpts, find_triangle_counts, resolve_occlusion
+from spice.models.mesh_view import resolve_occlusion
 
 import jaxkd as jk
 
@@ -34,11 +34,78 @@ from spice.constants import SOLAR_MASS_KG, SOLAR_RAD_CM, SOLAR_RAD_M
 YEAR_TO_SECONDS = 3.154e7
 DAY_TO_YEAR = 0.0027378507871321013
 DEFAULT_N_NEIGHBOURS = 32
+# Lower bound for the adaptive neighbour count. The heuristic below maps
+# triangles onto a fixed 50x50 grid, so once a mesh has more faces than grid
+# points most triangles contain no grid point, the counts collapse and the
+# estimate pins to this floor (measured: k=21 at 1280 faces but k=8 at 5120).
+# A starved neighbour search silently under-counts occlusion -- measured on the
+# TZ For geometry, k=8 loses 2.6% of the blocked flux at 5120 faces and 3.1% at
+# 20480, while k>=20 is accurate to 0.04%. See tests/test_occlusion_accuracy.py.
+MIN_N_NEIGHBOURS = 24
+# Upper bound on the automatic estimate. The old code capped at 64 inline; the
+# cap never engaged because the estimate was collapsing rather than growing.
+MAX_N_NEIGHBOURS = 256
 
 def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:
     return jk.build_tree(jnp.zeros(points_shape))
 
+
+def _estimate_n_neighbours(occluded: Model, occluder: Model,
+                           safety: float = 2.0) -> int:
+    """How many occluder faces to consider per occluded face.
+
+    ``_resolve_occlusion`` asks a KD-tree for the ``k`` nearest occluder faces
+    and then keeps those within the occluded face's bounding-circle radius, so
+    ``k`` must be at least the number of occluder centres that can fall inside
+    that radius. Undersizing it silently drops occluders: the eclipse comes out
+    too shallow, and because the shortfall worsens as the mesh refines, a mesh
+    convergence test *diverges*.
+
+    The count is set by the occluder's projected number density and the occluded
+    face's projected size::
+
+        k ~ safety * pi * R_occluded^2 * (n_visible / projected_area_occluder)
+
+    Both factors scale as 1/N and N respectively, so the estimate is invariant
+    under refining both meshes together -- which is the property the previous
+    grid-sampling estimator lacked. It sampled triangle overlaps on a fixed
+    50x50 grid (``construct_triangle_to_gridpts``), so once the faces were
+    smaller than a grid cell most of them contained no sample point and the
+    count collapsed: measured 49 -> 31 -> 24 (the MIN_N_NEIGHBOURS floor) for
+    1280 -> 5120 -> 20480 elements, understating occluded area by 0.26%, 0.67%
+    and 0.97%. The grid could not simply be refined because
+    ``construct_points_in_circles`` is O(P^2) in the number of grid points.
+
+    Using the summed projected area rather than pi*R_star^2 keeps this valid for
+    distorted and imported (PHOEBE) meshes, which have no single radius.
+
+    ``safety`` = 2 is calibrated against a direct measurement: for the TZ For-like
+    pair the raw estimate is 25.1/25.4/25.6 at the three resolutions, and the
+    occluded area is converged (to 0.03%) by k = 48.
+    """
+    # ``cast_areas`` is the sky-plane area in R_sun^2, i.e. the same units as
+    # ``cast_vertex_bounding_circle_radii``. ``areas`` must NOT be used here: it
+    # is the unit-sphere area (it sums to 4*pi for any radius), so pairing it
+    # with the physically-scaled radius inflates the estimate by R^2 -- 777
+    # instead of 51 for the 8.28 R_sun component.
+    visible = occluder.mus > 0
+    n_visible = jnp.sum(visible)
+    projected_area = jnp.sum(jnp.where(visible, occluder.cast_areas, 0.0))
+    r_occluded = jnp.max(occluded.cast_vertex_bounding_circle_radii)
+    k = safety * jnp.pi * jnp.square(r_occluded) * n_visible / projected_area
+    k = float(k) if np.isfinite(float(k)) else float(DEFAULT_N_NEIGHBOURS)
+    return int(np.clip(np.ceil(k), MIN_N_NEIGHBOURS, MAX_N_NEIGHBOURS))
+
+
 class Binary(NamedTuple):
+    """Two mesh models bound on a Keplerian orbit.
+
+    Construct with :meth:`from_bodies`, attach orbital elements with
+    :func:`add_orbit`, and obtain positioned, occlusion-resolved component
+    meshes with :func:`evaluate_orbit` / :func:`evaluate_orbit_at_times`.
+    State is immutable; every operation returns a new instance.
+    """
+
     body1: Model
     body2: Model
 
@@ -76,15 +143,13 @@ class Binary(NamedTuple):
               Binary: a binary consisting of body1 and body2
           """
           
-        triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body1)
-        points_in_circles = construct_points_in_circles(grid_points, jnp.max(body2.cast_vertex_bounding_circle_radii))
-        triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours1 = n_neighbours1 or jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
-        
-        triangle_to_gridpts, _, grid_points = construct_triangle_to_gridpts(body2)
-        points_in_circles = construct_points_in_circles(grid_points, jnp.max(body1.cast_vertex_bounding_circle_radii))
-        triangle_counts = find_triangle_counts(points_in_circles, triangle_to_gridpts)
-        n_neighbours2 = n_neighbours2 or jnp.clip(1.5*np.max(triangle_counts), 8, 64) if np.max(triangle_counts) else DEFAULT_N_NEIGHBOURS
+        # ``n_neighbours1`` is used when body2 is the occluded body (see
+        # _evaluate_orbit), so it is sized from body2's face size against body1's
+        # face density -- and vice versa.
+        if n_neighbours1 is None:
+            n_neighbours1 = _estimate_n_neighbours(body2, body1)
+        if n_neighbours2 is None:
+            n_neighbours2 = _estimate_n_neighbours(body1, body2)
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
@@ -225,7 +290,12 @@ def add_orbit(binary: Binary,
         i (float): Inclination of the orbit in radians.
         omega (float): Argument of periastron in radians.
         Omega (float): Longitude of the ascending node in radians.
-        mean_anomaly (float): Mean anomaly at reference time in radians.
+        mean_anomaly (float): Additive phase offset in radians on top of the
+            periastron timing (the orbit uses ``M(t) = mean_anomaly + n*(t - T)``).
+            Set either ``mean_anomaly`` or ``T``, not both: passing PHOEBE-style
+            values for both (where ``mean_anom`` at the reference time already
+            encodes ``T``) double-counts the periastron phase and shifts every
+            orbital event.
         reference_time (float): Reference time in years.
         vgamma (float): Systemic line-of-sight velocity in **km/s** (same units as
             PHOEBE ``vgamma@binary``). Converted to SI inside ``get_orbit_jax``.

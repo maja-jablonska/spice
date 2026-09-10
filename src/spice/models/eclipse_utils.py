@@ -1,6 +1,18 @@
 import numpy as np
 
 # ---------- Utilities ----------
+def _sky_plane_basis(los_vector):
+    # Orthonormal basis (e1, e2) spanning the plane perpendicular to the LOS,
+    # returned as a (3, 2) projection matrix.
+    los = np.asarray(los_vector, dtype=float)
+    los = los / np.linalg.norm(los)
+    trial = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(trial, los)) > 0.9:
+        trial = np.array([0.0, 1.0, 0.0])
+    e1 = trial - np.dot(trial, los) * los
+    e1 = e1 / np.linalg.norm(e1)
+    e2 = np.cross(los, e1)
+    return np.stack([e1, e2], axis=1)
 def _hermite_coeffs(p0, p1, v0, v1, h):
     # Returns coefficients for cubic Hermite: p(s)=a*s^3+b*s^2+c*s+d, s in [0,1]
     d = p0
@@ -168,6 +180,11 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
         return _brentq(func, a, b, tol=tol)
 
     for idx in br_out:
+        # Only ingress crossings (rho decreasing through Rsum) open an eclipse;
+        # egress crossings would otherwise pair with the next ingress and record
+        # a bogus "eclipse" spanning the out-of-eclipse gap.
+        if gout[idx] < gout[idx+1]:
+            continue
         a, b = Tgrid[idx], Tgrid[idx+1]
         # Find T1
         T1 = root_on(lambda x: motion.rho([x])[0] - Rsum, a, b)
@@ -209,8 +226,9 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
                     T4 = root_on(lambda x: motion.rho([x])[0] - Rsum, a2, b2)
                     break
 
-        # If no T4, treat as incomplete bracket (skip)
-        if T4 is None:
+        # If no T4 (or a degenerate window-edge bracket that resolved back to
+        # T1 within the root tolerance), treat as incomplete and skip
+        if T4 is None or T4 - T1 <= tol:
             continue
 
         # Mid-eclipse: where r·v = 0 between T1 and T4
@@ -260,3 +278,93 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
     else:
         _spice_log.info(_done)
     return eclipses
+
+
+def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
+                         tol=1e-6, sample_factor=5, want_total=True):
+    """Locate eclipses directly from a :class:`Binary` or :class:`PhoebeBinary`.
+
+    Convenience wrapper around :func:`find_eclipses`: it samples a low-resolution
+    Keplerian orbit itself from the binary's stored orbital elements and component
+    masses, projects the component positions and velocities onto the sky plane
+    (perpendicular to the line of sight), and searches that sampling for eclipses
+    using the component radii. The Hermite interpolation and root refinement in
+    :func:`find_eclipses` make a coarse sampling sufficient — the default 100
+    points per period locate contact times to high precision.
+
+    Args:
+        binary: A ``Binary`` (after :func:`~spice.models.binary.add_orbit`) or
+            ``PhoebeBinary``. Orbital elements, masses, and radii are read from it.
+        n_points (int, optional): Number of coarse orbit samples over one period.
+            Keplerian ``Binary`` only; ignored if ``times`` is given. Defaults to 100.
+        times (array_like, optional): Explicit scan window in **years** (the
+            ``add_orbit`` clock), strictly increasing. Keplerian ``Binary`` only;
+            defaults to one full period ``[0, P]``.
+        los_vector (array_like, optional): Line-of-sight vector defining the sky
+            plane. Keplerian ``Binary`` only; defaults to ``binary.body1.los_vector``
+            — the same vector used by ``add_orbit`` and the occlusion resolution,
+            so the finder agrees with what the synthesis will actually eclipse.
+        tol, sample_factor, want_total: Passed through to :func:`find_eclipses`.
+
+    Returns:
+        List of eclipse dicts (keys ``T1``, ``T2``, ``mid``, ``T3``, ``T4``,
+        ``kind``) as documented in :func:`find_eclipses`. Times are in years for
+        a ``Binary`` and in **days** for a ``PhoebeBinary`` (matching the PHOEBE
+        clock of ``evaluated_times``).
+
+    Note:
+        For a ``PhoebeBinary`` the finder scans PHOEBE's own precomputed uvw
+        orbit samples (``evaluated_times`` / ``body*_centers`` / ``body*_velocities``)
+        rather than re-solving the Kepler orbit from elements — u/v span the sky
+        plane and w is the line of sight, so the events found are exactly the ones
+        the PHOEBE meshes produce, and eclipses are only found within the
+        precomputed time window.
+    """
+    import jax.numpy as jnp
+    from spice.constants import SOLAR_RAD_M
+    from spice.models.binary import PhoebeBinary
+    from spice.models.orbit_utils import get_orbit_jax, Constants
+
+    R1 = float(binary.body1.radius)
+    R2 = float(binary.body2.radius)
+
+    if isinstance(binary, PhoebeBinary):
+        # PHOEBE uvw frame: u,v are the sky plane, w the line of sight. Positions
+        # are in solar radii, velocities in km/s, times in days — convert the
+        # velocities to solRad/day so the Hermite interpolation is consistent.
+        kms_to_solrad_per_day = 86400.0e3 / SOLAR_RAD_M
+        t = np.asarray(binary.evaluated_times, dtype=float)
+        pos1 = np.asarray(binary.body1_centers)[:, :2]
+        pos2 = np.asarray(binary.body2_centers)[:, :2]
+        vel1 = np.asarray(binary.body1_velocities)[:, :2] * kms_to_solrad_per_day
+        vel2 = np.asarray(binary.body2_velocities)[:, :2] * kms_to_solrad_per_day
+        return find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
+                             tol=tol, sample_factor=sample_factor, want_total=want_total)
+
+    if times is None:
+        times = np.linspace(0.0, float(binary.P), int(n_points))
+    else:
+        times = np.asarray(times, dtype=float)
+
+    if los_vector is None:
+        los_vector = binary.body1.los_vector
+
+    # vgamma only shifts the barycenter; the relative sky motion is unaffected,
+    # so it is left out of the coarse orbit.
+    orbit = get_orbit_jax(jnp.asarray(times), binary.body1.mass, binary.body2.mass,
+                          binary.P, binary.ecc, binary.T, binary.i, binary.omega,
+                          binary.Omega, binary.mean_anomaly, binary.reference_time,
+                          vgamma=0.0, los_vector=jnp.asarray(los_vector))
+
+    # get_orbit_jax returns positions in metres and velocities in km/s;
+    # convert to solar radii and solar radii per year to match the radii and
+    # the year-valued time grid.
+    kms_to_solrad_per_year = 1.0e3 * Constants.yr / SOLAR_RAD_M
+    basis = _sky_plane_basis(los_vector)
+    pos1 = np.asarray(orbit[2]) / SOLAR_RAD_M @ basis
+    vel1 = np.asarray(orbit[3]) * kms_to_solrad_per_year @ basis
+    pos2 = np.asarray(orbit[4]) / SOLAR_RAD_M @ basis
+    vel2 = np.asarray(orbit[5]) * kms_to_solrad_per_year @ basis
+
+    return find_eclipses(times, pos1, vel1, pos2, vel2, R1, R2,
+                         tol=tol, sample_factor=sample_factor, want_total=want_total)

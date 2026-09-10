@@ -18,6 +18,51 @@ ABUNDANCE_NAMES: List[str] = ['abundance', 'abundances',
                               'metallicity', 'metallicities']
 MU_NAMES: List[str] = ['mu', 'mus']
 
+# Emulator bundles often qualify their parameter names with the atmosphere grid
+# they were trained on -- the Aug-2026 ``RozanskiT/TPayne-spice-harps`` retrain
+# exposes ``marcs_teff`` / ``marcs_logg`` rather than ``teff`` / ``logg``.
+# Without stripping the prefix those names match nothing below, and
+# ``construct`` either raises or (if the caller silences it by passing them in
+# ``parameter_values``) bakes them in as *constants* -- silently discarding
+# PHOEBE's per-element, gravity-darkened Teff and log g, which is the whole
+# reason for importing a PHOEBE mesh in the first place.
+MODEL_GRID_PREFIXES: List[str] = ['marcs', 'atlas', 'atlas9', 'atlas12',
+                                  'phoenix', 'kurucz', 'tlusty']
+
+
+def _canonical_parameter_name(name: str) -> str:
+    """Lower-case ``name``, dropping a leading atmosphere-grid qualifier.
+
+    ``'marcs_teff' -> 'teff'``; anything without a recognised prefix is
+    returned unchanged, so unrelated names can never be collapsed onto a
+    mesh column by accident.
+    """
+    lowered = name.lower()
+    prefix, sep, rest = lowered.partition('_')
+    if sep and prefix in MODEL_GRID_PREFIXES:
+        return rest
+    return lowered
+
+
+def _stack_per_element(params, n_elements):
+    """Shape per-parameter columns into ``(n_elements, n_parameters)`` rows.
+
+    ``params`` is either a single 1-D array (the no-``parameter_names`` path,
+    just teffs) or a *list* of 1-D arrays, one per parameter, each of length
+    ``n_elements`` -- i.e. ``(n_parameters, n_elements)``.
+
+    This used to be ``np.array(params).reshape((n_elements, -1))``, but reshape
+    does not transpose: it reinterprets the flat buffer, so row 0 came out as
+    the first ``n_parameters`` *teff* values rather than element 0's
+    ``(teff, logg, feh, ...)``. Every element was then emulated at meaningless
+    parameters. Harmless only in the single-parameter case, where the two
+    layouts coincide -- which is why it survived.
+    """
+    arr = np.asarray(params)
+    if arr.ndim == 1:
+        return arr.reshape((n_elements, 1))
+    return arr.T
+
 
 class PhoebeModel(Model, namedtuple("PhoebeModel",
                                     ["time", "mass", "radius", "center",
@@ -126,11 +171,26 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
         except ValueError:
             pass
 
-        los_vector = np.array([0., 0., -1.])
+        # PHOEBE's uvw frame has +w toward the observer, and its radial velocity
+        # is -vws (verified against a PHOEBE rv dataset: rv = -126.483 km/s while
+        # the visible-area-weighted vws = +126.482). SPICE computes
+        #   los_velocities = -cast_to_los(velocities, los_vector)
+        # with velocities = -center_velocities and cast_to_los = -dot(v, los),
+        # which reduces to +dot(-center_velocities, los_vector). Choosing
+        # los_vector = +w therefore gives -vws, matching PHOEBE exactly.
+        # (With [0, 0, -1] it gave +vws -- the right magnitude, wrong sign.)
+        # Safe to differ from the MeshModel default here: for PhoebeModel the
+        # LOS is used ONLY by los_velocities -- mus, cast_vertices/centers/areas
+        # all come straight from PHOEBE, and los_z is not implemented.
+        los_vector = np.array([0., 0., 1.])
 
         mus = phoebe_config.get_mus(time, component)
 
-        lin_velocity = 2 * np.pi * radius / period / 1e5  # km/s
+        # requiv comes back in solar radii and period was converted to
+        # seconds above, so the R_sun -> cm factor is required for km/s.
+        # Without it this was 6.957e10 times too small (7.96e-11 km/s
+        # instead of 5.54 km/s for the TZ For primary).
+        lin_velocity = 2 * np.pi * radius * R_SOL_CM / period / 1e5  # km/s
 
         ones_like_centers = np.ones_like(phoebe_config.get_center_velocities(time, component))[:, 0]
         log_gs = ones_like_centers * phoebe_config.b.get_quantity('loggs', component=str(component), time=time)
@@ -143,13 +203,14 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
             parameter_values_keys = [pk.lower() for pk in parameter_values.keys()]
             if parameter_names:
                 for pl in parameter_names:
-                    if pl.lower() in TEFF_NAMES:
+                    canonical = _canonical_parameter_name(pl)
+                    if canonical in TEFF_NAMES:
                         params.append(phoebe_config.get_parameter(time, 'teffs', component=component))
-                    elif pl.lower() in LOG_G_NAMES:
+                    elif canonical in LOG_G_NAMES:
                         params.append(log_gs)
-                    elif pl.lower() in ABUNDANCE_NAMES:
+                    elif canonical in ABUNDANCE_NAMES:
                         params.append(ones_like_centers * phoebe_config.get_quantity('abun', component=component))
-                    elif pl.lower() in MU_NAMES:
+                    elif canonical in MU_NAMES:
                         params.append(phoebe_config.get_mus(time, component=component))
                     else:
                         if pl.lower() not in parameter_values_keys:
@@ -182,7 +243,7 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                                    rotation_velocity=lin_velocity,
                                    center_velocities=phoebe_config.get_center_velocities(time, component),
                                    rotation_axis=rotation_axis,
-                                   parameters=np.array(params).reshape((mus.shape[0], -1)),
+                                   parameters=_stack_per_element(params, mus.shape[0]),
                                    los_vector=los_vector,
                                    orbital_velocity=orbital_velocity
                                    )

@@ -17,17 +17,17 @@ This approach allows SPICE to accurately model stars with inhomogeneous surfaces
    - Implement rotation and pulsations for stellar mesh models
 
 2. **Spectral Synthesis**:
-   - Generate synthetic spectra using various models (e.g., Blackbody, TransformerPayne)
+   - Generate synthetic spectra using various models (e.g., Blackbody, neural-network aemu bundles)
    - Simulate observed flux for different stellar configurations with varying resolutions
    - Account for Doppler shifts in spectral calculations
 
 3. **Synthetic Photometry**:
    - Calculate monochromatic and bolometric luminosities
    - Compute magnitudes in various photometric systems (e.g., AB, ST)
-   - Support for multiple standard filters (e.g., Johnson, Bessel, Gaia)
+   - Support for multiple standard filters (e.g., Johnson-Cousins, Gaia, 2MASS)
 
 4. **Binary System Modeling**:
-   - Simulate synthetic spectra and photometric for binary star systems
+   - Simulate synthetic spectra and photometry for binary star systems
    - Account for eclipsing
 
 5. **Data Visualization**:
@@ -42,7 +42,7 @@ This approach allows SPICE to accurately model stars with inhomogeneous surfaces
    - Integration with other astronomical tools and libraries (e.g., PHOEBE, Synphot)
 
 
-The underlying spectrum model is configurable - we provide a machine-learning based spectrum emulator, `Transformer Payne <https://github.com/RozanskiT/transformer_payne>`_
+The underlying spectrum model is configurable — machine-learning emulators are consumed as ``astro-emulators-toolkit`` (aemu) bundles; see :doc:`aemu_integration`.
 
 .. note::
 
@@ -55,10 +55,23 @@ Contents
    :maxdepth: 2
 
    introduction
+   installation
+   quickstart
+   conventions
    mesh
+   spectral_synthesis
+   spectral_grids
+   custom_emulators
    binaries
-   transformer_payne_integration
+   aemu_integration
    phoebe_integration
    synthetic_photometry
    api
    troubleshooting
+
+Citation
+--------
+
+A preprint describing SPICE is available on
+`arXiv <https://arxiv.org/abs/2511.10998>`_. Please cite it if you use SPICE
+in your work.

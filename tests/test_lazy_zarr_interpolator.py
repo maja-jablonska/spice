@@ -24,6 +24,10 @@ def _load_module():
         "spice.spectrum",
         "spice.spectrum.spectrum_emulator",
         "spice.spectrum.lazy_zarr_interpolator",
+        # spice.utils is overwritten with a stub (the _LogShim below); without
+        # restoring it here the stub leaks into every later test that does
+        # ``from spice.utils import log``.
+        "spice.utils",
     ]
     missing = object()
     saved_modules = {name: sys.modules.get(name, missing) for name in target_module_names}

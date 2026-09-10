@@ -39,6 +39,48 @@ def _lazy_import_astro_emulators_toolkit():
 aemu, _apply_jax_runtime, _make_frozen_apply_runtime = _lazy_import_astro_emulators_toolkit()
 
 
+# Known-bad bundle revisions: loading one of these silently produces wrong
+# science, so refuse rather than warn. Keys are HF repo ids; values map a
+# revision hash to why it is rejected.
+REJECTED_BUNDLE_REVISIONS: Dict[str, Dict[str, str]] = {
+    "RozanskiT/TPayne-spice-harps": {
+        "bcc8a6e7f4367857132ebf0b72d1c1d4580db9c9":
+            "memorized its 250 K MARCS training grid instead of interpolating: "
+            "output is piecewise-constant in Teff with ~20% jumps at the node "
+            "midpoints (5375/5625/5875/6125 K). Superseded by revision 3df764e, "
+            "which takes marcs_teff directly and varies smoothly.",
+    },
+}
+
+
+def _reject_known_bad_revision(name: str, emulator: "aemu.Emulator") -> None:
+    """Raise if ``emulator`` was loaded from a revision known to be wrong.
+
+    ``from_pretrained`` resolves ``main`` when the hub is reachable, but on an
+    offline node it can fall back to *any* cached snapshot -- including the
+    superseded one, which stays in the cache indefinitely. The failure is silent
+    and the resulting spectra look plausible, so check explicitly.
+    """
+    # Check every rejected revision against both the requested name and the
+    # resolved path: a bundle can be loaded by repo id OR by a direct path to a
+    # cached snapshot (which carries no repo id but does carry the hash), and
+    # both routes must be blocked.
+    candidates = [str(name)]
+    for attr in ("bundle_path", "path", "local_dir", "_local_dir", "source"):
+        candidates.append(str(getattr(emulator, attr, "") or ""))
+    for repo, bad in REJECTED_BUNDLE_REVISIONS.items():
+        for revision, reason in bad.items():
+            if not any(revision in c for c in candidates):
+                continue
+            resolved = next((c for c in candidates if revision in c), str(name))
+            raise ValueError(
+                f"{repo} revision {revision[:7]} is known to be broken: {reason}\n"
+                f"Loaded from: {resolved}\n"
+                "Fetch the current revision (needs network access), or delete "
+                "that snapshot from the astro_emulators_toolkit cache."
+            )
+
+
 def _load_emulator(name: str) -> "aemu.Emulator":
     """Load an :class:`aemu.Emulator` from ``name``.
 
@@ -46,14 +88,21 @@ def _load_emulator(name: str) -> "aemu.Emulator":
     or a Hugging Face repo id (loaded with ``Emulator.from_pretrained``). The
     older code path only supported the latter, which broke when ``name`` was a
     path to a bundle produced by a local training run.
+
+    Bundle revisions listed in :data:`REJECTED_BUNDLE_REVISIONS` are refused --
+    see :func:`_reject_known_bad_revision`.
     """
     try:
         is_dir = os.path.isdir(name)
     except (TypeError, ValueError):
         is_dir = False
     if is_dir:
-        return aemu.Emulator.from_bundle(name)
-    return aemu.Emulator.from_pretrained(name)
+        emulator = aemu.Emulator.from_bundle(name)
+        _reject_known_bad_revision(name, emulator)
+        return emulator
+    emulator = aemu.Emulator.from_pretrained(name)
+    _reject_known_bad_revision(name, emulator)
+    return emulator
 
 
 def _affine_section_of_combined(combined: Any, side: str) -> Optional[Dict[str, Any]]:
@@ -259,11 +308,31 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
 
 
+# Parameter contracts a bundle must expose. The Aug-2026 TPayne-spice-harps
+# retrain renamed everything (teff -> marcs_teff etc.); the superseded revision
+# is the only one exposing the old names, and ``to_parameters`` silently fills
+# unknown names with 0.0, so a stale bundle yields a plausible-looking spectrum
+# at meaningless parameters. Check the contract as a second line of defence
+# behind the revision pin, since a local bundle dir carries no revision hash.
+REQUIRED_BUNDLE_PARAMETERS: Dict[str, str] = {
+    "RozanskiT/TPayne-spice-harps": "marcs_teff",
+}
+
+
 class PretrainedAemuSpectrumEmulator(AemuSpectrumEmulator):
     def __init__(self, name: str):
         # ``name`` may be a Hugging Face repo id or a local bundle directory.
         emulator = _load_emulator(name)
         super().__init__(emulator)
+        required = REQUIRED_BUNDLE_PARAMETERS.get(name)
+        if required is not None and required not in self.stellar_parameter_names:
+            raise ValueError(
+                f"{name} does not expose {required!r}; its parameters are "
+                f"{self.stellar_parameter_names}. This is the signature of a "
+                "superseded bundle revision (the pre-Aug-2026 TPayne-spice-harps "
+                "used 'teff'/'logg'/'[Fe/H]' with a log10 temperature and "
+                "memorized its 250 K training grid). Fetch the current revision."
+            )
 
 
 
@@ -365,6 +434,7 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
 
     Matches bundles like ``RozanskiT/TPayne-spice-small-random`` (and the
     locally-trained "new FE" Tpayne intensity bundles):
+
         * Inputs:  ``{"parameters": (B, n_p), "wavelengths": (B, n_w)}`` —
           ``wavelengths`` are **log10(Angstrom)**. The full input parameter
           channel list includes ``mu`` (the bundle is a true intensity

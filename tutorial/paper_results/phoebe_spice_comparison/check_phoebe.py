@@ -13,7 +13,7 @@ except ImportError as exc:
 import numpy as np
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
-from transformer_payne import Blackbody
+from spice.spectrum.blackbody import Blackbody
 from spice.models.binary import PhoebeBinary
 from spice.models.phoebe_utils import PhoebeConfig
 
@@ -64,7 +64,7 @@ def main(inclination, period, q, ecc, times, primary_mass):
                        ecc = b.get_parameter('ecc@binary@component').value, T = 0.,
                         i = jnp.deg2rad(b.get_parameter('incl@binary@component').value),
                         omega = b.get_parameter('per0@binary@component').value*0.017453292519943295,
-                        Omega = b.get_parameter('long_an@binary@component').value*0.0027378507871321013,
+                        Omega = b.get_parameter('long_an@binary@component').value*0.017453292519943295,
                         vgamma = b.get_parameter('vgamma').value,
                         reference_time = b.get_parameter('t0_ref@binary@component').value*0.0027378507871321013,
                         mean_anomaly = b.get_parameter('mean_anom@binary@component').value*0.017453292519943295,

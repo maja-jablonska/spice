@@ -1,0 +1,30 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N tzfor_kernel_fit
+#PBS -j oe
+# Joint Clausen b,y + 12-window HARPS fit through SynthesisKernel with gravity
+# darkening free (tzfor_kernel_fit.py), then a leave-one-window-out jackknife.
+set -uo pipefail
+: "${PYTHON_BIN:=/g/data/y89/mj8805/miniforge/envs/astro/bin/python}"
+: "${RUN_DIR:=/scratch/y89/mj8805/spice_docsexp/run}"
+: "${PYTHONPATH:=/scratch/y89/mj8805/spice_docsexp/src}"
+: "${OUT_DIR:=/scratch/y89/mj8805/tzfor_joint_out}"
+: "${EXTRA_ARGS:=--jackknife}"
+export PYTHONPATH JAX_ENABLE_X64=1 XLA_PYTHON_CLIENT_PREALLOCATE=false
+mkdir -p "${OUT_DIR}"
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+cd "${RUN_DIR}"
+"${PYTHON_BIN}" -u "${RUN_DIR}/tzfor_kernel_fit.py" \
+    --lc-meshes "${RUN_DIR}/tzfor_aemu_roche_n1200_lc6650_meshes.pkl" \
+    --spec-meshes "${RUN_DIR}/tzfor_aemu_roche_n1500_spectra_meshes.pkl" \
+    --harps "${RUN_DIR}/harps_windows_log.npz" \
+    --photometry "${RUN_DIR}/tzfor_lightcurve.csv" \
+    --out "${OUT_DIR}/kernel_fit_result${TAG:-}.pkl" ${EXTRA_ARGS}
+echo "===== DONE ====="

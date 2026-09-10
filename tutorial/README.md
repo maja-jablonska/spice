@@ -17,6 +17,7 @@ recommended but not strictly required.
 | [`custom_filter.ipynb`](custom_filter.ipynb) | Defining a custom photometric filter / passband |
 | [`synphot.ipynb`](synphot.ipynb) | Synthetic photometry via `synphot` |
 | [`solar_oscillations_physical_line.ipynb`](solar_oscillations_physical_line.ipynb) | Solar-like oscillations with the Physical Line Emulator |
+| [`aemu_harps_test.ipynb`](aemu_harps_test.ipynb) | Smoke test of the `RozanskiT/TPayne-spice-harps` aemu bundle (`[aemu]` extra) |
 
 ## Pulsation & visualization — [`pulsation/`](pulsation/)
 
@@ -28,7 +29,24 @@ recommended but not strictly required.
 
 ## Documentation examples — [`docs_examples/`](docs_examples/)
 
-Notebooks that generate figures for the documentation (`docs_imgs.ipynb`).
+Companion notebooks for the documentation pages: one notebook per page, one
+section per code snippet / figure, so every figure in the docs can be
+reproduced by running the matching notebook end-to-end.
+
+| Notebook | Documentation page | Requires |
+| --- | --- | --- |
+| [`mesh_examples.ipynb`](docs_examples/mesh_examples.ipynb) | Creating a Mesh Model | core install |
+| [`spectral_synthesis_examples.ipynb`](docs_examples/spectral_synthesis_examples.ipynb) | Spectral Synthesis | core install |
+| [`spectral_grids_examples.ipynb`](docs_examples/spectral_grids_examples.ipynb) | Spectral Grids | `[grid]` extra |
+| [`custom_emulators_examples.ipynb`](docs_examples/custom_emulators_examples.ipynb) | Custom Emulators | core install |
+| [`synthetic_photometry_examples.ipynb`](docs_examples/synthetic_photometry_examples.ipynb) | Synthetic Photometry | core install |
+| [`aemu_examples.ipynb`](docs_examples/aemu_examples.ipynb) | Machine-Learning Emulators (aemu) | `[aemu]` extra |
+| [`binaries_examples.ipynb`](docs_examples/binaries_examples.ipynb) | Binaries | `[phoebe]` extra |
+| [`phoebe_integration_examples.ipynb`](docs_examples/phoebe_integration_examples.ipynb) | PHOEBE Integration | `[phoebe]` extra |
+
+Figure sections write both light and dark variants directly into `docs/img/`
+with the filenames the docs reference. `docs_imgs.ipynb` is the legacy
+scratch notebook these supersede.
 
 ## Paper reproduction — [`paper_results/`](paper_results/)
 

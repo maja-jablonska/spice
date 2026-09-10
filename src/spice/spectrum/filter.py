@@ -22,10 +22,27 @@ except ImportError:
 def _filter_responses(wavelengths: ArrayLike,
                       sample_wavelengths: ArrayLike,
                       sample_responses: ArrayLike) -> ArrayLike:
-    return jnp.interp(wavelengths, sample_wavelengths, sample_responses)
+    # `left`/`right` must be 0: bare jnp.interp clamps to the edge values
+    # outside the tabulated range, so a passband whose curve does not go to
+    # zero at its endpoints would silently respond across the whole input grid.
+    # Most curves here start and end at 0.0 (so clamping was already a no-op),
+    # but `Bolometric` is flat 1.0 over 1-30000 A, and any wavelength outside
+    # that range was being given full transmission.
+    return jnp.interp(wavelengths, sample_wavelengths, sample_responses,
+                      left=0.0, right=0.0)
 
 
 class Filter(ABC):
+    """An astronomical passband: a transmission curve plus system zero points.
+
+    Subclass (or instantiate a subclass from ``spice.spectrum.filter``) and
+    pass to :func:`~spice.spectrum.AB_passband_luminosity`,
+    :func:`~spice.spectrum.ST_passband_luminosity`, or
+    :func:`~spice.spectrum.Vega_passband_luminosity`. ``non_photonic`` marks
+    energy-based (rather than photon-counting) responses; ``Vega_zeropoint``
+    must be set for Vega magnitudes.
+    """
+
     def __init__(self,
                  transmission_curve: Float[Array, "2 n_samples"],
                  name: Optional[str] = None,

@@ -64,13 +64,22 @@ from tqdm import tqdm
 # line of sight) are defined locally below.
 from tzfor_constants import *  # noqa: F401,F403  (literature constants + _repo_root)
 
+# Shared canonical-name -> bundle-name resolver (tutorial/paper_results/). Aemu
+# bundles rename their parameters between revisions and to_parameters silently
+# zero-fills names it does not know, so every parameter dict below goes through
+# this module instead of being handed to the emulator verbatim.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import emulator_params as ep  # noqa: E402
+
 # Wavelength grid: defaults trimmed to a HARPS metal-band window with fine
 # sampling (Δλ ~ 0.01 Å → native R ≳ 5e5 at 5500 Å) so that downstream R = 80k
 # convolution is honest for both HARPS and SPICE. Pass --wl-min/--wl-max to
 # widen for paper figures that need bluer / redder coverage.
 WL_MIN = 4800.0            # Angstrom; default wavelength grid lower edge
 WL_MAX = 6800.0            # Angstrom; default wavelength grid upper edge
-N_MESH = 5000              # icosphere subdivisions per body (spectra use finer mesh)
+N_MESH = int(os.environ.get("TZ_FOR_N_MESH", "5000"))   # icosphere subdivisions per body
+                                                       # (spectra use a finer mesh than the
+                                                       # lightcurve runs; override for smoke tests)
 
 # Keplerian orbit precomputation for add_orbit / linear interpolation at evaluate_orbit.
 # 15 points smears eclipse geometry (~2% of P fits in one interpolation segment);
@@ -165,15 +174,17 @@ def _build_binary_and_eclipses(em):
         teff=SECONDARY_TEFF, logg=SECONDARY_LOGG,
         feh=SECONDARY_FEH, vmic=SECONDARY_VMIC, afe=SECONDARY_AFE,
     )
+    print(f"Emulator parameters:         {ep.emulator_parameter_names(em)}")
+    print(f"Resolved from canonical:     {ep.resolve_names(em)}")
     body1 = IcosphereModel.construct(
         N_MESH, PRIMARY_RADIUS, PRIMARY_MASS,
-        em.to_parameters(primary_params),
+        ep.to_parameters(em, primary_params),
         em.stellar_parameter_names,
         override_log_g=False,
     )
     body2 = IcosphereModel.construct(
         N_MESH, SECONDARY_RADIUS, SECONDARY_MASS,
-        em.to_parameters(secondary_params),
+        ep.to_parameters(em, secondary_params),
         em.stellar_parameter_names,
         override_log_g=False,
     )

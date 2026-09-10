@@ -28,11 +28,15 @@ from spice.utils.dtypes import float_dtype as _float_dtype
 
 
 def _default_los_vector():
-    return jnp.array([0., 1., 0.], dtype=_float_dtype())
+    # Points observer -> star; [0, 0, -1] is the standard astronomical
+    # convention shared by PhoebeModel and the binary-orbit utilities.
+    return jnp.array([0., 0., -1.], dtype=_float_dtype())
 
 
 def _default_rotation_axis():
-    return jnp.array([0., 0., 1.], dtype=_float_dtype())
+    # Kept in the sky plane of the default LOS so that a rotating star is
+    # viewed equator-on by default (maximal Doppler signal, not pole-on).
+    return jnp.array([0., 1., 0.], dtype=_float_dtype())
 
 
 def _no_rotation_matrix():
@@ -48,6 +52,17 @@ def create_harmonics_params(n: int):
 
 
 def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLike = 0.0):
+    """Per-element log10 surface gravity in cgs (cm/s^2).
+
+    Args:
+        mass: Stellar mass in solar masses.
+        d_centers: Element centers relative to the stellar center, in solar radii.
+        rot_velocities: Element rotation speeds in km/s; the centrifugal term
+            reduces the effective gravity.
+
+    Returns:
+        log10(g) per mesh element, with g in cm/s^2.
+    """
     # g in m/s^2 (d_centers in solar radii, mass in solar masses; 274.20011... = GM_sun/R_sun^2)
     r = jnp.linalg.norm(d_centers, axis=1)
     g_mks = (274.20011165737316 * mass / jnp.power(r, 2)) - jnp.power(rot_velocities, 2) / (695700000.0 * r)
@@ -270,7 +285,7 @@ class IcosphereModel(MeshModel):
                   parameter_names: List[str],
                   max_pulsation_mode: int = DEFAULT_MAX_PULSATION_MODE_PARAMETER,
                   max_fourier_order: int = DEFAULT_FOURIER_ORDER,
-                  override_log_g: bool = True,
+                  override_log_g: bool = False,
                   log_g_index: Optional[int] = None) -> "IcosphereModel":
         """
         Constructs an IcosphereModel with specified stellar and mesh properties.
@@ -287,8 +302,11 @@ class IcosphereModel(MeshModel):
             parameter_names (List[str]): Names of the parameters, used for identifying log g parameter.
             max_pulsation_mode (int, optional): Maximum pulsation mode for the model. Defaults to a predefined value.
             max_fourier_order (int, optional): Maximum order of Fourier series for pulsation calculation. Defaults to a predefined value.
-            override_log_g (bool, optional): Whether to override the log g values based on the model's mass and centers. Defaults to True.
-            log_g_index (Optional[int], optional): Index of the log g parameter in the parameters array. Required if override_log_g is True and specific log g parameter name is not in parameter_names.
+            override_log_g (bool, optional): If False (the default), SPICE computes log g per element from the model's
+                mass and per-element radius, overwriting any log g value passed in parameters. Set to True to keep
+                explicitly passed log g values as-is; a warning is issued. Defaults to False.
+            log_g_index (Optional[int], optional): Index of the log g parameter in the parameters array. Only needed
+                when no name in parameter_names matches one of the recognized log g names (see LOG_G_NAMES).
 
         Returns:
             IcosphereModel: An instance of IcosphereModel initialized with the specified properties.
@@ -300,6 +318,16 @@ class IcosphereModel(MeshModel):
             "IcosphereModel constructed in {elapsed:.1f} s",
         ):
             vertices, faces, areas, centers = icosphere(n_vertices)
+            # The packaged icosphere pickles were dumped from a float32 session,
+            # so under jax_enable_x64 they come back float32 while every other
+            # field below is built at _float_dtype(). The mismatch is invisible
+            # until something branches on the model: get_mesh_view's lax.cond
+            # traces one branch through _add_rotation (which promotes to float64)
+            # and the other unchanged, and jax rejects the pair. Normalize here
+            # so a model's dtype never depends on how its cache was written.
+            vertices = jnp.asarray(vertices, dtype=_float_dtype())
+            areas = jnp.asarray(areas, dtype=_float_dtype())
+            centers = jnp.asarray(centers, dtype=_float_dtype())
             vertices = vertices * radius
             centers = centers * radius
 
@@ -321,15 +349,21 @@ class IcosphereModel(MeshModel):
             parameters = jnp.atleast_1d(parameters)
             if len(parameters.shape) == 1:
                 parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats=areas.shape[0], axis=0)
+            log_g_name_indices = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES]
+            if log_g_index is None and log_g_name_indices:
+                log_g_index = log_g_name_indices[0]
             if override_log_g:
-                if any([pn in parameter_names for pn in LOG_G_NAMES]):
-                    log_g_index = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES][0]
-                    parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers))
-                elif log_g_index and isinstance(log_g_index, int):
-                    parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers))
+                if log_g_index is not None:
+                    warnings.warn(
+                        "override_log_g is True: using the log g values passed in parameters as-is "
+                        "instead of computing them from the model's mass and per-element radius.")
                 else:
-                    warnings.warn(f"If override_log_g is True, either parameter_names must include one of [" + ",".join(
-                        LOG_G_NAMES) + "], or log_g_index must be passed for log g to be used in the spectrum emulator.")
+                    warnings.warn(
+                        f"override_log_g is True, but parameter_names {parameter_names} includes none of "
+                        f"[{', '.join(LOG_G_NAMES)}] and log_g_index was not passed, so there are no "
+                        "log g values to override.")
+            elif log_g_index is not None:
+                parameters = parameters.at[:, log_g_index].set(calculate_log_gs(mass, centers))
 
             harmonics_params = create_harmonics_params(max_pulsation_mode)
 

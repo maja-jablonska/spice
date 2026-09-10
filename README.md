@@ -72,7 +72,7 @@ pip install stellar-spice[grid]
 - **Blackbody radiation** for basic stellar modeling
 - **Model-atmosphere grid interpolation** from precomputed, zarr-backed grids
 - **Analytic line-profile emulators** (Gaussian and physical)
-- **Transformer-Payne** integration for ML-based spectral synthesis
+- **Neural-network emulator (aemu) bundles** for ML-based spectral synthesis
 - **Custom spectral models** via the `SpectrumEmulator` interface
 
 ### 🔍 **Synthetic Photometry**
@@ -268,7 +268,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Built with [JAX](https://github.com/google/jax) for fast, differentiable computations
 - Integrates with [PHOEBE](https://phoebe-project.org/) for binary star modeling
-- Uses [Transformer-Payne](https://github.com/tingyuansen/transformer-payne) for ML-based spectral synthesis
+- Uses [astro-emulators-toolkit](https://pypi.org/project/astro-emulators-toolkit/) bundles for ML-based spectral synthesis
 
 ---
 
