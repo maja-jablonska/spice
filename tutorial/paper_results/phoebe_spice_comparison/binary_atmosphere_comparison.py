@@ -1,28 +1,43 @@
-"""End-to-end binary light curves: SPICE + aemu against PHOEBE + each atmosphere.
+"""End-to-end binary light curves for one comparison suite.
 
 Layer 3 of ``spice_vs_phoebe_atmospheres.py`` (invoked as ``--mode binary``).
 The intensity grid in that script predicts, from single-star quantities alone,
-how much the light ratio and hence the eclipse depths should move when the
-atmosphere changes. This module checks that the predicted differences are the
-ones that actually appear once both codes build a mesh, occlude it and integrate
-over an orbit.
+how much the light ratio and hence the eclipse depths should move; this module
+checks that the predicted differences are the ones that actually appear once
+both codes build a mesh, occlude it and integrate over an orbit.
 
-Five runs per system, chosen so each pair isolates one thing:
+**Two suites, run separately, never mixed.**
 
-    PHOEBE blackbody  vs SPICE Blackbody   geometry only (both uniform discs)
-    PHOEBE ck2004     vs SPICE aemu        MARCS vs Castelli-Kurucz
-    PHOEBE phoenix    vs SPICE aemu        MARCS vs PHOENIX
-    PHOEBE ck2004     vs PHOEBE blackbody  what the atmosphere costs, in-code
-    SPICE aemu        vs SPICE Blackbody   the same, in the other code
+``--suite atmospheres``
+    SPICE's MARCS aemu bundle against PHOEBE ``ck2004`` and ``phoenix``. Both
+    sides carry their own limb darkening -- mu is an input channel of the
+    bundle, and PHOEBE uses ``ld_mode='interp'`` to read its tabulated I(mu) --
+    so the residual is radiative transfer.
 
-``distortion_method='sphere'`` on the PHOEBE side so its surface matches SPICE's
-icosphere: the whole point is to leave only the radiative transfer differing.
-The systems are well-detached, so sphericity is a small correction anyway (0.6-0.7%
-in primary depth for TZ For, measured by ``tzfor_phoebe_vs_spice.py``).
+``--suite blackbody``
+    SPICE's ``Blackbody`` emulator against PHOEBE ``atm='blackbody'``, both as
+    uniform discs. This is the control: the physics is *identical* on the two
+    sides, so whatever is left is geometry, meshing and passband integration,
+    and it sets the floor below which the atmospheres suite cannot resolve
+    anything.
 
-Cost warning: the SPICE + aemu light curve calls the intensity bundle once per
-surface element per epoch. It is by far the slowest thing here -- keep
-``--n-mesh`` and ``--n-per-eclipse`` small, or run it on a GPU node.
+Comparing the MARCS emulator against PHOEBE's blackbody would charge the
+difference between two different atmospheres to the two codes, which is why the
+suites are kept apart rather than run as a cross-product.
+
+Settings common to both suites, all chosen so that only the intended difference
+survives:
+
+    distortion_method = 'sphere'   PHOEBE's surface matches SPICE's icosphere
+    irrad_method      = 'none'     no reflection/irradiation in either code
+    gravb_bol         = 0.0        SPICE's icosphere has no gravity darkening
+    ld_*_bol          = linear, [0]  bolometric LD only feeds irradiation
+    intens_weighting  = 'energy'   matches non_photonic=True on the SPICE side
+    pblum_mode        = 'absolute' no renormalisation between the codes
+
+Cost warning: the aemu light curve calls the intensity bundle once per surface
+element per epoch and is by far the slowest thing here. The blackbody suite is
+~100x faster.
 """
 import time
 
@@ -105,6 +120,10 @@ def configure_atmosphere(b, atm):
     """
     b.set_value_all("atm", atm)
     if atm == "blackbody":
+        # The control suite. A uniform disc: ld_coeffs=[0] in the linear law
+        # means L(mu) = 1, exactly what SPICE's Blackbody emulator is (no mu
+        # dependence at all). With identical physics on both sides, any residual
+        # is geometry, meshing or passband integration.
         b.set_value_all("ld_mode", "manual")
         b.set_value_all("ld_func", "linear")
         b.set_value_all("ld_coeffs", [0.0])
@@ -119,6 +138,30 @@ def configure_atmosphere(b, atm):
     b.set_value_all("gravb_bol", 0.0)
     # Match the energy-weighted branch used on the SPICE side.
     b.set_value_all("intens_weighting", "energy")
+
+
+def realized_triangles(system, n_mesh, distortion="sphere"):
+    """How many triangles PHOEBE actually builds for a given ``ntriangles``.
+
+    ``ntriangles`` is a *target* for PHOEBE's marching-triangles algorithm, not
+    an exact count: a request of 1280 comes back as 1458. SPICE's icosphere, by
+    contrast, is exact at its subdivision levels (1280 / 5120 / 20480 = 20*4^n).
+    Recording the realized number keeps the two codes' resolutions honestly
+    labelled instead of both being called "1280".
+    """
+    import phoebe
+    phoebe.logger(clevel="ERROR")
+    b = build_bundle(system, n_mesh, distortion)
+    # ld_mode lives on lc datasets, so configure_atmosphere needs one to exist.
+    # PHOEBE rejects a leading underscore in a dataset label ("first character
+    # of label is a forbidden character"), so these cannot be named _lc / _m.
+    b.add_dataset("lc", compute_times=[0.0], passband="Johnson:V", dataset="meshprobe")
+    b.add_dataset("mesh", compute_times=[0.0], columns=["areas"], dataset="meshprobemesh")
+    configure_atmosphere(b, "blackbody")
+    b.run_compute(irrad_method="none", ltte=False)
+    return {c: int(np.asarray(b.get_value("areas", dataset="meshprobemesh",
+                                          component=c, context="model")).size)
+            for c in ("primary", "secondary")}
 
 
 def eclipse_windows(b):
@@ -166,7 +209,7 @@ def sample_times(b, n_per_eclipse):
     return times, (t1_p, t4_p, t1_s, t4_s), int(np.argmin(np.abs(times - baseline)))
 
 
-def spice_binary(b, n_mesh, emu, feh, vmicro, blackbody=False):
+def spice_binary(b, n_mesh, emu, feh, vmicro, blackbody=False, n_neighbours=None):
     """SPICE's own icosphere binary, with every element read out of the bundle.
 
     ``log_g_index`` is passed explicitly: ``IcosphereModel.construct`` only
@@ -216,7 +259,20 @@ def spice_binary(b, n_mesh, emu, feh, vmicro, blackbody=False):
     body2 = body(b.get_parameter("mass@secondary@component").value,
                  b.get_parameter("requiv@secondary@component").value,
                  b.get_parameter("teff@secondary@component").value)
-    binary = Binary.from_bodies(body1, body2)
+    # ``n_neighbours`` is how many candidate occluder faces the KD-tree search
+    # considers per occluded face. Binary.from_bodies picks it automatically as
+    # clip(1.5*max(triangle_counts), MIN_N_NEIGHBOURS, 64), but that estimate
+    # *falls* as the mesh refines (49 -> 31 -> 24 for these systems at
+    # 1280/5120/20480) and pins to the floor exactly when a finer mesh needs
+    # more neighbours, not fewer. The search is then starved and occlusion is
+    # under-counted -- measured at mid primary eclipse for cool-hot, the
+    # occluded area is 0.26% low at N=1280, 0.67% at 5120 and 0.97% at 20480,
+    # which makes the eclipse progressively too shallow and defeats a mesh
+    # convergence test. Passing an explicit value (>=48 converges here) avoids
+    # it without changing library behaviour.
+    binary = Binary.from_bodies(body1, body2,
+                                n_neighbours1=n_neighbours,
+                                n_neighbours2=n_neighbours)
     binary = add_orbit(
         binary,
         P=b.get_parameter("period@binary@component").value * DAYS_TO_YR,
@@ -292,19 +348,25 @@ def run_binary(args):
     )
 
     systems = args.systems or ["cool-hot"]
-    bands = load_passbands(BANDS)
+    suite = args.suite
+    spice_kind = "blackbody" if suite == "blackbody" else "aemu"
+    bands = load_passbands(BANDS, atms=args.atms)
     filters = {k: v["filter"] for k, v in bands.items()}
     lo = max(EMULATOR_RANGE_A[0], min(b["wl"].min() for b in bands.values()))
     hi = min(EMULATOR_RANGE_A[1], max(b["wl"].max() for b in bands.values()))
     wavelengths = jnp.asarray(np.linspace(lo, hi, args.n_wavelengths))
 
-    emu = load_emulator(args.bundle)
+    emu = load_emulator(args.bundle) if spice_kind == "aemu" else None
 
     results = {}
     for name in systems:
         system = SYSTEMS[name]
         print(f"\n=== {name}: {system} ===", flush=True)
         b0 = build_bundle(system, args.n_mesh, args.distortion)
+        realized = realized_triangles(system, args.n_mesh, args.distortion)
+        print(f"  mesh: SPICE {args.n_mesh} exact, PHOEBE {args.n_mesh} requested "
+              f"-> {realized['primary']}/{realized['secondary']} realized",
+              flush=True)
         times, edges, ref = sample_times(b0, args.n_per_eclipse)
         print(f"  {len(times)} epochs, baseline at index {ref}", flush=True)
 
@@ -332,12 +394,15 @@ def run_binary(args):
                     float(pbl[f"pblum@secondary@{_ds(band)}"].value)
                     / float(pbl[f"pblum@primary@{_ds(band)}"].value))
 
+        # Exactly one SPICE run per suite. Running both emulators and
+        # cross-comparing them against every PHOEBE atmosphere is what produced
+        # the meaningless "MARCS emulator vs blackbody" numbers; each suite now
+        # pairs its own SPICE side with its own PHOEBE side and nothing else.
         spice_dmag, spice_ratio = {}, {}
-        for label, blackbody in (("aemu", False), ("blackbody", True)):
-            if label == "blackbody" and not args.include_spice_blackbody:
-                continue
+        for label, blackbody in ((spice_kind, spice_kind == "blackbody"),):
             binary, emulator = spice_binary(b0, args.n_mesh, emu, system["feh"],
-                                            args.vmicro, blackbody=blackbody)
+                                            args.vmicro, blackbody=blackbody,
+                                            n_neighbours=getattr(args, "n_neighbours", None))
             print(f"  SPICE  {label}", flush=True)
             t0 = time.time()
             mags, per_body = spice_light_curve(
@@ -354,6 +419,9 @@ def run_binary(args):
             "phoebe_dmag": phoebe_dmag, "phoebe_ratio": phoebe_ratio,
             "spice_dmag": spice_dmag, "spice_ratio": spice_ratio,
             "n_mesh": args.n_mesh, "distortion": args.distortion,
+            "suite": suite, "spice_kind": spice_kind, "atms": list(args.atms),
+            "n_mesh_phoebe": realized,
+            "n_neighbours": getattr(args, "n_neighbours", None),
         }
     return results
 
@@ -363,6 +431,12 @@ def _ds(band):
 
 
 def report_binary(results, atms):
+    """Text report for one suite.
+
+    The SPICE column is whichever emulator this suite ran -- read off the
+    results rather than assumed -- so the blackbody control reports its own
+    Blackbody run instead of an absent 'aemu' key.
+    """
     lines = []
     add = lines.append
     for name, r in results.items():
@@ -370,52 +444,53 @@ def report_binary(results, atms):
         ref = r["baseline_index"]
         assert ref == n, f"unexpected baseline position {ref} (expected {n})"
         prim, sec = slice(0, ref), slice(ref + 1, ref + 1 + n)
+        spice_kind = r.get("spice_kind", "aemu")
+        spice_col = {"aemu": "SPICE aemu", "blackbody": "SPICE bb"}[spice_kind]
+        run_atms = [a for a in (r.get("atms") or atms)]
 
         add("=" * 92)
-        add(f"{name}: {r['system']}")
+        add(f"[{r.get('suite', '?')}] {name}: {r['system']}")
         add(f"{r['n_mesh']} mesh elements, PHOEBE distortion "
             f"'{r['distortion']}', {len(r['times'])} epochs")
         add("=" * 92)
         add("")
         add("Eclipse depths [mag]")
         add(f"  {'band':<14}{'eclipse':<11}"
-            + "".join(f"{'PH ' + a:>12}" for a in atms)
-            + f"{'SPICE aemu':>12}{'SPICE bb':>12}")
+            + "".join(f"{'PH ' + a:>13}" for a in run_atms)
+            + f"{spice_col:>13}")
         for band in BANDS:
             for label, sl in (("primary", prim), ("secondary", sec)):
                 row = f"  {band:<14}{label:<11}"
-                for a in atms:
+                for a in run_atms:
                     d = r["phoebe_dmag"].get((a, band))
-                    row += f"{np.nanmax(d[sl]) if d is not None else np.nan:>12.5f}"
-                for k in ("aemu", "blackbody"):
-                    d = r["spice_dmag"].get((k, band))
-                    row += f"{np.nanmax(d[sl]) if d is not None else np.nan:>12.5f}"
+                    row += f"{np.nanmax(d[sl]) if d is not None else np.nan:>13.5f}"
+                d = r["spice_dmag"].get((spice_kind, band))
+                row += f"{np.nanmax(d[sl]) if d is not None else np.nan:>13.5f}"
                 add(row)
         add("")
         add("Out-of-eclipse light ratio L2/L1")
-        add(f"  {'band':<14}" + "".join(f"{'PH ' + a:>12}" for a in atms)
-            + f"{'SPICE aemu':>12}{'SPICE bb':>12}")
+        add(f"  {'band':<14}" + "".join(f"{'PH ' + a:>13}" for a in run_atms)
+            + f"{spice_col:>13}")
         for band in BANDS:
             row = f"  {band:<14}"
-            for a in atms:
-                row += f"{r['phoebe_ratio'].get((a, band), np.nan):>12.5f}"
-            for k in ("aemu", "blackbody"):
-                row += f"{r['spice_ratio'].get(k, {}).get(band, np.nan):>12.5f}"
+            for a in run_atms:
+                row += f"{r['phoebe_ratio'].get((a, band), np.nan):>13.5f}"
+            row += f"{r['spice_ratio'].get(spice_kind, {}).get(band, np.nan):>13.5f}"
             add(row)
         add("")
-        add("Depth residual SPICE aemu - PHOEBE [mmag]  (rms over the window)")
-        add(f"  {'band':<14}{'eclipse':<11}" + "".join(f"{a:>12}" for a in atms))
+        add(f"Depth residual {spice_col} - PHOEBE [mmag]  (rms over the window)")
+        add(f"  {'band':<14}{'eclipse':<11}" + "".join(f"{a:>13}" for a in run_atms))
         for band in BANDS:
             for label, sl in (("primary", prim), ("secondary", sec)):
                 row = f"  {band:<14}{label:<11}"
-                s = r["spice_dmag"].get(("aemu", band))
-                for a in atms:
-                    p = r["phoebe_dmag"].get((a, band))
-                    if s is None or p is None:
-                        row += f"{np.nan:>12.3f}"
+                sp = r["spice_dmag"].get((spice_kind, band))
+                for a in run_atms:
+                    ph = r["phoebe_dmag"].get((a, band))
+                    if sp is None or ph is None:
+                        row += f"{np.nan:>13.3f}"
                     else:
-                        d = (s[sl] - p[sl]) * 1e3
-                        row += f"{np.sqrt(np.nanmean(d ** 2)):>12.3f}"
+                        d = (sp[sl] - ph[sl]) * 1e3
+                        row += f"{np.sqrt(np.nanmean(d ** 2)):>13.3f}"
                 add(row)
         add("=" * 92)
     return "\n".join(lines)

@@ -61,6 +61,31 @@ import numpy as np
 
 BUNDLE = "RozanskiT/TPayne-spice-harps"
 
+# Two independent comparison suites. They answer different questions and must
+# not be mixed: comparing SPICE's MARCS emulator against PHOEBE's blackbody
+# charges the difference between two *different atmospheres* to the codes, which
+# is meaningless. Each suite pairs like with like.
+SUITES = {
+    # Real atmospheres against real atmospheres. Both sides carry their own
+    # limb darkening (the aemu bundle has mu as an input channel; PHOEBE uses
+    # ld_mode='interp' to read its tabulated I(mu)), so what is left is the
+    # radiative transfer.
+    "atmospheres": {
+        "spice": "aemu",
+        "phoebe_atms": ["ck2004", "phoenix"],
+        "title": "SPICE MARCS emulator vs PHOEBE model atmospheres",
+    },
+    # The control: identical physics on both sides -- a Planck function with no
+    # limb darkening at all. Any residual here is geometry, meshing or passband
+    # integration, not atmosphere, so it calibrates what the suite above can
+    # possibly resolve.
+    "blackbody": {
+        "spice": "blackbody",
+        "phoebe_atms": ["blackbody"],
+        "title": "SPICE blackbody vs PHOEBE blackbody (geometry control)",
+    },
+}
+
 # The emulator's wavelength support (log10 A domain of its reference scaling).
 EMULATOR_RANGE_A = (3781.0, 6910.0)
 
@@ -103,7 +128,7 @@ def _import_phoebe():
 # Passbands
 # --------------------------------------------------------------------------
 
-def load_passbands(names=PASSBANDS):
+def load_passbands(names=PASSBANDS, atms=None):
     """PHOEBE ``Passband`` objects plus the SPICE ``Filter`` built from the same
     transmission table.
 
@@ -125,7 +150,7 @@ def load_passbands(names=PASSBANDS):
         fl = np.asarray(pb.ptf_table["fl"]).astype(np.float64)
         inside = (wl >= EMULATOR_RANGE_A[0]) & (wl <= EMULATOR_RANGE_A[1])
         covered = float(np.trapezoid(fl[inside], wl[inside]) / np.trapezoid(fl, wl))
-        atms = sorted({c.split(":")[0] for c in pb.content})
+        table_atms = sorted({c.split(":")[0] for c in pb.content})
         out[name] = {
             "passband": pb,
             "filter": Filter(jnp.array([wl, fl]), name=f"PHOEBE {name}",
@@ -133,7 +158,11 @@ def load_passbands(names=PASSBANDS):
             "wl": wl,
             "fl": fl,
             "covered_fraction": covered,
-            "atms": [a for a in ("blackbody", "ck2004", "phoenix") if a in atms],
+            # Intersect what the passband tabulates with what the suite asks
+            # for, so a suite can never silently pick up an atmosphere from the
+            # other one just because the table happens to carry it.
+            "atms": [a for a in (atms or ("blackbody", "ck2004", "phoenix"))
+                     if a in table_atms],
         }
     return out
 
@@ -142,6 +171,53 @@ def load_passbands(names=PASSBANDS):
 # SPICE side
 # --------------------------------------------------------------------------
 
+class SpiceSide:
+    """The SPICE half of one suite: an emulator plus how to build its parameters.
+
+    Wrapping both variants behind one interface keeps the grid/report code free
+    of ``if suite == ...`` branches, and makes it impossible to accidentally run
+    the emulator for one suite against the atmosphere list of the other.
+    """
+
+    def __init__(self, kind, bundle=BUNDLE):
+        self.kind = kind
+        if kind == "aemu":
+            from spice.spectrum.aemu_spectrum_emulator import (
+                IntensityPretrainedAemuSpectrumEmulator,
+            )
+            self.emulator = IntensityPretrainedAemuSpectrumEmulator(bundle)
+            self.label = f"SPICE aemu ({bundle})"
+        elif kind == "blackbody":
+            from spice.spectrum.blackbody import Blackbody
+            # No ld_law: the bare Planck function, matching PHOEBE's blackbody,
+            # which is likewise not limb darkened.
+            self.emulator = Blackbody()
+            self.label = "SPICE Blackbody"
+        else:
+            raise ValueError(f"unknown SPICE side {kind!r}")
+
+    @property
+    def intensity(self):
+        return self.emulator.intensity
+
+    def parameters(self, teff, logg, feh, vmicro):
+        if self.kind == "blackbody":
+            # Blackbody's whole contract is ['Teff']; log g and abundance have
+            # no meaning for a Planck function, so they are deliberately unused
+            # rather than silently passed to something that ignores them.
+            import jax.numpy as jnp
+            return jnp.array([float(teff)])
+        values = {"marcs_teff": float(teff), "marcs_logg": float(logg),
+                  "feh": float(feh), "vmicro": float(vmicro)}
+        missing = [k for k in values if k not in self.emulator.stellar_parameter_names]
+        if missing:
+            raise ValueError(
+                f"bundle does not expose {missing}; its parameters are "
+                f"{self.emulator.stellar_parameter_names}. Fetch the current revision."
+            )
+        return self.emulator.to_parameters(values)
+
+
 def load_emulator(bundle=BUNDLE):
     from spice.spectrum.aemu_spectrum_emulator import (
         IntensityPretrainedAemuSpectrumEmulator,
@@ -149,26 +225,7 @@ def load_emulator(bundle=BUNDLE):
     return IntensityPretrainedAemuSpectrumEmulator(bundle)
 
 
-def _spice_parameters(emu, teff, logg, feh, vmicro):
-    """Bundle parameter vector for one star.
-
-    The Aug-2026 retrain renamed everything (``teff`` -> ``marcs_teff``), and
-    ``to_parameters`` fills *unknown* names with 0.0 rather than raising -- so a
-    dict keyed on the old names yields a flat, meaningless spectrum. Assert the
-    names we set are actually in the contract.
-    """
-    values = {"marcs_teff": float(teff), "marcs_logg": float(logg),
-              "feh": float(feh), "vmicro": float(vmicro)}
-    missing = [k for k in values if k not in emu.stellar_parameter_names]
-    if missing:
-        raise ValueError(
-            f"bundle {BUNDLE} does not expose {missing}; its parameters are "
-            f"{emu.stellar_parameter_names}. Fetch the current revision."
-        )
-    return emu.to_parameters(values)
-
-
-def spice_intensity_grid(emu, log_wavelengths, params, mus):
+def spice_intensity_grid(spice, log_wavelengths, params, mus):
     """``(n_mu, n_wavelength)`` specific intensity from the emulator.
 
     ``mu`` is an input channel of this bundle, so the limb darkening comes out
@@ -178,7 +235,7 @@ def spice_intensity_grid(emu, log_wavelengths, params, mus):
     import jax
     import jax.numpy as jnp
 
-    per_mu = jax.vmap(emu.intensity, in_axes=(None, 0, None))(
+    per_mu = jax.vmap(spice.intensity, in_axes=(None, 0, None))(
         log_wavelengths, jnp.asarray(mus), params
     )
     return np.asarray(per_mu[..., 0])
@@ -315,10 +372,16 @@ def run_intensity(args, extra_points=()):
     """
     import jax.numpy as jnp
 
-    bands = load_passbands()
-    emu = load_emulator(args.bundle)
+    suite = SUITES[args.suite]
+    bands = load_passbands(atms=suite["phoebe_atms"])
+    spice = SpiceSide(suite["spice"], args.bundle)
+    print(f"suite '{args.suite}': {suite['title']}")
+    print(f"  SPICE side  : {spice.label}")
+    print(f"  PHOEBE atms : {suite['phoebe_atms']}\n")
 
-    print("Passbands (emulator covers 3781-6910 A):")
+    covers = ("emulator covers 3781-6910 A" if spice.kind == "aemu"
+              else "full passband support (Planck is analytic)")
+    print(f"Passbands ({covers}):")
     for name, b in bands.items():
         print(f"  {name:<14} {b['wl'].min():7.1f}-{b['wl'].max():7.1f} A   "
               f"in-range {b['covered_fraction'] * 100:6.2f}%   atms={b['atms']}")
@@ -327,8 +390,16 @@ def run_intensity(args, extra_points=()):
     mus = np.asarray(args.mus)
     # One wavelength grid for every band: the emulator is wavelength-conditioned
     # so a single forward pass per (parameters, mu) serves all four passbands.
-    lo = max(EMULATOR_RANGE_A[0], min(b["wl"].min() for b in bands.values()))
-    hi = min(EMULATOR_RANGE_A[1], max(b["wl"].max() for b in bands.values()))
+    #
+    # Only the aemu bundle has a restricted support (3781-6910 A). Clipping the
+    # blackbody control to it as well would drop the 0.63% of Johnson B that
+    # falls outside and show up as a 0.0004 dex "disagreement" that is really
+    # just truncation -- in a suite whose entire purpose is to measure the
+    # numerical floor. Planck is analytic everywhere, so the control integrates
+    # the full passband.
+    limit = EMULATOR_RANGE_A if spice.kind == "aemu" else (0.0, np.inf)
+    lo = max(limit[0], min(b["wl"].min() for b in bands.values()))
+    hi = min(limit[1], max(b["wl"].max() for b in bands.values()))
     wavelengths = np.linspace(lo, hi, args.n_wavelengths)
     log_wavelengths = jnp.asarray(np.log10(wavelengths))
     responses = {
@@ -348,8 +419,8 @@ def run_intensity(args, extra_points=()):
     t_start = time.time()
     for n, (teff, logg, feh) in enumerate(grid):
         t0 = time.time()
-        params = _spice_parameters(emu, teff, logg, feh, args.vmicro)
-        spice_i = spice_intensity_grid(emu, log_wavelengths, params, mus)
+        params = spice.parameters(teff, logg, feh, args.vmicro)
+        spice_i = spice_intensity_grid(spice, log_wavelengths, params, mus)
 
         for band, b in bands.items():
             spice_pb = passband_integrate(spice_i, wavelengths, responses[band])
@@ -395,6 +466,10 @@ def run_intensity(args, extra_points=()):
         "vmicro": args.vmicro,
         "bundle": args.bundle,
         "reference": REFERENCE_PARAMS,
+        "suite": args.suite,
+        "suite_title": suite["title"],
+        "spice_label": spice.label,
+        "phoebe_atms": suite["phoebe_atms"],
     }
     return result
 
@@ -437,8 +512,8 @@ def report_intensity(result):
     add = lines.append
 
     add("=" * 88)
-    add("SPICE (aemu MARCS intensity bundle) vs PHOEBE model atmospheres")
-    add(f"bundle {result['bundle']}, vmicro = {result['vmicro']} km/s")
+    add(result.get("suite_title", "SPICE vs PHOEBE"))
+    add(f"{result.get('spice_label', 'SPICE')}, vmicro = {result['vmicro']} km/s")
     add(f"response measured against Teff/logg/[M/H] = {reference}")
     add("=" * 88)
     add("")
@@ -592,6 +667,11 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", default="intensity",
                         choices=["intensity", "pairs", "binary"])
+    parser.add_argument("--suite", default="atmospheres", choices=sorted(SUITES),
+                        help="'atmospheres' compares SPICE's MARCS emulator with "
+                             "PHOEBE ck2004/phoenix; 'blackbody' is the control, "
+                             "SPICE's Blackbody against PHOEBE's, with identical "
+                             "physics on both sides")
     parser.add_argument("--bundle", default=BUNDLE)
     parser.add_argument("--teffs", type=float, nargs="+", default=DEFAULT_TEFFS)
     parser.add_argument("--loggs", type=float, nargs="+", default=DEFAULT_LOGGS)
@@ -615,9 +695,8 @@ def main():
     binary.add_argument("--systems", nargs="+", default=None,
                         help="entries of binary_atmosphere_comparison.SYSTEMS "
                              "(default: cool-hot)")
-    binary.add_argument("--atms", nargs="+",
-                        default=["blackbody", "ck2004", "phoenix"],
-                        help="PHOEBE atmospheres to run")
+    binary.add_argument("--atms", nargs="+", default=None,
+                        help="override the suite's PHOEBE atmosphere list")
     binary.add_argument("--n-mesh", type=int, default=1280,
                         help="elements for both codes (SPICE snaps to an "
                              "icosphere subdivision: 1280 / 5120 / 20480)")
@@ -635,13 +714,19 @@ def main():
                              "emulator graph is vmapped and inlined, so it "
                              "costs compile time rather than runtime; results "
                              "are invariant to it.")
+    binary.add_argument("--n-neighbours", type=int, default=None,
+                        help="occluder candidates per occluded face. Default None "
+                             "lets Binary.from_bodies choose, but its estimate "
+                             "shrinks as the mesh refines and starves the search "
+                             "(occlusion 0.97%% low at 20480 elements); pass >=48 "
+                             "for a mesh-convergence run.")
     binary.add_argument("--include-spice-blackbody", action="store_true",
                         default=True,
                         help="also run SPICE's own Blackbody emulator, giving "
                              "the in-code atmosphere cost to compare against "
                              "PHOEBE's")
-    parser.add_argument("--output", type=Path,
-                        default=Path(__file__).parent / "atmosphere_out")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="default: atmosphere_out/<suite>/")
     parser.add_argument("--verbose", action="store_true", default=True)
     args = parser.parse_args()
 
@@ -652,11 +737,18 @@ def main():
     from jax import config as jax_config
     jax_config.update("jax_enable_x64", True)
 
+    # Each suite gets its own directory: the two are separate comparisons and
+    # their pickles/reports must never overwrite each other.
+    if args.output is None:
+        args.output = Path(__file__).resolve().parent / "atmosphere_out" / args.suite
     args.output.mkdir(parents=True, exist_ok=True)
 
     if args.mode == "binary":
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from binary_atmosphere_comparison import report_binary, run_binary
+
+        if args.atms is None:
+            args.atms = list(SUITES[args.suite]["phoebe_atms"])
 
         results = run_binary(args)
         with open(args.output / "binary_light_curves.pkl", "wb") as f:
