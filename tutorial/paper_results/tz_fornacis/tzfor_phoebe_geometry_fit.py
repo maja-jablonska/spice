@@ -41,6 +41,8 @@ def main():
     ap.add_argument("--nm-maxiter", type=int, default=60); ap.add_argument("--nm-teff-maxiter", type=int, default=40)
     ap.add_argument("--free-teff1", action="store_true", help="also let Teff1 float in the Nelder-Mead")
     ap.add_argument("--skip-fit", action="store_true", help="only the chi2 comparison at the fixed geometries")
+    ap.add_argument("--scan-ratio", action="store_true", help="map PHOEBE's photometric chi2 against R2/R1 at fixed R1+R2, re-optimising Teff2 at each ratio")
+    ap.add_argument("--ratio-range", type=float, nargs=3, default=(0.450, 0.530, 17), help="min max n for the R2/R1 scan")
     ap.add_argument("--out", default=str(HERE / "tzfor_aemu_out" / "phoebe_geometry_fit.pkl"))
     args = ap.parse_args()
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
@@ -120,7 +122,7 @@ def main():
     t0_anchor = b.get_value("t0_supconj@binary@component")
     b.add_solver("optimizer.nelder_mead", solver="nmT", compute="phoebe01",
                  fit_parameters=["teff@secondary@component", "t0_supconj@binary@component"],
-                 maxiter=args.nm_teff_maxiter, progress_every_niters=20)
+                 maxiter=args.nm_teff_maxiter, progress_every_niters=0)
     for label, R1, R2, incl, T1, T2 in SPICE_SOLUTIONS:
         b.set_value("requiv@primary@component", R1); b.set_value("requiv@secondary@component", R2)
         b.set_value_all("incl@binary", incl); b.set_value("teff@primary@component", T1)
@@ -140,6 +142,31 @@ def main():
 
     result = dict(distortion=distortion, chi2_fixed=fixed, chi2_relaxed=relaxed, N=N, solutions=SPICE_SOLUTIONS, args=vars(args))
     pickle.dump(result, open(args.out, "wb"), protocol=4)
+
+    # ---- the photometric constraint on the radius RATIO, which is what the spectra moved ----
+    # The eclipse duration fixes R1 + R2, so the ratio is the free direction; Teff2 is re-optimised at
+    # every ratio because a smaller secondary is compensated by a hotter one at fixed eclipse depth.
+    if args.scan_ratio:
+        R_sum = K.PRIMARY_RADIUS + K.SECONDARY_RADIUS
+        lo, hi, nr = args.ratio_range; ratios = np.linspace(lo, hi, int(nr))
+        b.add_solver("optimizer.nelder_mead", solver="nmT2", compute="phoebe01",
+                     fit_parameters=["teff@secondary@component"], maxiter=args.nm_teff_maxiter, progress_every_niters=0)
+        b.set_value("t0_supconj@binary@component", t0_anchor); b.set_value("teff@primary@component", 4896.0)
+        scan = []
+        print(f"\nPHOEBE photometric chi2 vs R2/R1 at fixed R1+R2 = {R_sum:.3f} R_sun:", flush=True)
+        for q in ratios:
+            R1 = R_sum / (1.0 + q); R2 = R_sum - R1
+            b.set_value("requiv@primary@component", R1); b.set_value("requiv@secondary@component", R2)
+            b.set_value_all("incl@binary", K.INCL_DEG); b.set_value("teff@secondary@component", 6396.0)
+            t = time.time(); b.run_solver("nmT2", solution="nmT2_sol", overwrite=True); b.adopt_solution("nmT2_sol")
+            b.run_compute(model="scanm", overwrite=True); c = float(np.sum(b.calculate_chi2(model="scanm")))
+            T2 = float(b.get_value("teff@secondary@component"))
+            scan.append((float(q), R1, R2, T2, c))
+            print(f"  R2/R1 {q:.4f}  (R1 {R1:.3f}, R2 {R2:.3f})  Teff2 {T2:.0f}  chi2/N {c / N:.4f}  ({time.time() - t:.0f}s)", flush=True)
+            result["ratio_scan"] = np.array(scan); pickle.dump(result, open(args.out, "wb"), protocol=4)
+        A = np.array(scan); k = int(np.argmin(A[:, 4]))
+        print(f"  minimum at R2/R1 = {A[k, 0]:.4f} (literature {K.SECONDARY_RADIUS / K.PRIMARY_RADIUS:.4f}, SPICE free geometry {4.084 / 8.118:.4f})", flush=True)
+
     if args.skip_fit:
         print("saved", args.out); return
 
@@ -149,7 +176,7 @@ def main():
     fit_params = ["requiv@primary@component", "requiv@secondary@component", "incl@binary@component", "teff@secondary@component"]
     if args.free_teff1: fit_params.append("teff@primary@component")
     b.add_solver("optimizer.nelder_mead", solver="nm", compute="phoebe01", fit_parameters=fit_params,
-                 maxiter=args.nm_maxiter, progress_every_niters=5)
+                 maxiter=args.nm_maxiter, progress_every_niters=0)
     t = time.time(); b.run_solver("nm", solution="nm_sol", overwrite=True)
     print(f"\nNelder-Mead ({len(fit_params)} free): {time.time() - t:.0f}s  message: {b.get_value('message@nm_sol')}", flush=True)
     b.adopt_solution("nm_sol")

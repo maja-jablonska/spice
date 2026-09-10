@@ -163,12 +163,52 @@ def fig_degeneracy():
     fig.tight_layout(); save(fig, "tzfor_geometry_degeneracy")
 
 
+# ---------------------------------------------------------------- figure 4
+def fig_ratio_constraint():
+    """What the photometry alone says about R2/R1, against what the spectra want.
+
+    PHOEBE's chi2 (Roche meshes, ck2004) scanned over the radius ratio at fixed R1+R2 -- the direction the
+    eclipse duration leaves free -- with Teff2 re-optimised at every ratio, since a smaller secondary is
+    compensated by a hotter one at fixed eclipse depth.
+    """
+    f = AEMU / "phoebe_geometry_scan.pkl"
+    if not f.exists(): print("  (no ratio scan yet)"); return
+    d = pickle.load(open(f, "rb"))
+    if "ratio_scan" not in d: print("  (ratio scan incomplete)"); return
+    A = np.asarray(d["ratio_scan"], float); N = d["N"]
+    q, T2, c = A[:, 0], A[:, 3], A[:, 4]
+    if q.size < 4: print(f"  (ratio scan has only {q.size} points)"); return
+    c0 = c.min()
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), sharex=True)
+    ax = axes[0]
+    ax.plot(q, c - c0, "o-", color="C0", ms=5, lw=1.4, label="PHOEBE photometry (Roche, ck2004)")
+    q_lit = K.SECONDARY_RADIUS / K.PRIMARY_RADIUS; q_spice, q_delta = 4.084 / 8.118, 4.045 / 8.087
+    for x, col, lab in ((q_lit, "k", "Andersen et al. (1991)"), (q_spice, "C3", "SPICE free geometry, 5% mask"), (q_delta, "C1", "SPICE free geometry, δ map")):
+        ax.axvline(x, color=col, ls="--", lw=1.3, label=lab)
+    for lev, txt in ((1.0, "1σ"), (9.0, "3σ")):
+        ax.axhline(lev, color="0.7", lw=0.8, ls=":"); ax.text(q.min(), lev, f" Δχ²={lev:.0f} ({txt})", va="bottom", fontsize=7.5, color="0.45")
+    ax.set_yscale("symlog", linthresh=1.0); ax.set_ylim(bottom=0)
+    ax.text(0.5, 0.02, "wiggle below 0.465 is Nelder-Mead noise (~4 in χ²)", transform=ax.transAxes, ha="center", fontsize=7.5, color="0.45")
+    ax.set_xlabel("$R_2/R_1$   (at fixed $R_1+R_2$ = 12.22 $R_\odot$)"); ax.set_ylabel("Δχ² (photometry)")
+    ax.grid(alpha=0.3); ax.legend(fontsize=8, loc="upper center")
+    ax.set_title("The photometry's constraint on the radius ratio (inclination fixed)")
+    ax = axes[1]
+    ax.plot(q, T2, "o-", color="C2", ms=5, lw=1.4, label="PHOEBE's best $T_{\\rm eff,2}$ at each ratio")
+    for x, col in ((q_lit, "k"), (q_spice, "C3"), (q_delta, "C1")): ax.axvline(x, color=col, ls="--", lw=1.3)
+    ax.plot(q_spice, 6275, "D", color="C3", ms=9, label="SPICE joint fit (spectra + photometry)")
+    ax.plot(q_delta, 6211, "D", color="C1", ms=9)
+    ax.set_xlabel("$R_2/R_1$"); ax.set_ylabel("$T_{\\rm eff,2}$ [K]"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+    ax.set_title("Size and temperature trade off at fixed eclipse depth")
+    fig.tight_layout(); save(fig, "tzfor_ratio_constraint")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", nargs="*", choices=["treatments", "eclipses", "degeneracy"], default=None)
+    ap.add_argument("--only", nargs="*", choices=["treatments", "eclipses", "degeneracy", "ratio"], default=None)
     a = ap.parse_args()
-    which = a.only or ["treatments", "eclipses", "degeneracy"]
+    which = a.only or ["treatments", "eclipses", "degeneracy", "ratio"]
     print("figures:")
     if "treatments" in which: fig_treatments()
     if "eclipses" in which: fig_eclipses()
     if "degeneracy" in which: fig_degeneracy()
+    if "ratio" in which: fig_ratio_constraint()
