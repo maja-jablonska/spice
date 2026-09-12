@@ -77,6 +77,7 @@ def main():
     ap.add_argument("--delta-in", default=None, help="result pkl whose delta map is used (delta-mode fixed)")
     ap.add_argument("--jackknife-blocks", type=int, default=0)
     ap.add_argument("--dump-model", default=None, help="npz with the continuum-matched model spectra, observations, mask and light-curve model at the fitted theta (for figures)")
+    ap.add_argument("--exact-dump", action="store_true", help="build the --dump-model spectra and light curves with exact per-element synthesis (simulate_observed_flux) instead of the kernel surrogate; use with --maxiter 0")
     ap.add_argument("--noise-check", action="store_true", help="measure the float32 roundoff of the objective and compare AD with finite differences at the start point")
     ap.add_argument("--stall-retries", type=int, default=2, help="L-BFGS-B restarts from a perturbed point when a fit stalls in its first line search")
     ap.add_argument("--maxiter", type=int, default=150); ap.add_argument("--n-phot-wl", type=int, default=16000); ap.add_argument("--chunk", type=int, default=32768)
@@ -357,18 +358,72 @@ def main():
     pickle.dump(result, open(args.out, "wb"), protocol=4)
 
     # ---- model dump for figures (optional) ----
-    if args.dump_model:
+    if args.dump_model and args.exact_dump:
+        # ---- the same model, evaluated element by element instead of through the kernels ----
+        # Every element gets its own Teff (gravity darkening), the fitted vsini scale is applied to the element
+        # velocities about the orbital mean (exactly what the surrogate does to its kernels), and the result goes
+        # through the same macroturbulent broadening and continuum fit. This is the path the surrogate was
+        # validated against; here it produces the figures themselves.
+        from spice.spectrum.spectrum import simulate_observed_flux
+        assert not args.free_geometry, "exact dump is for the PHOEBE-mesh geometry"
+        thj = jnp.asarray(th)
+        vs = [th[P["vsini_scale1"]], th[P["vsini_scale2"]]] if args.free_vsini else [1.0, 1.0]
+        vm = [th[P["vmac1"]], th[P["vmac2"]]] if args.free_vmacro else list(args.vmacro0)
+        ifn = [intensity_with_delta(dlt), emu.intensity]
+
+        def exact_star(mm, s, lw, teff, feh_, scale):
+            p = jnp.asarray(mm.parameters); t_el = teff * jnp.power(10.0, args.beta * (p[:, iG] - gref[s]))
+            cv = jnp.asarray(mm.center_velocities); a = np.asarray(mm.visible_cast_areas); mu = np.asarray(mm.mus)
+            vis = (mu > 0) & (a > 0); cvm = jnp.asarray(np.average(np.asarray(cv)[vis], axis=0, weights=a[vis]))
+            mm2 = mm._replace(parameters=p.at[:, iT].set(t_el).at[:, iF].set(feh_), center_velocities=cvm + scale * (cv - cvm))
+            return simulate_observed_flux(ifn[s], mm2, lw, chunk_size=256)                       # (n, 2): line, continuum
+
+        t0_ = time.time(); F1, F2, C = [], [], []
+        for e_ in range(n_ep):
+            m1_, m2_ = SP["models"][e_]
+            o1 = exact_star(m1_, 0, lw_model, thj[P["Teff1"]], thj[P["feh"]], vs[0]); o2 = exact_star(m2_, 1, lw_model, thj[P["Teff2"]], thj[P["feh"]], vs[1])
+            F1.append(broaden(o1[None, :, 0], vm[0])[0]); F2.append(broaden(o2[None, :, 0], vm[1])[0])
+            C.append(broaden(o1[None, :, 1], vm[0])[0] + broaden(o2[None, :, 1], vm[1])[0])
+            print(f"  exact spectra: epoch {e_ + 1}/{n_ep} ({time.time() - t0_:.0f}s)", flush=True)
+        F1, F2, C = jnp.stack(F1), jnp.stack(F2), jnp.stack(C)
+        raw = (F1 + F2) / C; fixed = jax.vmap(continuum_fix)(raw, obs, good); corr = fixed / raw
+        mod, prim, sec = (np.asarray(a_) for a_ in (fixed, F1 / C * corr, F2 / C * corr))
+        # kernel surrogate at the same theta, for the record
+        F1k, F2k, Ck = spectra_parts(thj, dlt); mk = np.asarray(jax.vmap(continuum_fix)((F1k + F2k) / Ck, obs, good))
+        dk = np.abs(mod - mk)[good_np]; print(f"exact vs kernel over all fitted pixels: max {dk.max():.5f} rms {np.sqrt((dk ** 2).mean()):.6f}", flush=True)
+
+        # light curves, element by element on the PHOEBE light-curve meshes
+        t0_ = time.time(); flux = []
+        for j_, pair in enumerate(LC["models"]):
+            f_ = 0.0
+            for s in (0, 1):
+                o_ = simulate_observed_flux(emu.intensity, pair[s]._replace(parameters=jnp.asarray(pair[s].parameters).at[:, iT].set(
+                    thj[P[f"Teff{s + 1}"]] * jnp.power(10.0, args.beta * (jnp.asarray(pair[s].parameters)[:, iG] - gref[s]))).at[:, iF].set(thj[P["feh"]])), lw_ph, chunk_size=256)
+                f_ = f_ + o_[:, 0]
+            flux.append(f_)
+        flux = jnp.stack(flux); print(f"  exact light curves: {len(LC['models'])} phases ({time.time() - t0_:.0f}s)", flush=True)
+        pm = {}
+        for b, rr in resp.items():
+            mags = jax.vmap(lambda f: GI.passband_mag(f, wl_ph, rr))(flux)[order]; mags = mags - jnp.median(mags)
+            mi = jnp.interp((ph_o - thj[P["dphi"]]) % 1.0, mph, mags, period=1.0); res_ = mag_o[b] - mi; zp = jnp.median(res_); res_ = res_ - zp
+            pm[b] = (mags, mi, mag_o[b] - zp, res_)
+        pk = jax.jit(phot_model)(thj)
+        for b in pm: print(f"  exact vs kernel light curve {b}: max {1000 * float(jnp.max(jnp.abs(pm[b][0] - pk[b][0]))):.3f} mmag", flush=True)
+        lc = {}
+    elif args.dump_model:
         def _parts(t_, d_):
             F1, F2, C = spectra_parts(t_, d_); raw = (F1 + F2) / C; fixed = jax.vmap(continuum_fix)(raw, obs, good); corr = fixed / raw
             return fixed, F1 / C * corr, F2 / C * corr
         mod, prim, sec = (np.asarray(a) for a in jax.jit(_parts)(jnp.asarray(th), dlt))
         pm = jax.jit(phot_model)(jnp.asarray(th)); lc = {}
+    if args.dump_model:
         for b, (mags, mi, mo, res) in pm.items():
             lc[f"lc_{b}_model_phase"] = np.asarray(mph); lc[f"lc_{b}_model_mag"] = np.asarray(mags); lc[f"lc_{b}_obs_phase"] = np.asarray((ph_o - th[P["dphi"]]) % 1.0)
             lc[f"lc_{b}_obs_mag"] = np.asarray(mo); lc[f"lc_{b}_model_at_obs"] = np.asarray(mi); lc[f"lc_{b}_sigma"] = sig_ph[b]
         np.savez(args.dump_model, logwl=lw_obs, obs=np.where(np.isfinite(obs_np), obs_np, np.nan), model=mod, primary=prim, secondary=sec, good=good_np, masked=np.isfinite(obs_np) & ~good_np, sigma=sig_np, rv=rv, times=np.asarray(SP["times"]),
-                 fit_epochs=fit_e, theta=th, pnames=np.array(pnames), delta=(np.asarray(dlt) if args.delta else np.zeros(0)), block_edges=edges, **lc)
-        print(f"model dump: {mod.shape} spectra + {len(pm)} light curves -> {args.dump_model}", flush=True)
+                 fit_epochs=fit_e, theta=th, pnames=np.array(pnames), delta=(np.asarray(dlt) if args.delta else np.zeros(0)), block_edges=edges,
+                 synthesis=("exact per-element" if args.exact_dump else "kernel surrogate"), **lc)
+        print(f"model dump ({'exact per-element' if args.exact_dump else 'kernel surrogate'}): {mod.shape} spectra + {len(pm)} light curves -> {args.dump_model}", flush=True)
 
     # ---- residual stack -> learned mask (optional) ----
     if args.derive_mask_out:
