@@ -100,7 +100,9 @@ def fig_eclipses():
     every curve is put back on its own out-of-eclipse level before plotting.
     """
     geo = np.load(AEMU / "fr_model_maskall_geo.npz", allow_pickle=True)
-    fix = np.load(AEMU / "fr_model_maskall_hp.npz", allow_pickle=True)
+    fix_path = AEMU / "fr_model_maskall_exact.npz"                        # exact per-element synthesis when it has been run
+    if not fix_path.exists(): fix_path = AEMU / "fr_model_maskall_hp.npz"
+    fix = np.load(fix_path, allow_pickle=True)
     dphi = lambda d: float(d["theta"][list(d["pnames"]).index("dphi")])
     def curves(d, b):
         lev = float(np.min(d[f"lc_{b}_model_mag"]))                       # brightest model point = out of eclipse
