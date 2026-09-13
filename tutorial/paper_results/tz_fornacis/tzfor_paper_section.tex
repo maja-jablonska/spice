@@ -7,6 +7,10 @@
 %   tzfor_eclipses_fit_fullrange.pdf      -> figures/tz_fornacis_eclipses_fit.pdf
 % (all three from tutorial/paper_results/paper_plots/tz_fornacis/, drawn from the
 % exact per-element re-synthesis of the fitted model).
+%
+% Bibliography entries the new text needs are in tzfor_paper_section.bib; the
+% Acknowledgements and Data Availability sentences ESO requires are at the end of
+% this file.
 
 \subsection{Binary system}
 \label{sec:binary_system}
@@ -17,8 +21,12 @@ within the spectral grid used to train the emulator and for which both photometr
 and spectroscopic time series are available. Our test case is TZ Fornacis, with
 orbital parameters from \citet{tz_fornacis_orbit} listed in
 Table~\ref{tab:tz_fornacis_parameter_values}, the Str\"omgren $b$ and $y$ light
-curves of \citet{Clausen1991} (1169 epochs per band) and 21 HARPS spectra covering
-4450--6750\,\AA. Rather than synthesising a light curve at the literature
+curves of \citet{Clausen1991} (1169 epochs per band) and 21 spectra from the HARPS
+spectrograph \citep{Mayor2003} covering 4450--6750\,\AA. The spectra are the
+pipeline-reduced products of the ESO Science Archive Facility, obtained between 2009
+and 2015 under twelve programmes, eleven of them under the Araucaria large programme
+190.D-0237 whose radial velocities set the orbit of \citet{tz_fornacis_orbit}; we
+continuum-normalised them with SuppNet \citep{Rozanski2022}. Rather than synthesising a light curve at the literature
 parameters, we fit the two data sets together: the free parameters are the two
 effective temperatures, [Fe/H], a phase offset, a macroturbulent velocity and a
 rotation-velocity scale for each star, with the geometry held at the literature
@@ -123,3 +131,17 @@ parameters.
     reproduced to the scatter of the photometry with no structure in the residuals.}
     \label{fig:tz_fornacis_eclipse}
 \end{figure*}
+
+
+% ---------------------------------------------------------------------------
+% For \section*{Acknowledgements} (ESO's required form of words):
+%
+% Based on observations collected at the European Southern Observatory under ESO
+% programmes 082.D-0499, 083.D-0549, 084.D-0591, 085.C-0614, 086.D-0078,
+% 094.D-0056 and 190.D-0237, obtained from the ESO Science Archive Facility.
+%
+% For \section*{Data Availability}, add after the Clausen citation:
+%
+% The HARPS spectra of TZ Fornacis are public in the ESO Science Archive Facility
+% under the programme identifiers listed in the Acknowledgements.
+% ---------------------------------------------------------------------------
