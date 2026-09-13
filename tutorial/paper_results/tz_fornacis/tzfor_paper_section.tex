@@ -57,9 +57,12 @@ cooler than the 6650\,K of \citet{tz_fornacis_orbit}; the same conclusion follow
 from the photometry alone with either the \spice\ or the \phoebe\ atmosphere
 tables, and \phoebe's own optimiser at the same geometry returns 6393\,K. A
 line-strength correction for the emulator's giant-star line list shifts the result
-by $-75$\,K, which we quote as the dominant systematic. The full fitting
-procedure, the treatment of the emulator's line-list residuals and the tests
-of the geometry are described in a companion analysis; here the point is that
+by $-75$\,K, which we quote as the dominant systematic. Every step of the
+analysis, from the fit and its jackknife and posterior checks to the line-list
+treatments and a test with the radii and inclination free, is reproducible from the
+notebook and scripts in the repository\footnote{\texttt{tutorial/paper\_results/tz\_fornacis/}:
+\texttt{tzfor\_teff2\_revision.ipynb} walks through the analysis and
+\texttt{tzfor\_fullrange\_fit.py} performs the fit.}; here the point is that
 \spice\ turns a binary with two data sets into a gradient-based fit whose
 photometric residuals sit at the noise floor and whose spectroscopic residuals are
 limited by the emulator, not by the geometry. As a check of \spice's own
