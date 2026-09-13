@@ -1,0 +1,125 @@
+% Drop-in replacement for \subsection{Binary system} of the SPICE paper.
+% Labels are unchanged (sec:binary_system, tab:tz_fornacis_parameter_values,
+% fig:tz_fornacis_lc, fig:tz_fornacis_spectra, fig:tz_fornacis_eclipse), so
+% nothing else in the manuscript needs editing. Figures to copy into figures/:
+%   tzfor_lightcurves_fit_fullrange.pdf   -> figures/tz_fornacis_lightcurves_fit.pdf
+%   tzfor_line_grid_fitted_mgb.pdf        -> figures/tz_fornacis_line_grid_fitted.pdf
+%   tzfor_eclipses_fit_fullrange.pdf      -> figures/tz_fornacis_eclipses_fit.pdf
+% (all three from tutorial/paper_results/paper_plots/tz_fornacis/, drawn from the
+% exact per-element re-synthesis of the fitted model).
+
+\subsection{Binary system}
+\label{sec:binary_system}
+
+To test the binary-star modelling capabilities of \spice\ against real data, we
+selected a wide, fully detached eclipsing system whose component parameters fall
+within the spectral grid used to train the emulator and for which both photometric
+and spectroscopic time series are available. Our test case is TZ Fornacis, with
+orbital parameters from \citet{tz_fornacis_orbit} listed in
+Table~\ref{tab:tz_fornacis_parameter_values}, the Str\"omgren $b$ and $y$ light
+curves of \citet{Clausen1991} (1169 epochs per band) and 21 HARPS spectra covering
+4450--6750\,\AA. Rather than synthesising a light curve at the literature
+parameters, we fit the two data sets together: the free parameters are the two
+effective temperatures, [Fe/H], a phase offset, a macroturbulent velocity and a
+rotation-velocity scale for each star, with the geometry held at the literature
+values. The surfaces are \phoebe\ Roche meshes imported as described in
+Section~\ref{sec:phoebe_integration}, and the specific intensities come from the
+Transformer-based emulator of Appendix~\ref{sec:appendix_transformer_emulators}.
+Because the forward model is differentiable, the joint $\chi^2$ over
+$3\times10^{6}$ spectral pixels and 2338 photometric points and its gradient with
+respect to every parameter cost 36\,s on a single GPU, and the fit converges in
+20--30 iterations; inside the optimiser the disc integral is evaluated through a
+velocity-kernel surrogate that reproduces the per-element sum of
+Equation~\ref{eq:synthetic_flux} to $10^{-4}$, and all figures shown here are
+recomputed with the exact per-element synthesis at the fitted parameters.
+
+The fit reproduces both data sets. Figure~\ref{fig:tz_fornacis_lc} shows the
+Str\"omgren light curves with residuals of 4.8 and 4.6\,mmag, the scatter of the
+photometry itself, and Figure~\ref{fig:tz_fornacis_eclipse} zooms on the two
+eclipses. Figure~\ref{fig:tz_fornacis_spectra} shows how the blended spectrum is
+built at three orbital phases: the giant's contribution, the secondary's, and their
+sum against the observed spectrum, in the Mg\,b region where the residual is
+1.5\,per cent. The two stars separate cleanly because the K giant's narrow lines and
+the secondary's lines, broadened by its 43\,km\,s$^{-1}$ rotation, are
+distinguishable at every phase, and their line-depth dilution follows from the
+light ratio rather than being a free parameter. The fitted temperatures,
+$T_{\rm eff,1} = 4896 \pm 14$\,K and $T_{\rm eff,2} = 6396 \pm 35$\,K (block
+jackknife), agree with the literature primary but put the secondary some 250\,K
+cooler than the 6650\,K of \citet{tz_fornacis_orbit}; the same conclusion follows
+from the photometry alone with either the \spice\ or the \phoebe\ atmosphere
+tables, and \phoebe's own optimiser at the same geometry returns 6393\,K. A
+line-strength correction for the emulator's giant-star line list shifts the result
+by $-75$\,K, which we quote as the dominant systematic. The full fitting
+procedure, the treatment of the emulator's line-list residuals and the tests
+of the geometry are described in a companion analysis; here the point is that
+\spice\ turns a binary with two data sets into a gradient-based fit whose
+photometric residuals sit at the noise floor and whose spectroscopic residuals are
+limited by the emulator, not by the geometry. As a check of \spice's own
+occlusion, the light curves computed from two \spice\ icospheres on the Keplerian
+orbit agree with those from the imported \phoebe\ meshes to 0.6\,mmag at the same
+parameters.
+
+\begin{table}
+    \centering
+    \caption{Parameters of the TZ Fornacis model. Orbital elements and radii are
+    held at the values of \citet{tz_fornacis_orbit}; the temperatures are those of
+    the joint fit, with the literature values in parentheses.}
+    \begin{tabular}{ll}
+        \hline
+        \textbf{Parameter} & \textbf{Value} \\
+        \hline
+        Primary radius &  $8.28\,R_\odot$ \\
+        Primary mass & $2.06\,M_\odot$ \\
+        Primary $T_{\rm eff}$ & $4896 \pm 14$\,K \ (4930\,K) \\
+        Primary $\log g$ & 2.91 \\
+        Secondary radius &  $3.94\,R_\odot$ \\
+        Secondary mass &  $1.96\,M_\odot$ \\
+        Secondary $T_{\rm eff}$ & $6396 \pm 35$\,K \ (6650\,K) \\
+        Secondary $\log g$ & 3.35 \\
+        $[\mathrm{Fe}/\mathrm{H}]$ & $-0.18 \pm 0.01$ \\
+        Period & $75.667$\,d \\
+        Inclination & $85.68^\circ$ \\
+        Argument of periastron & $65.99^\circ$ \\
+        Longitude of the ascending node & $269.00^\circ$ \\
+        \hline
+    \end{tabular}
+    \label{tab:tz_fornacis_parameter_values}
+\end{table}
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/tz_fornacis_lightcurves_fit.pdf}
+    \caption{Str\"omgren $b$ and $y$ light curves of TZ Fornacis from \citet{Clausen1991}
+    against the joint photometric--spectroscopic fit of Section~\ref{sec:binary_system},
+    with the residuals beneath. The model is the exact per-element synthesis at the
+    fitted parameters through the imported \phoebe\ meshes; the residual scatter of
+    4.8 and 4.6\,mmag is that of the photometry.}
+    \label{fig:tz_fornacis_lc}
+\end{figure*}
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\linewidth]{figures/tz_fornacis_line_grid_fitted.pdf}
+    \caption{How the blended spectrum of TZ Fornacis is built, at the joint fit of
+    Section~\ref{sec:binary_system}, in the Mg\,b region. Columns are three orbital
+    phases along the radial-velocity cycle: maximum separation with the giant
+    receding, near conjunction with the two line systems blended, and maximum
+    separation with the giant approaching; the sketches show the configuration, with
+    separations to scale and the discs enlarged. Rows are the giant's contribution,
+    the secondary's contribution, and their sum against the HARPS spectrum with the
+    residual. Dotted lines mark the rest wavelength 5192.34\,\AA\ as each star places
+    it. The secondary's lines are broadened by its 43\,km\,s$^{-1}$ rotation; the
+    giant's are not.}
+    \label{fig:tz_fornacis_spectra}
+\end{figure*}
+
+\begin{figure*}
+    \centering
+    \includegraphics[width=\textwidth]{figures/tz_fornacis_eclipses_fit.pdf}
+    \caption{The two eclipses of TZ Fornacis in Str\"omgren $b$ and $y$, the same
+    model and data as Figure~\ref{fig:tz_fornacis_lc}, over the phases at which the
+    model was evaluated. The deeper eclipse is the secondary passing behind the
+    giant, the shallower its transit; ingress, egress and the eclipse bottom are
+    reproduced to the scatter of the photometry with no structure in the residuals.}
+    \label{fig:tz_fornacis_eclipse}
+\end{figure*}
