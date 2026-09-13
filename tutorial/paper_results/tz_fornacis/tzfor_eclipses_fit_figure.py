@@ -1,8 +1,9 @@
 """Zoom on the two eclipses for the joint-fit light-curve figure of notebook section 7.
 
 Same model and data as ``tzfor_lightcurves_fit`` (the 12-window joint fit, ``paper_models.npz``
-from ``tzfor_paper_models.py``), shown only within ±0.03 in phase of each eclipse so the ingress,
-egress and bottom can be judged against Clausen's points, with the residuals underneath.
+from ``tzfor_paper_models.py``), shown only over the phases where the model was evaluated (the mesh phases cluster on the
+eclipses) so the ingress, egress and bottom can be judged against Clausen's points, with the
+residuals underneath.
 
 ``--dump`` accepts any dump with ``lc_*`` arrays: the 12-window ones store the model on its own
 phase frame plus ``dphi``; the full-range ones (``fr_model_*.npz``) store per-band arrays and
@@ -41,7 +42,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dump", default=str(HERE / "tzfor_aemu_out" / "paper_models.npz"))
     ap.add_argument("--out", default="tzfor_eclipses_fit"); ap.add_argument("--out-dir", default=str(HERE.parent / "paper_plots" / "tz_fornacis"))
-    ap.add_argument("--half-width", type=float, default=0.03, help="phase half-width of each zoom")
+    ap.add_argument("--half-width", type=float, default=0.03, help="phase half-width within which the model's eclipse samples are collected")
+    ap.add_argument("--pad", type=float, default=0.0005, help="phase margin added beyond the model's coverage")
     args = ap.parse_args()
     curves, label = load_curves(args.dump)
     near = lambda ph, c: np.abs(((ph - c + 0.5) % 1.0) - 0.5) < args.half_width
@@ -52,7 +54,11 @@ def main():
         lev = float(np.min(mm)); mm, om = mm - lev, om - lev            # brightest model point = out of eclipse = zero
         for j, (title, centre) in enumerate(ECLIPSES):
             top, bot = axes[2 * r, j], axes[2 * r + 1, j]
-            so, sm = near(op, centre), near(mp, centre); o = np.argsort(mp[sm])
+            sm = near(mp, centre); o = np.argsort(mp[sm])
+            # show only where the model has eclipse samples: the dump evaluates the model on the mesh phases,
+            # which cluster on the eclipses, so data beyond that span would have no model beneath them
+            lo, hi = float(mp[sm].min()) - args.pad, float(mp[sm].max()) + args.pad
+            so = (op >= lo) & (op <= hi)
             top.plot(op[so], om[so], ".", color="0.35", ms=4, zorder=1, label=f"Clausen {b}")
             top.plot(mp[sm][o], mm[sm][o], "-", color="C3", lw=1.6, zorder=2, label=f"{label} model")
             top.invert_yaxis(); top.grid(alpha=0.3); top.set_ylabel(f"Δ{b} [mag]")
@@ -63,7 +69,7 @@ def main():
             bot.set_ylim(-22, 22); bot.grid(alpha=0.3); bot.set_ylabel("O−C [mmag]")
             bot.text(0.02, 0.8, f"rms {np.sqrt(np.mean(oc ** 2)):.1f} mmag, {so.sum()} points", transform=bot.transAxes, fontsize=9)
             if r == 1: bot.set_xlabel("phase from $T_P$")
-            top.set_xlim(centre - args.half_width, centre + args.half_width); bot.set_xlim(top.get_xlim())
+            top.set_xlim(lo, hi); bot.set_xlim(lo, hi)
     fig.suptitle(f"TZ For eclipses: Clausen photometry against the {label} model", y=0.995)
     fig.tight_layout()
     out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
