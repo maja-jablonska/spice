@@ -1,0 +1,17 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=09:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N ai-lit3-dcep
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+[ -d $P3 ] || { echo "phase-3 bundle missing: $P3"; exit 1; }
+# delta Cep Luck literature model, full (uncapped) Luck vmicro, default Teff curve, with the phase-3 bundle (cf. phase 1: phot 1.71).
+SPICE_HARPS_BUNDLE=$P3 $PY -u $DC_PY $DC_ARGS --bundle $P3 --out $OUTD/dcep_lit_luck_lg_fullvt_p3.pkl

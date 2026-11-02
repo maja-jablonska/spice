@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N tz-geomfit
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=4
+#PBS -l mem=32GB
+#PBS -l walltime=12:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+#PBS -m ae
+# Step 1: PHOEBE's best geometry (R1, R2, incl; dphi profiled) for TZ For at Gallenne 2016 parameters, phoenix and ck2004
+# atmospheres in parallel, with the paper's light-curve scoring. Smoke first. CPU only; no PBS commands.
+set -uo pipefail
+export PHOEBE_ENABLE_ONLINE_PASSBANDS=FALSE OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 JAX_PLATFORMS=cpu
+export PYTHONPATH=/scratch/y89/mj8805/spice_v2/src TZFOR_DIR=/scratch/y89/mj8805/litrepro/tzfor
+PY=/g/data/y89/mj8805/miniforge/envs/phoebe/bin/python; G=/scratch/y89/mj8805/litrepro/geomfit
+CSV=/scratch/y89/mj8805/tzfor_v2b/run/tzfor_lightcurve.csv
+$PY -u $G/tzfor_phoebe_geom_fit.py --atm phoenix --n-mesh 1000 --maxfev 2 --photometry $CSV --out $G/geomfit_smoke.json || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+$PY -u $G/tzfor_phoebe_geom_fit.py --atm phoenix --photometry $CSV --out $G/geomfit_phoenix.json > $G/geomfit_phoenix.log 2>&1 & p1=$!
+$PY -u $G/tzfor_phoebe_geom_fit.py --atm ck2004 --photometry $CSV --out $G/geomfit_ck2004.json > $G/geomfit_ck2004.log 2>&1 & p2=$!
+rc=0; wait $p1 || rc=1; wait $p2 || true
+grep -h "^BEST" $G/geomfit_phoenix.log $G/geomfit_ck2004.log
+exit $rc

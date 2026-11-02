@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -N ai-lit9-fitphot
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=1
+#PBS -l mem=8GB
+#PBS -l walltime=00:30:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# TZ For free fit (ai-fit-tz-p3) photometry rescored like the lit9 literature models (fitted dphi, no / out-of-eclipse
+# nightly zero points). CPU only; no PBS commands.
+set -uo pipefail
+O=/scratch/y89/mj8805/litrepro/interp/out; PY=/g/data/y89/mj8805/miniforge/envs/phoebe/bin/python
+CSV=/scratch/y89/mj8805/tzfor_v2b/run/tzfor_lightcurve.csv
+for n in none out-of-eclipse; do $PY -u /scratch/y89/mj8805/exactfit/tzfor/tzfor_phot_rescore.py --dump $O/tzfor_fit_p3_nomask.npz --csv $CSV --nightly $n --json $O/tzfor_fit_p3_nomask_phot_$n.json; done | tee $O/tzfor_fit_p3_nomask_phot.txt

@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -N ai-tz-acf
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=4
+#PBS -l mem=64GB
+#PBS -l walltime=01:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# Correlation length L of the TZ For spectral residuals at the previous full-fit optimum (vt fixed, unit weights) and the
+# implied weight spec_scale = chi2nu_phot / (chi2nu_spec * L); writes out/tz_spec_scale.txt for the fits that depend on it.
+# CPU; no PBS commands.
+set -uo pipefail
+PY=/g/data/y89/mj8805/miniforge/envs/phoebe/bin/python; I=/scratch/y89/mj8805/litrepro/interp; O=$I/out
+$PY -u $I/tzfor_residual_acf.py $O/tzfor_fit_p3_nomask.npz 0.845 $O/tz_acf.json 200 | tee $O/tz_acf.log
+S=$(grep "^SPEC_SCALE" $O/tz_acf.log | awk '{print $2}')
+[ -n "$S" ] || { echo "no SPEC_SCALE"; exit 1; }
+echo "$S" > $O/tz_spec_scale.txt; echo "wrote $O/tz_spec_scale.txt: $S"

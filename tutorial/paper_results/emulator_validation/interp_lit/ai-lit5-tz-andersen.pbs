@@ -1,0 +1,27 @@
+#!/bin/bash
+#PBS -N ai-lit5-tz-gspec
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=gdata/y89+scratch/y89+scratch/mk27
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+# TZ For exact forward model with the phase-3 emulator (Andersen 1991 dropped by the user: too old):
+#  gallenne_spec = Gallenne et al. 2016 Table 2 as published: Teff 4930 / 6650 K (spectroscopic Teff2, not the
+#                  adopted H-band 6350), [Fe/H] +0.02 / -0.05, vt 0.98 / 3.10, v sin i 6.1 / 45.7 km/s
+# Geometry: Gallenne et al. 2016.
+# Not published, unchanged: vmacro 5 / 6, C/N/O 0, beta 0.079. No PBS commands inside the job.
+TZ_PY=/scratch/y89/mj8805/exactfit/tzfor/tzfor_fullrange_fit.py
+TZ_BASE=${TZ_ARGS%--set*}
+GSP="--set Teff1=4930 Teff2=6650 feh=0.02 dphi=0 --feh-secondary -0.05 --vmicro 0.98 3.10 --vsini 6.1 45.7"
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_BASE $GSP --n-epochs 1 --n-lc-epochs 3 --out $OUTD/tzfor_lit_exact_p3_gallenne_spec_smoke.pkl \
+    || { echo "LIT5 SMOKE FAIL"; exit 1; }
+echo "LIT5 SMOKE PASS"
+rc=0
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_BASE $GSP --out $OUTD/tzfor_lit_exact_p3_gallenne_spec.pkl --dump-model $OUTD/tzfor_lit_exact_p3_gallenne_spec.npz || rc=1
+exit $rc

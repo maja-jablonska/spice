@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=09:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N ai-dcep-fullvt-v2b
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+# delta Cep Luck (2018) literature model with the FULL Luck vmicro curve (no cap any more: the 3.4 km/s --vmicro-cap that kept v2b
+# below its t02 -> t05 step). Same command as dc_lit_luck_lg otherwise.
+[ -d $V2B ] || { echo "bundle missing: $V2B"; exit 1; }
+SPICE_HARPS_BUNDLE=$V2B $PY -u $DC_PY $DC_ARGS  --bundle $V2B --out $OUTD/dcep_lit_luck_lg_fullvt_v2b.pkl

@@ -1,0 +1,43 @@
+#!/bin/bash
+#PBS -N tz-port-mesh
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=4
+#PBS -l mem=48GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# PHOEBE literature model of TZ For exported as SPICE meshes WITH PHOEBE's own per-element Teff (for --mesh-teff): Gallenne
+# et al. 2016 Teff 4930 / 6350 K, their light-curve geometry (R 8.34 / 3.97 Rsun, i 85.68), rotation v sin i / sin i
+# (6.12 / 45.83 km/s: Roche + rotational flattening of both stars), Lucy gravity darkening (gravb 0.32), Horvat irradiation.
+# Nothing fitted. Also reports how much PHOEBE's irradiation changes the element temperatures. CPU only; no PBS commands.
+set -uo pipefail
+export PHOEBE_ENABLE_ONLINE_PASSBANDS=FALSE OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 JAX_PLATFORMS=cpu
+export PYTHONPATH=/scratch/y89/mj8805/spice_v2/src
+export TZ_FOR_PRIMARY_RADIUS=8.34 TZ_FOR_SECONDARY_RADIUS=3.97 TZ_FOR_INCL_DEG=85.68 TZ_FOR_PRIMARY_VROT_KMS=6.12 TZ_FOR_SECONDARY_VROT_KMS=45.83
+export TZ_FOR_PRIMARY_TEFF=4930 TZ_FOR_SECONDARY_TEFF=6350
+PY=/g/data/y89/mj8805/miniforge/envs/phoebe/bin/python; G=/scratch/y89/mj8805/litrepro/pure; T=/scratch/y89/mj8805/litrepro/tzfor
+OLD_SP=/scratch/y89/mj8805/tzfor_v2b/run/tzfor_aemu_roche_n1500_spectra_meshes.pkl; OLD_LC=/scratch/y89/mj8805/tzfor_v2b/run/tzfor_aemu_roche_n1200_lc6650_meshes.pkl
+cd $T
+$PY -u - <<'PYEOF'
+# irradiation and the Teff map: one phase near each conjunction, horvat vs none
+import numpy as np, tzfor_constants as K
+from tzfor_phoebe_aemu_photometry import build_bundle
+print(f"constants: R {K.PRIMARY_RADIUS}/{K.SECONDARY_RADIUS} i {K.INCL_DEG} vrot {K.PRIMARY_VROT_KMS}/{K.SECONDARY_VROT_KMS} Teff {K.PRIMARY_TEFF}/{K.SECONDARY_TEFF}")
+out = {}
+for irr in (True, False):
+    b = build_bundle(1500, "roche", gravity_darkening=True, irradiation=irr)
+    t = K.T_P_HJD + np.array([0.25, 0.75]) * K.PERIOD_DAYS
+    b.add_dataset("mesh", compute_times=t, columns=["teffs"], dataset="m01")
+    b.run_compute(irrad_method="horvat" if irr else "none", ltte=False, model="phmodel")
+    out[irr] = {c: [np.asarray(b.get_value(qualifier="teffs", component=c, time=tt, model="phmodel")) for tt in t] for c in ("primary", "secondary")}
+for c in ("primary", "secondary"):
+    for j in range(2):
+        d = out[True][c][j] - out[False][c][j]
+        print(f"  {c} t{j}: Teff {out[True][c][j].min():.1f}-{out[True][c][j].max():.1f} K; irradiation changes Teff by {d.min():+.2f}..{d.max():+.2f} K")
+PYEOF
+$PY -u tzfor_phoebe_aemu_photometry.py --mode export-spectra --n-mesh 1500 --names-from $OLD_SP --times-from $OLD_SP \
+    --meshes $G/tzfor_phoebe_lit_n1500_spectra_meshes.pkl || exit 1
+$PY -u tzfor_phoebe_aemu_photometry.py --mode export-lc --n-mesh 1200 --teff2 6350 --n-per-eclipse 40 --n-out 12 --names-from $OLD_LC \
+    --meshes $G/tzfor_phoebe_lit_n1200_lc_meshes.pkl || exit 1
+ls -la $G/tzfor_phoebe_lit_*.pkl

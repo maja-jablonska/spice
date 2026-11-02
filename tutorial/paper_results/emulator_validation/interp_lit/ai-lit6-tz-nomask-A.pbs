@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N ai-lit6-tz-nmA
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=gdata/y89+scratch/y89+scratch/mk27
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+# TZ For literature models, phase 3, NO residual mask: our fitted [Fe/H] -0.30 (reference) and Gallenne 2016 adopted (vmacro 5/6). No PBS commands inside.
+TZ_PY=/scratch/y89/mj8805/exactfit/tzfor/tzfor_fullrange_fit.py
+TZ_BASE=${TZ_ARGS%--set*}
+TZ_NM=$(echo "$TZ_BASE" | sed "s/--mask-in [^ ]*//")      # NO residual mask: the old mask came from our own fit
+[ "$TZ_NM" != "$TZ_BASE" ] || { echo "mask flag not found in TZ_ARGS"; exit 1; }
+FIT="--set Teff1=4930 Teff2=6350 feh=-0.30 dphi=0"
+GAL="--set Teff1=4930 Teff2=6350 feh=0.02 dphi=0 --feh-secondary -0.05 --vmicro 0.98 3.10 --vsini 6.1 45.7"
+GSP="--set Teff1=4930 Teff2=6650 feh=0.02 dphi=0 --feh-secondary -0.05 --vmicro 0.98 3.10 --vsini 6.1 45.7"
+V0="--vmacro0 0 0"   # Gallenne v sin i come from broadening functions, which already include macroturbulence
+run() { SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_NM "${@:2}" --out $OUTD/tzfor_lit_nomask_p3_$1.pkl --dump-model $OUTD/tzfor_lit_nomask_p3_$1.npz; }
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_NM $GAL $V0 --n-epochs 1 --n-lc-epochs 3 --out $OUTD/tzfor_lit_nomask_smoke_$PBS_JOBID.pkl || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+rc=0
+run fitted $FIT || rc=1
+run gallenne $GAL || rc=1
+exit $rc

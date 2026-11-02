@@ -1,0 +1,31 @@
+#!/bin/bash
+#PBS -N tz-geomfit-lit
+#PBS -P y89
+#PBS -q gpuvolta
+#PBS -l ncpus=12
+#PBS -l ngpus=1
+#PBS -l mem=96GB
+#PBS -l walltime=12:00:00
+#PBS -l storage=gdata/y89+scratch/y89+scratch/mk27
+#PBS -j oe
+#PBS -m ae
+# Step 3: the TZ For literature model (Gallenne 2016 unchanged; per-star gamma; no nightly zero points) on PHOEBE's
+# best-fit geometry imported into SPICE (step 2 meshes); dphi = PHOEBE's best photometric-ephemeris offset.
+# Literal (no macroturbulence) and with 5/6 km/s. Smoke first. No PBS commands.
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+G=/scratch/y89/mj8805/litrepro/geomfit; DPHI=$(cat $G/geomfit_dphi.txt)
+TZ_PY=/scratch/y89/mj8805/exactfit/tzfor/tzfor_fullrange_fit.py
+TZ_BASE=${TZ_ARGS%--set*}
+TZ_NM=$(echo "$TZ_BASE" | sed "s/--mask-in [^ ]*//")
+[ "$TZ_NM" != "$TZ_BASE" ] || { echo "mask flag not found in TZ_ARGS"; exit 1; }
+MESH="--spec-meshes $G/tzfor_geomfit_roche_n1500_spectra_meshes.pkl --lc-meshes $G/tzfor_geomfit_roche_n1200_lc_meshes.pkl"
+GAL="--set Teff1=4930 Teff2=6350 feh=0.02 dphi=$DPHI --feh-secondary -0.05 --vmicro 0.98 3.10 --vsini 6.1 45.7 --gamma-components --phot-nightly-sigma 0 $MESH"
+run() { SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_NM "${@:2}" --out $OUTD/tzfor_geomfit_p3_$1.pkl --dump-model $OUTD/tzfor_geomfit_p3_$1.npz; }
+nvidia-smi -L; echo "dphi $DPHI"
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_NM $GAL --vmacro0 0 0 --n-epochs 1 --n-lc-epochs 3 --out $OUTD/tzfor_geomfit_smoke_$PBS_JOBID.pkl || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+rc=0
+run lit $GAL --vmacro0 0 0 || rc=1
+run vmac $GAL || rc=1
+exit $rc

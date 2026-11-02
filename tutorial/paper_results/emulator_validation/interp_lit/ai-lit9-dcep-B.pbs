@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N ai-lit9-dcep-B
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=12:00:00
+#PBS -l storage=gdata/y89+scratch/y89+scratch/mk27
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+# delta Cep literature models (DC_ARGS: VT only, vrot 0, Luck Vb order 4, G23, E(B-V) 0.092, d 279.5 pc, Luck log g / vt / CNO)
+# with Luck's total broadening corrected for his instrument: the Sandiford R = 60000 FWHM (5.0 km/s) removed in quadrature
+# (--vmacro-instr-r 60000). Trahin 2021 and Luck 2018 Teff curves; [Fe/H] --feh -0.12. Smoke first. No PBS commands inside.
+[ -d $P3 ] || { echo "bundle missing: $P3"; exit 1; }
+I="--vmacro-instr-r 60000 --feh -0.12"
+SPICE_HARPS_BUNDLE=$P3 $PY -u $DC_PY $DC_ARGS $I --bundle $P3 --n-spec-epochs 3 --windows 5160 6700 --n-phases 6 --out $OUTD/dc_lit9_smoke_$PBS_JOBID.pkl || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+rc=0
+SPICE_HARPS_BUNDLE=$P3 $PY -u $DC_PY $DC_ARGS $I --teff-curve /scratch/y89/mj8805/exactfit/dcep/literature/dcep_trahin2021_teff_curve.txt --bundle $P3 --out $OUTD/dcep_lit9_trahin_fehm02_p3.pkl || rc=1
+SPICE_HARPS_BUNDLE=$P3 $PY -u $DC_PY $DC_ARGS $I --teff-curve /scratch/y89/mj8805/exactfit/dcep/literature/dcep_luck2018_table6.txt --bundle $P3 --out $OUTD/dcep_lit9_luck_fehm02_p3.pkl || rc=1
+exit $rc

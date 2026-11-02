@@ -1,0 +1,23 @@
+#!/bin/bash
+#PBS -N pure-sum
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=1
+#PBS -l mem=8GB
+#PBS -l walltime=00:30:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# Summary of the pure literature models (TZ For + delta Cep) and PHOEBE at the same TZ For light-curve geometry, all
+# phased with Andersen et al. 1991's ephemeris, no nightly zero points. CPU only; no PBS commands.
+set -uo pipefail
+G=/scratch/y89/mj8805/litrepro/pure; I=/scratch/y89/mj8805/litrepro/interp; O=$I/out; PH=/scratch/y89/mj8805/litrepro/phoebe/out
+PY=/g/data/y89/mj8805/miniforge/envs/phoebe/bin/python; CSV=/scratch/y89/mj8805/tzfor_v2b/run/tzfor_lightcurve.csv
+R=/scratch/y89/mj8805/exactfit/tzfor/tzfor_phot_rescore.py; EPH="--ephemeris 2445032.6091 75.66675 --dphi 0 --nightly none"
+{ echo "=== TZ For pure"; for f in $(ls -t $G/tz-pure.o* 2>/dev/null | head -1); do grep -E "SMOKE|photometry phased|per-star|^exact model|model dump" $f; done
+  for m in pure pure_cont; do [ -f $O/tzfor_pure_p3_$m.npz ] && $PY -u $R --dump $O/tzfor_pure_p3_$m.npz --csv $CSV $EPH; done
+  echo "=== PHOEBE (light-curve radii 8.34/3.97, secondary 45.8 km/s; Gallenne interferometric radii for comparison)"
+  $PY -u $R --dump $O/tzfor_lit_nomask_p3_gallenne.npz --csv $CSV --dphi -0.00046 --nightly none --phoebe $PH/phoebe_gallenne_lcR.npz $PH/phoebe_gallenne_lcR_ph.npz $PH/phoebe_gallenne_lcR_noirr.npz $PH/phoebe_gallenne_ck2004_horvat.npz $PH/phoebe_gallenne_phoenix_horvat.npz
+  echo "=== delta Cep pure"; for f in $(ls -t $G/dcep-pure-*.o* 2>/dev/null); do tr "\r" "\n" < $f | grep -E "SMOKE|^Teff\(phase\)|HARPS-N:|systemic|exact-all spectra|exact-all photometry|residual dv"; done
+  $PY -u $I/dcep_vt_level.py $O/dcep_pure_*_p3.pkl
+} > $G/pure_summary.txt 2>&1
+cat $G/pure_summary.txt

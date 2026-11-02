@@ -1,0 +1,20 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=01:30:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -N ai-lit-smoke
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+# Smoke with the 11-input PILOT bundle: emulator scan (reduced) + the smoke versions of both literature models. All must pass.
+rc=0
+$PY -u $SCAN --bundle v2b=$V2B --bundle pilot=$PILOT --n-wl 2000 --out $OUTD/scan_smoke || rc=1
+SPICE_HARPS_BUNDLE=$PILOT $PY -u $TZ_PY $TZ_ARGS --n-epochs 1 --n-lc-epochs 3 --out $OUTD/tz_smoke.pkl --dump-model $OUTD/tz_smoke.npz || rc=1
+SPICE_HARPS_BUNDLE=$PILOT $PY -u $DC_PY $DC_ARGS --bundle $PILOT --n-spec-epochs 3 --windows 5160 6700 --n-phases 6 --out $OUTD/dc_smoke.pkl || rc=1
+[ $rc -eq 0 ] && echo "LIT SMOKE PASS" || echo "LIT SMOKE FAIL"; exit $rc

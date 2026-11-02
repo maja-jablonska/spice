@@ -392,6 +392,15 @@ def lightcurve_times(b, n_ecl, n_out):
                                    np.linspace(e[2], e[3], n_ecl), out]))
 
 
+def _parameter_names(args):
+    """Emulator parameter names for the mesh rows: from --names-from (an existing mesh pickle) or the emulator bundle."""
+    if args.names_from:
+        with open(args.names_from, "rb") as f:
+            return list(pickle.load(f)["parameter_names"])
+    from spice.spectrum.aemu_spectrum_emulator import IntensityPretrainedAemuSpectrumEmulator
+    return IntensityPretrainedAemuSpectrumEmulator(BUNDLE).stellar_parameter_names
+
+
 def report_teff_spread(teff_spread):
     """Guard the reason for importing a PHOEBE mesh at all.
 
@@ -443,6 +452,10 @@ def main():
     ap.add_argument("--no-gravity-darkening", action="store_true")
     ap.add_argument("--no-irradiation", action="store_true")
     ap.add_argument("--output", default=str(Path(__file__).parent / "tzfor_aemu_out"))
+    ap.add_argument("--names-from", default=None, help="take the emulator parameter names from this existing mesh pickle "
+                    "(no emulator bundle needed: the export then runs in a PHOEBE-only environment)")
+    ap.add_argument("--times-from", default=None, help="export-spectra: take the epochs from this existing spectra-mesh pickle "
+                    "instead of the HARPS ADP files")
     args = ap.parse_args()
 
     os.environ.setdefault("JAX_PLATFORMS", "cpu")
@@ -462,9 +475,7 @@ def main():
 
     # ---- hybrid light curve vs the OBSERVED photometry ---------------------
     if args.mode == "export-lc":
-        from spice.spectrum.aemu_spectrum_emulator import (
-            IntensityPretrainedAemuSpectrumEmulator)
-        names = IntensityPretrainedAemuSpectrumEmulator(BUNDLE).stellar_parameter_names
+        names = _parameter_names(args)
         b = build_bundle(args.n_mesh, args.distortion,
                          gravity_darkening=not args.no_gravity_darkening,
                          irradiation=not args.no_irradiation)
@@ -484,10 +495,16 @@ def main():
         # PHOEBE is not installed on the GPU nodes, so carry its transmission
         # curves in the payload rather than importing phoebe there.
         from phoebe.atmospheres import passbands as pbs
-        payload["passbands"] = {
-            n: (np.asarray(pbs.get_passband(n).ptf_table["wl"]).astype(np.float64)*1e10,
-                np.asarray(pbs.get_passband(n).ptf_table["fl"]).astype(np.float64))
-            for n in HYBRID_PHOT_BANDS}
+        payload["passbands"] = {}
+        for n in HYBRID_PHOT_BANDS:      # skip passbands not installed offline (the fits need Stromgren b and y only)
+            try:
+                pb = pbs.get_passband(n)
+            except Exception as exc:
+                print(f"  passband {n} unavailable ({exc}); skipped", flush=True); continue
+            payload["passbands"][n] = (np.asarray(pb.ptf_table["wl"]).astype(np.float64) * 1e10,
+                                       np.asarray(pb.ptf_table["fl"]).astype(np.float64))
+        if not all(n in payload["passbands"] for n in ("Stromgren:b", "Stromgren:y")):
+            raise SystemExit("Stromgren b / y passbands missing")
         with open(meshes, "wb") as f:
             pickle.dump(payload, f, protocol=4)
         report_teff_spread(payload["teff_spread"])
@@ -535,12 +552,14 @@ def main():
 
     # ---- spectra: PHOEBE meshes at the observed HARPS epochs ---------------
     if args.mode == "export-spectra":
-        from spice.spectrum.aemu_spectrum_emulator import (
-            IntensityPretrainedAemuSpectrumEmulator)
-        names = IntensityPretrainedAemuSpectrumEmulator(BUNDLE).stellar_parameter_names
+        names = _parameter_names(args)
 
-        epochs = harps_epochs(args.data_dir)
-        times = np.array([e[0] for e in epochs])
+        if args.times_from:
+            _tp = pickle.load(open(args.times_from, "rb")); times = np.asarray(_tp["times"], float)
+            epochs = [(t, f) for t, f in zip(times, _tp.get("harps_files", [""] * len(times)))]
+        else:
+            epochs = harps_epochs(args.data_dir)
+            times = np.array([e[0] for e in epochs])
         print(f"{len(times)} HARPS epochs, phases "
               f"{((times - 2452599.29040) % 75.66647 / 75.66647).min():.3f}"
               f"..{((times - 2452599.29040) % 75.66647 / 75.66647).max():.3f}")
@@ -639,9 +658,7 @@ def main():
     if args.mode in ("export", "all"):
         # Deferred: naming the bundle's parameters is all we need from aemu here,
         # and the export host may not have a GPU.
-        from spice.spectrum.aemu_spectrum_emulator import (
-            IntensityPretrainedAemuSpectrumEmulator)
-        names = IntensityPretrainedAemuSpectrumEmulator(BUNDLE).stellar_parameter_names
+        names = _parameter_names(args)
 
         b = build_bundle(args.n_mesh, args.distortion,
                          gravity_darkening=not args.no_gravity_darkening,

@@ -1,0 +1,35 @@
+#!/bin/bash
+#PBS -N tz-pure
+#PBS -P y89
+#PBS -q gpuvolta
+#PBS -l ncpus=12
+#PBS -l ngpus=1
+#PBS -l mem=96GB
+#PBS -l walltime=10:00:00
+#PBS -l storage=gdata/y89+scratch/y89+scratch/mk27
+#PBS -j oe
+#PBS -m ae
+# TZ For, pure literature forward model: NOTHING adjusted to the data except one photometric zero point per band (the
+# photometry is differential, relative to HR 970). Gallenne et al. 2016: Teff 4930/6350, [Fe/H] +0.02/-0.05, vt 0.98/3.10,
+# v sin i 6.1/45.7, gamma 17.99/18.35 (no empirical velocity shift: --dv-sys 0), no macroturbulence (contained in their
+# v sin i), their light-curve geometry (step-1 meshes); photometry phased with the published ephemeris of Andersen et al.
+# 1991 (Eq. 2); no nightly zero points; no continuum correction of the SuppNet-normalised spectra. Reference run: the
+# same with the per-epoch continuum correction. Smoke first. No PBS commands.
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+G=/scratch/y89/mj8805/litrepro/pure
+TZ_PY=/scratch/y89/mj8805/exactfit/tzfor/tzfor_fullrange_fit.py
+TZ_BASE=${TZ_ARGS%--set*}
+TZ_NM=$(echo "$TZ_BASE" | sed "s/--mask-in [^ ]*//")
+[ "$TZ_NM" != "$TZ_BASE" ] || { echo "mask flag not found in TZ_ARGS"; exit 1; }
+PURE="--set Teff1=4930 Teff2=6350 feh=0.02 dphi=0 --feh-secondary -0.05 --vmicro 0.98 3.10 --vsini 6.1 45.7 --vmacro0 0 0 \
+      --gamma-components --dv-sys 0 --phot-nightly-sigma 0 --phot-ephemeris 2445032.6091 75.66675 \
+      --spec-meshes $G/tzfor_gallenne_lcgeom_n1500_spectra_meshes.pkl --lc-meshes $G/tzfor_gallenne_lcgeom_n1200_lc_meshes.pkl"
+run() { SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_NM "${@:2}" --out $OUTD/tzfor_pure_p3_$1.pkl --dump-model $OUTD/tzfor_pure_p3_$1.npz; }
+nvidia-smi -L
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $TZ_NM $PURE --no-continuum-fix --n-epochs 1 --n-lc-epochs 3 --out $OUTD/tzfor_pure_smoke_$PBS_JOBID.pkl || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+rc=0
+run pure $PURE --no-continuum-fix || rc=1
+run pure_cont $PURE || rc=1
+exit $rc

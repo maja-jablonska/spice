@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N ai-fit-tz-p3
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=24:00:00
+#PBS -l storage=gdata/y89+scratch/y89+scratch/mk27
+#PBS -j oe
+#PBS -m ae
+set -uo pipefail
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+# TZ For full fit with the phase-3 emulator, NO residual mask, kernel synthesis (exact model at the optimum, --exact-dump):
+# free Teff1, Teff2, [Fe/H] primary and secondary (separate), vmacro1/2, primary C/N/O, dphi; fixed at Gallenne et al. 2016:
+# v sin i 6.1 / 45.7 (vmacro and v sin i are degenerate), vt 0.98 / 3.10, geometry. Start: Gallenne. Smoke first. No PBS commands.
+TZ_PY=/scratch/y89/mj8805/exactfit/tzfor/tzfor_fullrange_fit.py
+TZ_BASE=${TZ_ARGS%--set*}
+TZ_NM=$(echo "$TZ_BASE" | sed "s/--mask-in [^ ]*//")
+[ "$TZ_NM" != "$TZ_BASE" ] || { echo "mask flag not found in TZ_ARGS"; exit 1; }
+FIT="$TZ_NM --set Teff1=4930 Teff2=6350 feh=0.02 dphi=0 --feh-secondary -0.05 --free-feh-secondary --free-vmacro --free-cno --vmicro 0.98 3.10 --vsini 6.1 45.7"
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $FIT --maxiter 1 --stall-retries 0 --n-epochs 2 --n-lc-epochs 4 --out $OUTD/tzfor_fit_p3_smoke.pkl || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+SPICE_HARPS_BUNDLE=$P3 $PY -u $TZ_PY $FIT --maxiter 80 --stall-retries 1 --out $OUTD/tzfor_fit_p3_nomask.pkl --dump-model $OUTD/tzfor_fit_p3_nomask.npz
