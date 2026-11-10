@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spice.utils.log`.
 
 ### Fixed
+- `add_rotation` now fills the per-element rotation velocity field immediately. In 1.8.0
+  it stored only the rotation speed, so a mesh used without `evaluate_rotation` (as in
+  the README quickstart and in binaries, which never call it) had zero rotational
+  velocities and no rotational broadening.
 - Keep the eclipse helper's grid size static under JAX compilation so legacy
   automatic neighbour estimation and explicit grid sizes work without tracer errors.
 - Compute pulsation geometry from the combined vertex displacement, using
