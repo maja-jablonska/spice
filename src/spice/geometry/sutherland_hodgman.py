@@ -5,34 +5,22 @@ from spice.geometry.utils import inside, last_non_nan, append_to_last_nan, repea
 
 
 @jax.jit
-def x_y_first_line_vertical(p1, p2, q1, q2):
-    x = p1[0]
-    m2 = (q2[1]-q1[1])/(q2[0]-q1[0])
-    b2 = q1[1]-m2*q1[0]
-    return x, m2*x+b2
-
-@jax.jit
-def x_y_second_line_vertical(p1, p2, q1, q2):
-    x = q1[0]
-    m1 = (p2[1]-p1[1])/(p2[0]-p1[0])
-    b1 = p1[1]-m1*p1[0]
-    return x, m1*x+b1
-
-@jax.jit
-def x_y_no_vertical(p1, p2, q1, q2):
-    m1 = (p2[1]-p1[1])/(p2[0]-p1[0])
-    b1 = p1[1]-m1*p1[0]
-
-    m2 = (q2[1]-q1[1])/(q2[0]-q1[0])
-    b2 = q1[1]-m2*q1[0]
-
-    x = (b2-b1)/(m1-m2)
-    return x, m1*x+b1
-
-
-@jax.jit
 def compute_intersection(p1: ArrayLike, p2: ArrayLike, q1: ArrayLike, q2: ArrayLike) -> ArrayLike:
     """Calculate the intersection of two lines
+
+    Uses the parametric form ``x = (a (x3 - x4) - (x1 - x2) b) / d`` with
+    ``a = x1 y2 - y1 x2``, ``b = x3 y4 - y3 x4`` and
+    ``d = (x1 - x2)(y3 - y4) - (y1 - y2)(x3 - x4)``, which needs no special
+    case for vertical edges. Parallel lines and any nan input give a nan
+    point, which the clipper treats as "no vertex to add".
+
+    The arithmetic only ever sees finite numbers: nan inputs are replaced by
+    zero and the parallel denominator by one *before* the divisions, and the
+    nan result is produced by a select afterwards. That keeps the reverse
+    pass finite -- the clipper walks edges into its nan padding rows and,
+    under ``vmap``, evaluates every ``lax.cond`` branch, so a nan or division
+    by zero anywhere in this function used to leak nan cotangents into the
+    real vertices and made eclipse light curves non-differentiable.
 
     Args:
         p1 (ArrayLike): point 1 of line 1
@@ -41,27 +29,29 @@ def compute_intersection(p1: ArrayLike, p2: ArrayLike, q1: ArrayLike, q2: ArrayL
         q2 (ArrayLike): point 2 of line 2
 
     Returns:
-        ArrayLike: coordinates of the intersection of two lines
+        ArrayLike: coordinates of the intersection of two lines, shape (1, 2)
     """
-    x, y = jax.lax.cond(jnp.all(jnp.isclose(p1[0]-p2[0], 0)),
-                        x_y_first_line_vertical,
-                        lambda a, b, c, d: jax.lax.cond(
-                            jnp.all(jnp.isclose(c[0]-d[0], 0)),
-                            x_y_second_line_vertical,
-                            x_y_no_vertical,
-                            a, b, c, d),
-                        p1, p2, q1, q2)
-    
-    return jnp.array([[x, y]])
+    pts = jnp.stack([p1[:2], p2[:2], q1[:2], q2[:2]])
+    bad = jnp.any(jnp.isnan(pts))
+    pts = jnp.where(jnp.isnan(pts), 0.0, pts)
+    (x1, y1), (x2, y2), (x3, y3), (x4, y4) = pts
+    t1 = (x1 - x2) * (y3 - y4)
+    t2 = (y1 - y2) * (x3 - x4)
+    d = t1 - t2
+    parallel = jnp.abs(d) <= 1e-12 * (jnp.abs(t1) + jnp.abs(t2))
+    d_safe = jnp.where(parallel, 1.0, d)
+    a = x1 * y2 - y1 * x2
+    b = x3 * y4 - y3 * x4
+    x = (a * (x3 - x4) - (x1 - x2) * b) / d_safe
+    y = (a * (y3 - y4) - (y1 - y2) * b) / d_safe
+    return jnp.where(bad | parallel, jnp.nan, jnp.array([[x, y]]))
+
 
 def s_only_edge_start_inside(final_polygon, c_edge_start, c_edge_end, s_edge_start, s_edge_end):
     intersection = compute_intersection(s_edge_start,
                                         s_edge_end,
                                         c_edge_start,
                                         c_edge_end)
-    intersection = jax.lax.cond(jnp.any(jnp.isnan(intersection)),
-                                lambda: jnp.nan*intersection,
-                                lambda: intersection)
     return append_to_last_nan(final_polygon, intersection)
 
 def s_only_edge_end_inside(final_polygon, c_edge_start, c_edge_end, s_edge_start, s_edge_end):
@@ -69,9 +59,6 @@ def s_only_edge_end_inside(final_polygon, c_edge_start, c_edge_end, s_edge_start
                                         s_edge_end,
                                         c_edge_start,
                                         c_edge_end)
-    intersection = jax.lax.cond(jnp.any(jnp.isnan(intersection)),
-                            lambda: jnp.nan*intersection,
-                            lambda: intersection)
     polygon_with_intersection = append_to_last_nan(final_polygon, intersection)
     return append_to_last_nan(polygon_with_intersection, s_edge_end)
 

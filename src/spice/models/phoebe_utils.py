@@ -145,7 +145,11 @@ class PhoebeConfig:
         return areas*self.get_mus(time, component)*visibilities
     
     def get_radial_velocities(self, time: float, component: Optional[Component] = None) -> np.array:
-        return self.get_parameter(time, 'vws', component)
+        # PHOEBE's +w axis points toward the observer, so an element moving
+        # toward us has vws > 0 but a NEGATIVE radial velocity. Verified against
+        # a PHOEBE rv dataset: rv = -126.483 km/s for a visible-area-weighted
+        # vws of +126.482. Returning raw vws here gave the negated RV.
+        return -self.get_parameter(time, 'vws', component)
     
     def get_loggs(self, time: float, component: Optional[Component] = None) -> np.array:
         return self.get_parameter(time, 'loggs', component)

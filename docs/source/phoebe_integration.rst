@@ -3,6 +3,12 @@ PHOEBE Integration
 
 SPICE provides integration with the PHOEBE (PHysics Of Eclipsing BinariEs) library, allowing users to model binary star systems and generate synthetic spectra based on PHOEBE models.
 
+.. note::
+
+   Every code snippet on this page has a matching section in the companion notebook
+   `tutorial/docs_examples/phoebe_integration_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/phoebe_integration_examples.ipynb>`_
+   (requires the ``phoebe`` extra).
+
 Setting up a PHOEBE Model
 -------------------------
 
@@ -47,6 +53,16 @@ There are a few requirements PHOEBE needs to be set up so that SPICE can extract
 - The `mesh` dataset needs to be added with all the necessary columns (see `_mesh_columns`)
 - The `coordinates` parameter needs to be set to `uvw`
 - For some emulators, a dictionary of stellar parameters and the corresponding values needs to be provided. Some parameters are not provided by PHOEBE and need to be manually assigned to the mesh model
+
+Viewing convention
+------------------
+
+PHOEBE supplies the projected mesh geometry and viewing cosines. SPICE
+uses ``[0., 0., +1.]`` for the imported uvw velocity projection to preserve
+PHOEBE radial-velocity signs; keep this adapter convention rather than
+replacing it with the native mesh default ``[0., 0., -1.]``. PHOEBE meshes
+are read-only in SPICE. Set rotation and viewing geometry in PHOEBE, then
+recompute the meshes. See :doc:`conventions`.
 
 Generating Spectra
 ------------------

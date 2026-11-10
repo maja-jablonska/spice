@@ -1,0 +1,22 @@
+#!/bin/bash
+# delta Cep Turbospectrum intensities per phase (dcep_ts_intensities.py).
+# Submit from /scratch/y89/mj8805/dcep_ts. Smoke (one phase per variant):
+#   qsub -l ncpus=3 -l mem=24GB -l walltime=01:00:00 -v EXTRA=--max-rows=1,OUT=smoke dcep_ts_intensities.pbs
+# Full run (3 variants x 40 phases = 120 syntheses):
+#   qsub dcep_ts_intensities.pbs
+#PBS -P y89
+#PBS -q normal
+#PBS -N dcep-ts
+#PBS -l ncpus=48
+#PBS -l mem=190GB
+#PBS -l jobfs=20GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+#PBS -m a
+set -u
+export OMP_NUM_THREADS=1
+cd /scratch/y89/mj8805/dcep_ts
+/g/data/y89/mj8805/miniforge/envs/astro/bin/python -u dcep_ts_intensities.py \
+    --table dcep_ts_phases.csv --out "/scratch/y89/mj8805/dcep_ts/${OUT:-out}" \
+    --workers "${PBS_NCPUS:-48}" ${EXTRA:-}

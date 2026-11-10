@@ -47,7 +47,7 @@ Spectral Synthesis
 SPICE supports multiple spectrum models:
 
 - Simple blackbody radiation
-- Machine learning based TransformerPayne emulator
+- Machine-learning emulators loaded as aemu bundles
 - Custom model integration
 
 Performance

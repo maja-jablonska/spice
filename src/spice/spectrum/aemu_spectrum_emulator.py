@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Callable, Optional
+from typing import List, Dict, Any, Callable, Optional, Tuple
 from typing_extensions import override
 from jaxtyping import ArrayLike
 import numpy as np
@@ -39,6 +39,48 @@ def _lazy_import_astro_emulators_toolkit():
 aemu, _apply_jax_runtime, _make_frozen_apply_runtime = _lazy_import_astro_emulators_toolkit()
 
 
+# Known-bad bundle revisions: loading one of these silently produces wrong
+# science, so refuse rather than warn. Keys are HF repo ids; values map a
+# revision hash to why it is rejected.
+REJECTED_BUNDLE_REVISIONS: Dict[str, Dict[str, str]] = {
+    "RozanskiT/TPayne-spice-harps": {
+        "bcc8a6e7f4367857132ebf0b72d1c1d4580db9c9":
+            "memorized its 250 K MARCS training grid instead of interpolating: "
+            "output is piecewise-constant in Teff with ~20% jumps at the node "
+            "midpoints (5375/5625/5875/6125 K). Superseded by revision 3df764e, "
+            "which takes marcs_teff directly and varies smoothly.",
+    },
+}
+
+
+def _reject_known_bad_revision(name: str, emulator: "aemu.Emulator") -> None:
+    """Raise if ``emulator`` was loaded from a revision known to be wrong.
+
+    ``from_pretrained`` resolves ``main`` when the hub is reachable, but on an
+    offline node it can fall back to *any* cached snapshot -- including the
+    superseded one, which stays in the cache indefinitely. The failure is silent
+    and the resulting spectra look plausible, so check explicitly.
+    """
+    # Check every rejected revision against both the requested name and the
+    # resolved path: a bundle can be loaded by repo id OR by a direct path to a
+    # cached snapshot (which carries no repo id but does carry the hash), and
+    # both routes must be blocked.
+    candidates = [str(name)]
+    for attr in ("bundle_path", "path", "local_dir", "_local_dir", "source"):
+        candidates.append(str(getattr(emulator, attr, "") or ""))
+    for repo, bad in REJECTED_BUNDLE_REVISIONS.items():
+        for revision, reason in bad.items():
+            if not any(revision in c for c in candidates):
+                continue
+            resolved = next((c for c in candidates if revision in c), str(name))
+            raise ValueError(
+                f"{repo} revision {revision[:7]} is known to be broken: {reason}\n"
+                f"Loaded from: {resolved}\n"
+                "Fetch the current revision (needs network access), or delete "
+                "that snapshot from the astro_emulators_toolkit cache."
+            )
+
+
 def _load_emulator(name: str) -> "aemu.Emulator":
     """Load an :class:`aemu.Emulator` from ``name``.
 
@@ -46,14 +88,21 @@ def _load_emulator(name: str) -> "aemu.Emulator":
     or a Hugging Face repo id (loaded with ``Emulator.from_pretrained``). The
     older code path only supported the latter, which broke when ``name`` was a
     path to a bundle produced by a local training run.
+
+    Bundle revisions listed in :data:`REJECTED_BUNDLE_REVISIONS` are refused --
+    see :func:`_reject_known_bad_revision`.
     """
     try:
         is_dir = os.path.isdir(name)
     except (TypeError, ValueError):
         is_dir = False
     if is_dir:
-        return aemu.Emulator.from_bundle(name)
-    return aemu.Emulator.from_pretrained(name)
+        emulator = aemu.Emulator.from_bundle(name)
+        _reject_known_bad_revision(name, emulator)
+        return emulator
+    emulator = aemu.Emulator.from_pretrained(name)
+    _reject_known_bad_revision(name, emulator)
+    return emulator
 
 
 def _affine_section_of_combined(combined: Any, side: str) -> Optional[Dict[str, Any]]:
@@ -132,6 +181,26 @@ def _input_domain_param_bounds(emulator: "aemu.Emulator", which: str) -> Optiona
     return None
 
 
+def _bundle_wavelength_range(emulator: "aemu.Emulator") -> Optional[Tuple[float, float]]:
+    """``(min, max)`` [Angstrom] of the spectra a bundle was trained on.
+
+    Wavelength-conditioned bundles record their training grid in the extras as
+    ``source_log10_wavelength`` (or ``source_wavelength``); fixed-grid flux
+    bundles as ``wavelength_angstrom``. Returns None when none is recorded."""
+    extras = getattr(emulator, "bundle_extras", None) or {}
+    for key, is_log in (("source_log10_wavelength", True), ("source_wavelength", False),
+                        ("wavelength_angstrom", False)):
+        try:
+            values = np.asarray(extras.get(key, []), dtype=np.float64).ravel()
+        except (TypeError, ValueError):      # an unresolved sidecar reference rather than an array
+            continue
+        values = values[np.isfinite(values)]
+        if values.size:
+            lo, hi = float(values.min()), float(values.max())
+            return (10.0 ** lo, 10.0 ** hi) if is_log else (lo, hi)
+    return None
+
+
 def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> ArrayLike:
     # Use ``is None`` / dict-empty check explicitly: ``if not parameter_values``
     # raises on multi-element numpy arrays ("truth value is ambiguous").
@@ -139,8 +208,19 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
         parameter_values = SOLAR_PARAMETERS
 
     if isinstance(parameter_values, dict):
-        parameters = np.array([parameter_values.get(name, SOLAR_PARAMETERS.get(name, 0.0)) for name in interpolator.stellar_parameter_names])
-        for i, name in enumerate(interpolator.stellar_parameter_names):
+        names = interpolator.stellar_parameter_names
+        if parameter_values is not SOLAR_PARAMETERS:
+            from .parameters import resolve_parameter_names
+            parameter_values = resolve_parameter_names(parameter_values, names)
+        parameter_values = dict(parameter_values)
+        # Bundles with a ``marcs_fe_h`` input (HARPS cno-v2, 2026-10): when only ``feh`` is
+        # given, derive the atmosphere metallicity from it rather than defaulting to 0.
+        if "marcs_fe_h" in names and "marcs_fe_h" not in parameter_values and "feh" in parameter_values:
+            from .marcs_nodes import resolve_marcs_fe_h
+            mode = getattr(interpolator, "marcs_fe_h_mode", "feh")
+            parameter_values["marcs_fe_h"] = resolve_marcs_fe_h(parameter_values["feh"], mode)
+        parameters = np.array([parameter_values.get(name, SOLAR_PARAMETERS.get(name, 0.0)) for name in names])
+        for i, name in enumerate(names):
             if name in parameter_values:
                 parameters[i] = parameter_values[name]
     else:
@@ -233,6 +313,14 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
         idx = self._mu_index()
         return bounds if idx is None else np.delete(bounds, idx)
 
+    @override
+    @property
+    def wavelength_range(self) -> Optional[Tuple[float, float]]:
+        """Training wavelength range [Angstrom] recorded in the bundle extras, or None if absent."""
+        if not hasattr(self, "_wavelength_range"):
+            self._wavelength_range = _bundle_wavelength_range(self.emulator)
+        return self._wavelength_range
+
     def to_parameters(self, parameters: ArrayLike = None) -> ArrayLike:
         # Convert a (possibly partial) parameter dict into an ordered array of
         # raw stellar values matching ``stellar_parameter_names``. Scaling to
@@ -259,11 +347,31 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
 
 
 
+# Parameter contracts a bundle must expose. The Aug-2026 TPayne-spice-harps
+# retrain renamed everything (teff -> marcs_teff etc.); the superseded revision
+# is the only one exposing the old names, and ``to_parameters`` silently fills
+# unknown names with 0.0, so a stale bundle yields a plausible-looking spectrum
+# at meaningless parameters. Check the contract as a second line of defence
+# behind the revision pin, since a local bundle dir carries no revision hash.
+REQUIRED_BUNDLE_PARAMETERS: Dict[str, str] = {
+    "RozanskiT/TPayne-spice-harps": "marcs_teff",
+}
+
+
 class PretrainedAemuSpectrumEmulator(AemuSpectrumEmulator):
     def __init__(self, name: str):
         # ``name`` may be a Hugging Face repo id or a local bundle directory.
         emulator = _load_emulator(name)
         super().__init__(emulator)
+        required = REQUIRED_BUNDLE_PARAMETERS.get(name)
+        if required is not None and required not in self.stellar_parameter_names:
+            raise ValueError(
+                f"{name} does not expose {required!r}; its parameters are "
+                f"{self.stellar_parameter_names}. This is the signature of a "
+                "superseded bundle revision (the pre-Aug-2026 TPayne-spice-harps "
+                "used 'teff'/'logg'/'[Fe/H]' with a log10 temperature and "
+                "memorized its 250 K training grid). Fetch the current revision."
+            )
 
 
 
@@ -365,6 +473,7 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
 
     Matches bundles like ``RozanskiT/TPayne-spice-small-random`` (and the
     locally-trained "new FE" Tpayne intensity bundles):
+
         * Inputs:  ``{"parameters": (B, n_p), "wavelengths": (B, n_w)}`` —
           ``wavelengths`` are **log10(Angstrom)**. The full input parameter
           channel list includes ``mu`` (the bundle is a true intensity
@@ -382,7 +491,15 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
     normalise → apply → denormalise → ``10**y``.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, marcs_fe_h_mode: str = "feh"):
+        """``marcs_fe_h_mode`` sets how ``to_parameters`` fills the ``marcs_fe_h`` input
+        of bundles that have one when only ``feh`` is given: ``"feh"`` (default) copies
+        the synthesis metallicity, ``"snap"`` uses the nearest MARCS node
+        (see :mod:`spice.spectrum.marcs_nodes`). Ignored for bundles without it."""
+        from .marcs_nodes import MARCS_FE_H_MODES
+        if marcs_fe_h_mode not in MARCS_FE_H_MODES:
+            raise ValueError(f"marcs_fe_h_mode must be one of {MARCS_FE_H_MODES}, got {marcs_fe_h_mode!r}")
+        self.marcs_fe_h_mode = marcs_fe_h_mode
         super().__init__(name)
         ref_outputs = _affine_reference_scaling(self.emulator, "outputs")
         if self.ref is None or ref_outputs is None:

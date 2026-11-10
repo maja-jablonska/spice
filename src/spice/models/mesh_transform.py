@@ -9,7 +9,7 @@ from jax.typing import ArrayLike
 import numpy as np
 
 from .mesh_generation import face_center
-from .mesh_model import MeshModel, _default_rotation_axis, create_harmonics_params
+from .mesh_model import MeshModel, _default_rotation_axis
 try:
     from spice.models.phoebe_model import PhoebeModel
 except Exception:
@@ -124,16 +124,13 @@ def update_parameter(mesh: MeshModel, parameter: Union[str, int, ArrayLike], par
         raise ValueError(
             "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
 
-    if _is_phoebe_model(mesh):
-        raise ValueError(
-            "PHOEBE models are read-only in SPICE - parameters cannot be updated.")
     if isinstance(parameter, str):
         if parameter_names is None:
             raise ValueError(
                 "A list of parameters used for the model while constructing the mesh must be provided to update parameters by name.")
-        if parameter not in mesh.parameter_names:
+        if parameter not in parameter_names:
             raise ValueError(
-                f"Parameter {parameter} not found in mesh model. Model contains parameters: {mesh.parameter_names}")
+                f"Parameter {parameter} not found in mesh model. Model contains parameters: {parameter_names}")
         parameter_index = parameter_names.index(parameter)
     else:
         parameter_index = parameter
@@ -202,7 +199,7 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
         for param in parameters:
             if param not in parameter_names:
                 raise ValueError(
-                    f"Parameter {param} not found in mesh model. Model contains parameters: {mesh.parameter_names}")
+                    f"Parameter {param} not found in mesh model. Model contains parameters: {parameter_names}")
             parameter_indices.append(parameter_names.index(param))
     else:
         parameter_indices = parameters
@@ -211,18 +208,62 @@ def update_parameters(mesh: MeshModel, parameters: Union[List[str], List[int]], 
 
 
 @jax.jit
+def _axis_perpendicular_to_los(los_vector: Float[Array, "3"]) -> Float[Array, "3"]:
+    """A unit rotation axis guaranteed perpendicular to ``los_vector``.
+
+    Takes the module default when that is already perpendicular (the usual
+    case), and otherwise rejects the LOS component from it -- falling back to a
+    second seed axis if the default happens to be parallel to the LOS.
+
+    A rotation axis parallel to the line of sight projects to *zero* radial
+    velocity, so the star is seen pole-on and rotational broadening vanishes
+    silently. That is easy to hit whenever a caller overrides one of the two
+    defaults but not the other: `tz_fornacis_spectra.py` hardcodes
+    LOS = [0, 0, -1] while inheriting the default axis, which on a checkout
+    whose default axis is [0, 0, 1] gave exactly 0 km/s of broadening for a
+    38 km/s star.
+    """
+    los = los_vector / jnp.linalg.norm(los_vector)
+    primary = _default_rotation_axis()
+    # If the default is (nearly) parallel to the LOS, seed from another axis.
+    seed = jnp.where(
+        jnp.abs(jnp.dot(primary, los)) > 0.99,
+        jnp.array([1.0, 0.0, 0.0], dtype=primary.dtype),
+        primary,
+    )
+    seed = jnp.where(
+        jnp.abs(jnp.dot(seed, los)) > 0.99,
+        jnp.array([0.0, 1.0, 0.0], dtype=primary.dtype),
+        seed,
+    )
+    perp = seed - jnp.dot(seed, los) * los          # reject the LOS component
+    return perp / jnp.linalg.norm(perp)
+
+
 def _add_rotation(mesh: MeshModel,
                   rotation_velocity: float,
                   rotation_axis: Float[Array, "3"] = None) -> MeshModel:
     if rotation_axis is None:
-        rotation_axis = _default_rotation_axis()
+        rotation_axis = _axis_perpendicular_to_los(mesh.los_vector)
     rot_matrix = rotation_matrix(rotation_axis)
     rot_matrix_grad = rotation_matrix_prim(rotation_axis)
 
-    return mesh._replace(rotation_axis=rotation_axis,
+    mesh = mesh._replace(rotation_axis=rotation_axis,
                          rotation_matrix=rot_matrix,
                          rotation_matrix_prim=rot_matrix_grad,
                          rotation_velocity=rotation_velocity)
+
+    # Populate the per-element velocity field straight away. It used to be filled
+    # only by evaluate_rotation(), so a mesh with add_rotation() applied looked
+    # configured but produced NO rotational broadening. binary.py never calls
+    # evaluate_rotation, so every binary synthesis silently lost v sin i --
+    # measured on a 38 km/s star, line FWHM stayed at 16.19 km/s (the
+    # non-rotating value) instead of broadening to 64.20 km/s.
+    # Evaluating at t = 0 is a no-op for the geometry: theta = v*0/R = 0 and
+    # evaluate_rotation_matrix(R, 0) is the identity, so this only fills
+    # rotation_velocities and callers may still call evaluate_rotation(mesh, t)
+    # afterwards at any time.
+    return _evaluate_rotation(mesh, 0.0)
 
 
 def add_rotation(mesh: MeshModel,
@@ -238,7 +279,9 @@ def add_rotation(mesh: MeshModel,
     Args:
         mesh (MeshModel): The mesh model to add rotation to.
         rotation_velocity (float): The velocity of the rotation.
-        rotation_axis (Float[Array, "3"]): The axis of the rotation. Defaults to the global [0., 0., 1.].
+        rotation_axis (Float[Array, "3"]): The rotation axis. If omitted, choose an axis
+            perpendicular to the mesh's current line of sight (equator-on). Changing
+            the view afterwards preserves this axis.
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.
@@ -250,8 +293,28 @@ def add_rotation(mesh: MeshModel,
         raise ValueError(
             "PHOEBE models are read-only in SPICE - the rotation is already evaluated in the PHOEBE model.")
     if rotation_axis is None:
-        rotation_axis = _default_rotation_axis()
+        # Derive the default from the mesh's own line of sight rather than a
+        # module constant, so it can never come out parallel to it. A parallel
+        # axis projects to zero radial velocity: the star is seen pole-on and
+        # rotational broadening vanishes silently. That is exactly what happened
+        # to tz_fornacis_spectra.py, which hardcodes LOS = [0, 0, -1] while
+        # inheriting a default axis of [0, 0, 1] on the geometry-provenance
+        # branch -- 0 km/s of broadening for a 38 km/s star.
+        rotation_axis = _axis_perpendicular_to_los(mesh.los_vector)
     return _add_rotation(mesh, rotation_velocity, rotation_axis)
+
+
+def _refresh_computed_log_g(mesh: MeshModel) -> MeshModel:
+    """Keep automatically managed atmosphere gravity aligned with the geometry."""
+    if mesh.log_g_index is None:
+        return mesh
+    log_g = jax.lax.cond(
+        mesh.override_log_g,
+        lambda _: mesh.parameters[:, mesh.log_g_index],
+        lambda _: mesh.log_gs,
+        operand=None,
+    )
+    return mesh._replace(parameters=mesh.parameters.at[:, mesh.log_g_index].set(log_g))
 
 
 @jax.jit
@@ -268,11 +331,15 @@ def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
 
     axis_hat = mesh.rotation_axis / jnp.linalg.norm(mesh.rotation_axis)
 
-    vertex_norms = jnp.linalg.norm(rotated_vertices, axis=1, keepdims=True)
-    center_norms = jnp.linalg.norm(rotated_centers, axis=1, keepdims=True)
+    def project_to_surface(points):
+        squared_norms = jnp.sum(points**2, axis=1, keepdims=True)
+        # Icosphere arrays include zero padding. Avoid evaluating sqrt(0) or
+        # dividing by zero there, including in the backward pass.
+        norms = jnp.sqrt(jnp.where(squared_norms > 0.0, squared_norms, 1.0))
+        return points * (mesh.radius / norms)
 
-    surface_vertices = rotated_vertices * jnp.where(vertex_norms > 0.0, mesh.radius / vertex_norms, 1.0)
-    surface_centers = rotated_centers * jnp.where(center_norms > 0.0, mesh.radius / center_norms, 1.0)
+    surface_vertices = project_to_surface(rotated_vertices)
+    surface_centers = project_to_surface(rotated_centers)
 
     rotated_vertices_vel = (rotation_velocity_km_s / mesh.radius) * jnp.cross(surface_vertices, axis_hat)
     rotated_centers_vel = (rotation_velocity_km_s / mesh.radius) * jnp.cross(surface_centers, axis_hat)
@@ -283,10 +350,11 @@ def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     averaged_face_velocities = (jnp.sum(rotated_vertices_vel[face_indices], axis=1) + rotated_centers_vel) / 4.0
 
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
-    return mesh._replace(d_vertices=rotated_vertices,
-                         d_centers=rotated_centers,
-                         rotation_velocities=averaged_face_velocities,
-                         axis_radii=new_axis_radii)
+    rotated = mesh._replace(d_vertices=rotated_vertices,
+                            d_centers=rotated_centers,
+                            rotation_velocities=averaged_face_velocities,
+                            axis_radii=new_axis_radii)
+    return _refresh_computed_log_g(rotated)
 
 
 def evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel:
@@ -318,6 +386,7 @@ _evaluate_rotation_v = jax.vmap(_evaluate_rotation, in_axes=(None, 0))
 
 
 def evaluate_rotation_at_times(mesh: MeshModel, times: ArrayLike) -> ArrayLike:
+    """Vectorized :func:`evaluate_rotation` over an array of times (in seconds)."""
     from spice.utils import log
     with log.timed(
         f"Evaluating rotation at {len(times)} time steps",
@@ -533,11 +602,12 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
 
 @jax.jit
 def _reset_pulsations(m: MeshModel) -> MeshModel:
-    return m._replace(
+    reset = m._replace(
         vertices_pulsation_offsets=jnp.zeros_like(
             m.vertices_pulsation_offsets),
         center_pulsation_offsets=jnp.zeros_like(m.center_pulsation_offsets),
         area_pulsation_offsets=jnp.zeros_like(m.area_pulsation_offsets),
+        pulsation_velocities=jnp.zeros_like(m.pulsation_velocities),
         pulsation_periods=jnp.nan * jnp.ones_like(m.pulsation_periods),
         fourier_series_parameters=jnp.nan *
         jnp.ones_like(m.fourier_series_parameters),
@@ -545,6 +615,7 @@ def _reset_pulsations(m: MeshModel) -> MeshModel:
             (1, 3)).repeat(m.pulsation_periods.shape[0], axis=0),
         pulsation_angles=jnp.zeros_like(m.pulsation_periods),
     )
+    return _refresh_computed_log_g(reset)
 
 
 def reset_pulsations(m: MeshModel) -> MeshModel:
@@ -572,7 +643,7 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
 
 
 @jax.jit
-def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
+def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
                          magnitudes: Float[Array, "3"],
                          magnitudes_prim: Float[Array, "3"],
                          radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
@@ -621,7 +692,8 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
     )
     center_harmonic = center_harmonic / (jnp.max(jnp.abs(center_harmonic)) + 1e-8)
 
-    vertex_r_hat = m.d_vertices / jnp.linalg.norm(m.d_vertices, axis=1, keepdims=True)
+    vertex_norms = jnp.linalg.norm(m.d_vertices, axis=1, keepdims=True)
+    vertex_r_hat = m.d_vertices / jnp.where(vertex_norms > 0., vertex_norms, 1.)
     center_r_hat = m.d_centers / jnp.linalg.norm(m.d_centers, axis=1, keepdims=True)
 
     vertex_R = vertex_harmonic * vertex_r_hat
@@ -655,17 +727,45 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
     a_r, a_s, a_t = magnitudes[0], magnitudes[1], magnitudes[2]
     new_vertices = radius * (a_r * vertex_R + a_s * vertex_S + a_t * vertex_T)
 
-    new_areas, new_centers = jax.jit(jax.vmap(face_center, in_axes=(None, 0)))(
-        new_vertices + m.d_vertices, m.faces.astype(jnp.int32))
-
     # --- Pulsation velocity: same decomposition with time derivatives ---
     da_r, da_s, da_t = magnitudes_prim[0], magnitudes_prim[1], magnitudes_prim[2]
     total_pulsation_velocity = radius * (da_r * center_R + da_s * center_S + da_t * center_T)
 
-    return (jnp.nan_to_num(new_vertices),
-            jnp.nan_to_num(new_areas - m.base_areas),
-            jnp.nan_to_num(new_centers - m.d_centers),
-            jnp.nan_to_num(total_pulsation_velocity))
+    return jnp.nan_to_num(new_vertices), jnp.nan_to_num(total_pulsation_velocity)
+
+
+@jax.jit
+def _pulsation_geometry_offsets(m: MeshModel, vertex_offsets: ArrayLike):
+    """Measure the combined deformation relative to the reference triangles."""
+    faces = m.faces.astype(jnp.int32)
+    areas_for_vertices = jax.vmap(face_center, in_axes=(None, 0))
+    reference_areas, _ = areas_for_vertices(m.d_vertices, faces)
+    displaced_areas, _ = areas_for_vertices(m.d_vertices + vertex_offsets, faces)
+    # Stored areas exclude the reference radius squared. Compare like units,
+    # and subtract the same reference geometry so zero displacement is a no-op.
+    area_offsets = (displaced_areas - reference_areas) / m.radius**2
+    # Reference centers are projected onto the stellar radius at construction.
+    # Move them by the centroid displacement, without replacing that reference.
+    center_offsets = jnp.mean(vertex_offsets[faces], axis=1)
+    return area_offsets, center_offsets
+
+
+@jax.jit
+def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
+                         magnitudes: Float[Array, "3"],
+                         magnitudes_prim: Float[Array, "3"],
+                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
+    """Return vertex, normalized-area, center, and velocity offsets for one mode.
+
+    Areas and centers are measured relative to the undeformed mesh. For multiple
+    modes, use :func:`evaluate_pulsations` so geometry is computed after summing
+    vertex displacements; triangle areas are not additive across modes.
+    """
+    vertices, velocities = _pulsation_displacements(
+        m, harmonic_parameters, magnitudes, magnitudes_prim,
+        radius, pulsation_axis, pulsation_angle)
+    areas, centers = _pulsation_geometry_offsets(m, vertices)
+    return vertices, areas, centers, velocities
 
 
 def calculate_numerical_pulsation_velocity(m: MeshModel, t: float, dt: float = 1e-6):
@@ -755,11 +855,11 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
             pulsation_magnitudes = flat_magnitudes.reshape(n_modes, 3)
             pulsation_velocity_magnitudes = flat_velocity_magnitudes.reshape(n_modes, 3)
 
-        harmonic_params = create_harmonics_params(m.max_pulsation_mode)
+        harmonic_params = m.spherical_harmonics_parameters
 
         # vmap over modes; magnitudes and magnitudes_prim are now (n_modes, 3)
-        vert_offsets, area_offsets, center_offsets, pulsation_velocities = jax.vmap(
-            calculate_pulsations,
+        vert_offsets, pulsation_velocities = jax.vmap(
+            _pulsation_displacements,
             in_axes=(None, 0, 0, 0, None, 0, 0)
         )(m, harmonic_params,
           pulsation_magnitudes,
@@ -768,12 +868,14 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
           m.pulsation_axes,
           m.pulsation_angles)
 
+        combined_vertices = jnp.nan_to_num(jnp.sum(vert_offsets, axis=0))
+        area_offsets, center_offsets = _pulsation_geometry_offsets(m, combined_vertices)
         result = m._replace(
-            vertices_pulsation_offsets=jnp.nan_to_num(jnp.sum(vert_offsets, axis=0)),
-            center_pulsation_offsets=jnp.nan_to_num(jnp.sum(center_offsets, axis=0)),
-            area_pulsation_offsets=jnp.nan_to_num(jnp.sum(area_offsets, axis=0)),
+            vertices_pulsation_offsets=combined_vertices,
+            center_pulsation_offsets=center_offsets,
+            area_pulsation_offsets=area_offsets,
             pulsation_velocities=jnp.nan_to_num(
                 jnp.sum(pulsation_velocities, axis=0) * 8.052083333333332  # solRad/day to km/s
             )
         )
-    return result
+    return _refresh_computed_log_g(result)

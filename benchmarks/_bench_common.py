@@ -1,8 +1,8 @@
 """Small shared helpers for the benchmark scripts.
 
 Single source of truth for the handful of trivial, byte-identical helpers that
-were copy-pasted across benchmark_grid_loading.py, benchmark_spice_components.py,
-benchmark_occlusion.py, and benchmark_memory.py. Kept dependency-light (numpy +
+were copy-pasted across benchmark_grid_loading.py, benchmark_spice_components.py
+and benchmark_memory.py. Kept dependency-light (numpy +
 argparse only) so importing it never drags in the heavier benchmark modules.
 
 (The larger same-named helpers — make_plots, sweep_wavelengths, build_parser,

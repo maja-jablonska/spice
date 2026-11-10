@@ -26,7 +26,7 @@ def point_in_triangle(pt, tri_verts):  # tri_verts: (3,2)
     v = (dot00 * dot12 - dot01 * dot02) / denom
     return (u >= 0) & (v >= 0) & (u + v <= 1)
 
-@jax.jit
+@partial(jax.jit, static_argnames=("n_grid",))
 def construct_triangle_to_gridpts(mesh, n_grid: int = 50):
     # DO NOT boolean-index with mesh.mus inside jit
     faces   = jnp.asarray(mesh.faces).astype(jnp.int32)        # (T, 3)
@@ -86,7 +86,12 @@ def find_triangle_counts(points_in_circles_mask, triangle_to_gridpts_mask):
 
 @jax.jit
 def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
-    """Cast 3D vectors of centers and center velocities to the line-of-sight
+    """Set the observer direction while preserving the physical rotation axis.
+
+    Projected geometry and line-of-sight velocities follow the new view.
+    For an equator-on default axis at a custom view, call this before
+    ``add_rotation`` without an explicit axis. Viewing along an existing
+    rotation axis gives zero projected rotational velocity.
 
     Args:
         mesh (MeshModel): Properties to be cast (n, 3)
@@ -95,9 +100,10 @@ def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
     Returns:
         MeshModel: mesh with updated los_vector, mus, and los_velocities
     """
-    return mesh._replace(
-        los_vector=los_vector
-    )
+    # The observer direction must not change the physical rotation axis or
+    # velocity field, even when that axis equals the construction default.
+    # To choose an equator-on default, set the LOS before calling add_rotation.
+    return mesh._replace(los_vector=los_vector)
 
 
 @jax.jit
@@ -156,53 +162,57 @@ def _resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors
     # Masks for visible faces (not used for filtering, but for later masking)
     occluded_visible_mask = m_occluded.mus > 0
 
-    # Use all centers and faces (no masking)
+    # A closed surface need not have half its *faces* on the visible side:
+    # adaptive triangulations and imported meshes can refine one side more.
+    # Keep every target face so no visible triangle is silently omitted.
     m_occluded_centers = m_occluded.cast_centers  # (n_faces1, 3)
     m_occluded_faces = m_occluded.faces.astype(int)  # (n_faces1, 3)
     m_occluder_centers = m_occluder.cast_centers  # (n_faces2, 3)
     m_occluder_faces = m_occluder.faces.astype(int)  # (n_faces2, 3)
 
-    # Query n_neighbors nearest occluder faces for each occluded face
-    neighbours, _ = jk.build_and_query(m_occluder_centers, m_occluded_centers, k=n_neighbors)  # (n_faces1, n_neighbors)
-    
-    # Calculate distances between m_occluder centers and m_occluded center neighbours
-    # m_occluded_centers: (n_faces1, 3)
-    # m_occluder_centers: (n_faces2, 3)
-    # neighbours: (n_faces1, n_neighbors) -- indices into m_occluder_centers
-    # Gather the coordinates of the neighbour occluder centers for each occluded face
-    neighbour_occluder_centers = m_occluder_centers[neighbours]  # (n_faces1, n_neighbors, 3)
-    # Expand m_occluded_centers to (n_faces1, n_neighbors, 3) for broadcasting
-    occluded_centers_expanded = jnp.expand_dims(m_occluded_centers, axis=1)  # (n_faces1, 1, 3)
-    # Compute distances
-    distances = jnp.linalg.norm(occluded_centers_expanded - neighbour_occluder_centers, axis=-1)  # (n_faces1, n_neighbors)
-    # Take only distances smaller than radii
-    # m_occluded.radii: (n_faces1,)
-    # distances: (n_faces1, n_neighbors)
-    # We want a mask: (n_faces1, n_neighbors)
-    radii_expanded = jnp.expand_dims(m_occluded.radii, axis=1)  # (n_faces1, 1)
-    neighbour_mask = distances < radii_expanded  # (n_faces1, n_neighbors)
+    # Query n_neighbors nearest occluder faces for each occluded face.
+    # Only the occluder's visible hemisphere can hide anything, and its near and
+    # far sides project onto the same sky positions -- so push the back-facing
+    # faces far away in *query* space rather than discarding them afterwards.
+    # Filtering after the query would silently waste ~half of every neighbour
+    # slot (measured: back-facing faces are ~46% of the k nearest), which starves
+    # the search and under-counts occlusion by 2-3%.  Displacing them keeps the
+    # shapes static, so this stays jit-safe.
+    occluder_front = m_occluder.mus > 0  # (n_faces2,)
+    far_away = jnp.max(jnp.abs(m_occluder_centers)) * 1e3 + 1e3
+    m_occluder_query_centers = jnp.where(
+        occluder_front[:, None], m_occluder_centers, far_away
+    )
+    neighbours, _ = jk.build_and_query(
+        m_occluder_query_centers, m_occluded_centers,
+        k=min(n_neighbors, m_occluder_faces.shape[0]),
+    )
+    valid_indices = (neighbours >= 0) & (neighbours < m_occluder_faces.shape[0])
+    neighbours = jnp.clip(neighbours, 0, m_occluder_faces.shape[0] - 1)
 
-    # Gather the vertices for each occluded face (all faces)
-    occluded_vertices = m_occluded.cast_vertices[m_occluded_faces.astype(int)]  # (n_faces1, 3, 3)
+    distances = jnp.linalg.norm(
+        m_occluded_centers[:, None, :] - m_occluder_centers[neighbours], axis=-1)
+    # Each circle contains its entire projected triangle. Overlapping triangles
+    # therefore cannot have centres farther apart than the sum of their radii.
+    target_radii = m_occluded.cast_vertex_bounding_circle_radii[:, None]
+    occluder_radii = m_occluder.cast_vertex_bounding_circle_radii[neighbours]
+    neighbour_mask = (valid_indices & occluder_front[neighbours]
+                      & (distances <= target_radii + occluder_radii))
 
-    # Gather the vertices for each neighbour occluder face for each occluded face
-    # neighbours: (n_faces1, n_neighbors)
-    # m_occluder_faces[neighbours]: (n_faces1, n_neighbors, 3)
-    neighbours = jnp.where(neighbour_mask, neighbours, jnp.ones_like(neighbours) * jnp.nan)
-    occluder_vertices = m_occluder.cast_vertices[m_occluder_faces[neighbours.astype(int)]]  # (n_faces1, n_neighbors, 3, 3)
-
-    # Instead of flattening and calling visible_area directly (which is not batched and causes shape errors),
-    # use vmap to vectorize visible_area over the neighbor axis for each occluded face.
-    # v_total_visible_area: (n_faces1, n_neighbors, 3, 3), (n_faces1, n_neighbors, 3, 3) -> (n_faces1, n_neighbors)
-    occlusions = v_total_visible_area(occluded_vertices, occluder_vertices)  # (n_faces1, n_neighbors)
+    occluded_vertices = m_occluded.cast_vertices[m_occluded_faces]
+    occluder_vertices = m_occluder.cast_vertices[m_occluder_faces[neighbours]]
+    occlusions = v_total_visible_area(occluded_vertices, occluder_vertices)
+    # Keep validity separate from the integer indices. NaN-to-integer casts
+    # can select a real triangle, introducing face-order-dependent overlaps.
+    occlusions = jnp.where(neighbour_mask, occlusions, 0.0)
 
     # Sum occlusions from all neighbours for each occluded face
     total_occlusion = jnp.sum(occlusions, axis=1)  # (n_faces1,)
 
-    # Only keep occlusion for visible faces, and clip to the face area
-    clipped_occlusions = jnp.clip(total_occlusion, 0., jnp.where(occluded_visible_mask, m_occluded.cast_areas, 0.0))
-    total_occlusion = jnp.where(occluded_visible_mask, clipped_occlusions, 0.0)
-    return total_occlusion
+    # Back-facing targets cannot contribute; keep the occlusion of every
+    # visible face, bounded by its own projected area.
+    return jnp.where(occluded_visible_mask,
+                     jnp.clip(total_occlusion, 0., m_occluded.cast_areas), 0.)
 
 
 @partial(jax.jit, static_argnames=("n_neighbors",))

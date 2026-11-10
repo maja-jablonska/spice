@@ -1,12 +1,10 @@
-import pickle
-
 import pytest
 from jax import config
 
 config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
-from src.spice.models.mesh_transform import add_pulsations, transform, add_rotation, evaluate_rotation, add_pulsation, reset_pulsations, \
+from spice.models.mesh_transform import add_pulsations, transform, add_rotation, evaluate_rotation, add_pulsation, reset_pulsations, \
     evaluate_pulsations, update_parameters
 from tests.test_models.utils import default_icosphere
 
@@ -17,10 +15,6 @@ class TestMeshTransformations:
     @pytest.fixture
     def mesh_model(self):
         return default_icosphere()
-
-    @pytest.fixture
-    def phoebe_model(self, shared_datadir):
-        return pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
 
     def test_transform_mesh(self, mesh_model):
         vector = jnp.array([1, 1, 1])
@@ -316,7 +310,7 @@ class TestMeshTransformations:
         pulsation velocity — and therefore every pulsation Doppler shift —
         relative to the actual surface motion.
         """
-        from src.spice.models.utils import (evaluate_fourier_for_value,
+        from spice.models.utils import (evaluate_fourier_for_value,
                                             evaluate_fourier_prim_for_value)
 
         P = 2.7

@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N pf9-synth
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ngpus=1
+#PBS -l ncpus=14
+#PBS -l mem=100GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# delta Cep synthetic p-factor, step 2: SPICE disc integration (5000-5020 A, 0.01 A, 100 phases, 5000-vertex mesh, radius
+# curve scaled to 279.5 pc, no rotation) with (a) the Turbospectrum mu-dependence, (b) its mu = 1 spectrum on a uniform
+# disc, (c) the TPayne emulator v1.1.0 at the same inputs. Smoke first. No PBS commands.
+set -u
+source /scratch/y89/mj8805/litrepro/interp/lit_common.sh
+cd /scratch/y89/mj8805/dcep_ts2
+COMMON="--ts-dir out_m009 --variant paper --wl 5000 5020 --step 0.01 --n-mesh 5000 --vrot 0 --radius-scale 1.0200729927"
+nvidia-smi -L
+mkdir -p smoke_synth_m009
+$PY -u dcep_ts_synthesis.py $COMMON --ld atm --max-phases 2 --out smoke_synth_m009 || { echo "SMOKE FAIL ts"; exit 1; }
+$PY -u dcep_ts_synthesis.py $COMMON --emulator $P4 --max-phases 2 --out smoke_synth_m009 || { echo "SMOKE FAIL emulator"; exit 1; }
+echo "SMOKE PASS"
+rc=0
+$PY -u dcep_ts_synthesis.py $COMMON --ld atm --ld lin:0 || rc=1
+$PY -u dcep_ts_synthesis.py $COMMON --emulator $P4 || rc=1
+exit $rc

@@ -1,5 +1,3 @@
-import pickle
-
 import pytest
 import jax.numpy as jnp
 from spice.models.spots import add_spot, add_spherical_harmonic_spots, add_spherical_harmonic_spot, add_spots
@@ -25,23 +23,33 @@ def spherical_harmonic_params():
 
 class TestSpotFunctions:
 
+    def test_add_spherical_harmonic_spot_modifies_mesh_model(self, mock_mesh):
+        spotted = add_spherical_harmonic_spot(mock_mesh, 1, 1, 100., 0)
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
+
     def test_add_spherical_harmonic_spots_modifies_mesh_model_with_single_spot(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
-        with pytest.raises(TypeError, match="unexpected keyword argument 'm'"):
-            add_spherical_harmonic_spots(mock_mesh, m_values[:1], n_values[:1],
-                                         param_deltas[:1], param_indices[:1])
+        spotted = add_spherical_harmonic_spots(mock_mesh, m_values[:1], n_values[:1],
+                                               param_deltas[:1], param_indices[:1])
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        assert not jnp.allclose(spotted.parameters, mock_mesh.parameters)
 
     def test_add_spherical_harmonic_spots_modifies_mesh_model_with_multiple_spots(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
-        with pytest.raises(TypeError, match="unexpected keyword argument 'm'"):
-            add_spherical_harmonic_spots(mock_mesh, m_values, n_values,
-                                         param_deltas, param_indices)
+        spotted = add_spherical_harmonic_spots(mock_mesh, m_values, n_values,
+                                               param_deltas, param_indices)
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        assert not jnp.allclose(spotted.parameters, mock_mesh.parameters)
 
     def test_add_spherical_harmonic_spots_equals_to_two_add_spherical_harmonic_spot(self, mock_mesh, spherical_harmonic_params):
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
-        with pytest.raises(TypeError, match="unexpected keyword argument 'm'"):
-            add_spherical_harmonic_spots(mock_mesh, m_values, n_values,
-                                         param_deltas, param_indices)
+        spotted_plural = add_spherical_harmonic_spots(mock_mesh, m_values, n_values,
+                                                      param_deltas, param_indices)
+        spotted_singular = mock_mesh
+        for m, n, delta, idx in zip(m_values, n_values, param_deltas, param_indices):
+            spotted_singular = add_spherical_harmonic_spot(spotted_singular, m, n, delta, int(idx))
+        assert jnp.allclose(spotted_plural.parameters, spotted_singular.parameters)
 
     def test_raises_error_for_m_larger_than_n_add_spherical_harmonic_spot(self, mock_mesh):
         with pytest.raises(ValueError):
@@ -52,24 +60,24 @@ class TestSpotFunctions:
         with pytest.raises(ValueError):
             add_spherical_harmonic_spot(mock_mesh, 1, 0, param_deltas[0], param_indices[0])
 
-    def test_raises_error_for_read_only_phoebe_model_add_spherical_harmonic_spots(self, spherical_harmonic_params, shared_datadir):
-        phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
+    def test_raises_error_for_read_only_phoebe_model_add_spherical_harmonic_spots(self, spherical_harmonic_params, phoebe_model):
+        phoebe_mesh = phoebe_model
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         with pytest.raises(ValueError):
             add_spherical_harmonic_spots(phoebe_mesh, m_values, n_values, param_deltas, param_indices)
 
     def test_handles_empty_spots_without_modification_add_spherical_harmonic_spots(self, mock_mesh):
         empty_arrays = jnp.array([])
-        with pytest.raises(TypeError, match="unexpected keyword argument 'm'"):
-            add_spherical_harmonic_spots(mock_mesh, empty_arrays, empty_arrays,
-                                         empty_arrays, empty_arrays)
+        spotted = add_spherical_harmonic_spots(mock_mesh, empty_arrays, empty_arrays,
+                                               empty_arrays, empty_arrays)
+        assert jnp.allclose(spotted.parameters, mock_mesh.parameters)
 
     def test_add_spot_applies_modification(self, mock_mesh):
         result = add_spot(mock_mesh, 0.0, 0.0, 50.0, 100.0, 0)
         assert not jnp.allclose(result.parameters, mock_mesh.parameters)
 
-    def test_add_spot_raises_error_for_phoebe_model(self, shared_datadir):
-        phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
+    def test_add_spot_raises_error_for_phoebe_model(self, phoebe_model):
+        phoebe_mesh = phoebe_model
         with pytest.raises(ValueError):
             add_spot(phoebe_mesh, jnp.pi / 2, 0.0, jnp.pi / 4, 1.0, 0)
 
@@ -87,16 +95,16 @@ class TestSpotFunctions:
         tilt_axis = jnp.array([1., 0., 0.])
         tilt_degree = 10.
 
-        with pytest.raises(UnboundLocalError, match="n_degree"):
-            add_spherical_harmonic_spot(
-                mesh=mock_mesh,
-                m_order=4,
-                l_degree=4,
-                param_delta=spot_temp - base_temp,
-                param_index=0,
-                tilt_axis=tilt_axis,
-                tilt_angle=tilt_degree
-            )
+        spotted = add_spherical_harmonic_spot(
+            mesh=mock_mesh,
+            m_order=4,
+            l_degree=4,
+            param_delta=spot_temp - base_temp,
+            param_index=0,
+            tilt_axis=tilt_axis,
+            tilt_angle=tilt_degree
+        )
+        assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
 
     def test_add_tilted_spherical_harmonic_spot_with_zero_tilt(self, mock_mesh):
         base_temp = 5700
@@ -104,32 +112,42 @@ class TestSpotFunctions:
         tilt_axis = jnp.array([1., 0., 0.])
         tilt_degree = 0.
 
-        with pytest.raises(UnboundLocalError, match="n_degree"):
-            add_spherical_harmonic_spot(
-                mesh=mock_mesh,
-                m_order=4,
-                l_degree=4,
-                param_delta=spot_temp - base_temp,
-                param_index=0,
-                tilt_axis=tilt_axis,
-                tilt_angle=tilt_degree
-            )
+        spotted = add_spherical_harmonic_spot(
+            mesh=mock_mesh,
+            m_order=4,
+            l_degree=4,
+            param_delta=spot_temp - base_temp,
+            param_index=0,
+            tilt_axis=tilt_axis,
+            tilt_angle=tilt_degree
+        )
+        assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
 
     def test_add_tilted_spherical_harmonic_spot_different_tilt_axes(self, mock_mesh):
         base_temp = 5700
         spot_temp = 15000
         tilt_degree = 45.
 
-        with pytest.raises(UnboundLocalError, match="n_degree"):
-            add_spherical_harmonic_spot(
-                mesh=mock_mesh,
-                m_order=4,
-                l_degree=4,
-                param_delta=spot_temp - base_temp,
-                param_index=0,
-                tilt_axis=jnp.array([1., 0., 0.]),
-                tilt_angle=tilt_degree
-            )
+        spotted_x = add_spherical_harmonic_spot(
+            mesh=mock_mesh,
+            m_order=4,
+            l_degree=4,
+            param_delta=spot_temp - base_temp,
+            param_index=0,
+            tilt_axis=jnp.array([1., 0., 0.]),
+            tilt_angle=tilt_degree
+        )
+        spotted_y = add_spherical_harmonic_spot(
+            mesh=mock_mesh,
+            m_order=4,
+            l_degree=4,
+            param_delta=spot_temp - base_temp,
+            param_index=0,
+            tilt_axis=jnp.array([0., 1., 0.]),
+            tilt_angle=tilt_degree
+        )
+        # Different tilt axes must give different patterns
+        assert not jnp.allclose(spotted_x.parameters[:, 0], spotted_y.parameters[:, 0])
 
     def test_spot_dimensions(self, mock_mesh):
         """Test dimensions of spot function outputs"""
@@ -157,10 +175,10 @@ class TestSpotFunctions:
         tilt_degree = 45.0
 
         # Test add_spherical_harmonic_spot
-        with pytest.raises(UnboundLocalError, match="n_degree"):
-            add_spherical_harmonic_spot(mock_mesh, m_order, n_degree,
-                                        param_delta, param_index,
-                                        tilt_axis, tilt_degree)
+        spotted = add_spherical_harmonic_spot(mock_mesh, m_order, n_degree,
+                                              param_delta, param_index,
+                                              tilt_axis, tilt_degree)
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
 
     def test_multiple_spots_dimensions(self, mock_mesh):
         """Test dimensions of multiple spots function outputs"""
@@ -188,6 +206,8 @@ class TestSpotFunctions:
         tilt_angles = jnp.array([45.0, 30.0])
 
         # Test add_spherical_harmonic_spots
-        with pytest.raises(TypeError, match="unexpected keyword argument 'm'"):
-            add_spherical_harmonic_spots(mock_mesh, m_orders, n_degrees,
-                                         param_deltas, param_indices, tilt_angles=tilt_angles, tilt_axes=tilt_axes)
+        spotted = add_spherical_harmonic_spots(mock_mesh, m_orders, n_degrees,
+                                               param_deltas, param_indices,
+                                               tilt_angles=tilt_angles, tilt_axes=tilt_axes)
+        chex.assert_equal_shape([spotted.parameters, mock_mesh.parameters])
+        assert not jnp.allclose(spotted.parameters, mock_mesh.parameters)

@@ -1,0 +1,28 @@
+#!/bin/bash
+# p-factor per RV estimator from the SPICE + Turbospectrum delta Cep spectra (dcep_ts_pfactor.py).
+#   qsub -W depend=afterok:<synthesis job> dcep_ts_pfactor.pbs
+# With isolated-line selection on that run's baseline (dcep_ts_line_select.py):
+#   qsub -W depend=afterok:<synthesis job> -v TS_OUT=out_red,SELECT=1 dcep_ts_pfactor.pbs
+#PBS -P y89
+#PBS -q normal
+#PBS -N dcep-ts-pfac
+#PBS -l ncpus=1
+#PBS -l mem=16GB
+#PBS -l walltime=01:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -j oe
+#PBS -m a
+set -eu
+cd /scratch/y89/mj8805/dcep_ts
+TS=/scratch/y89/mj8805/dcep_ts/${TS_OUT:-out}
+PY=/g/data/y89/mj8805/miniforge/envs/astro/bin/python
+LINES=()
+if [ "${SELECT:-0}" = 1 ]; then
+    # isolated lines from the baseline spectra: 2% clear flux for reference, the 10% list is measured
+    $PY -u dcep_ts_line_select.py "$TS"/synth_geff_xiphi_atm.npz --cont 0.98 --out "$TS"/lines_cont0.98.csv
+    $PY -u dcep_ts_line_select.py "$TS"/synth_geff_xiphi_atm.npz --cont 0.90 --out "$TS"/lines.csv \
+        --plot "$TS"/lines.png
+    LINES=(--lines "$TS"/lines.csv)
+fi
+$PY -u dcep_ts_pfactor.py "$TS"/synth_*.npz "${LINES[@]}" \
+    --csv "$TS"/dcep_ts_pfactor.csv --plot "$TS"/dcep_ts_pfactor.png

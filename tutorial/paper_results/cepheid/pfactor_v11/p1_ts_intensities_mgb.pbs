@@ -1,0 +1,19 @@
+#!/bin/bash
+#PBS -N pfmg-ts
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=48
+#PBS -l mem=180GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# delta Cep synthetic p-factor in the Mg b window (5160-5200 A, the window of the HARPS-N velocity test), step 1: Turbospectrum I(lambda, mu) at 100 phases of the paper's literature model
+# (Trahin Teff, Luck log g / xi, [Fe/H] -0.09, solar-scaled abundances) over 4980-5040 A. Smoke first. No PBS commands.
+set -u
+export OMP_NUM_THREADS=1
+cd /scratch/y89/mj8805/dcep_ts2
+PY=/g/data/y89/mj8805/miniforge/envs/astro/bin/python
+$PY -u dcep_ts_intensities.py --table dcep_ts_phases_paper_m009.csv --out /scratch/y89/mj8805/dcep_ts2/out_mgb_smoke --max-rows 1 --lam 5150 5210 --workers 1 \
+    || { echo "SMOKE FAIL"; exit 1; }
+echo "SMOKE PASS"
+$PY -u dcep_ts_intensities.py --table dcep_ts_phases_paper_m009.csv --out /scratch/y89/mj8805/dcep_ts2/out_mgb --lam 5150 5210 --workers "${PBS_NCPUS:-48}"

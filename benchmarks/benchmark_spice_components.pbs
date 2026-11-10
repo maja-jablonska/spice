@@ -19,17 +19,26 @@
 #  (astro_emulators_toolkit) installed in the env, and they download from the
 #  Hugging Face Hub on first use.  Gadi compute nodes have no internet, so
 #  pre-populate the cache on a login node first, e.g.
-#      export HF_HOME=/scratch/y89/$USER/hf-cache
 #      python -c "from astro_emulators_toolkit import Emulator; \
 #          [Emulator.from_pretrained(n) for n in \
 #           ('RozanskiT/TPayne-spice-harps','RozanskiT/TPayne-spice-small-random')]"
-#  and pass the same HF_HOME below.  This job passes ``--skip-missing-sources``
-#  so a bundle that can't be loaded is skipped and the rest still run; locally
-#  the benchmark aborts instead (drop that flag when you want a hard failure).
+#  NOTE: astro_emulators_toolkit ignores HF_HOME.  Its cache is
+#  $ASTRO_EMU_CACHE_DIR, else $XDG_CACHE_HOME/astro_emulators_toolkit/hub, else
+#  ~/.cache/astro_emulators_toolkit/hub -- so by default the bundles live on the
+#  home quota.  Set ASTRO_EMU_CACHE_DIR to relocate them (same value on the
+#  login node and here).
+#  Offline, `from_pretrained` may fall back to ANY cached snapshot, including
+#  the superseded pre-Aug-2026 TPayne-spice-harps revision (bcc8a6e).  SPICE's
+#  wrapper refuses that revision and the job prints the resolved bundle
+#  revision + parameter names up front, so check the log.
+#  This job passes ``--skip-missing-sources`` so a bundle that can't be loaded
+#  is skipped and the rest still run; locally the benchmark aborts instead
+#  (drop that flag when you want a hard failure).
 #
 #  USAGE
 #    1. Edit the "EDIT" lines below: project code (-P), queue (-q), storage,
-#       PYTHON_BIN, and (optionally) the CUDA module load.
+#       PYTHON_BIN / PYTHONPATH, and (optionally) the CUDA module load.  The
+#       header defaults target the RSAA A100 queue (gpursaa, ncpus = 14 x ngpus).
 #    2. Submit:   qsub benchmarks/benchmark_spice_components.pbs
 #       Override knobs at submit time, e.g. a quick GPU smoke test:
 #         qsub -v QUICK=1 benchmarks/benchmark_spice_components.pbs
@@ -37,29 +46,47 @@
 #         qsub -v SOURCES="static linear_grid",SWEEPS="mesh chunks",N_RUNS=9 \
 #              benchmarks/benchmark_spice_components.pbs
 #       include the pretrained emulators (cache pre-populated, see above):
-#         qsub -v SOURCES="static aemu_harps aemu_small_random",\
-#HF_HOME=/scratch/y89/$USER/hf-cache benchmarks/benchmark_spice_components.pbs
-#    3. Monitor:  qstat -fx <jobid>  ;  tail -f benchmark_spice_components.o<jobid>
+#         qsub -v SOURCES="static aemu_harps aemu_small_random" \
+#              benchmarks/benchmark_spice_components.pbs
+#       the same run on a V100 (gpuvolta wants ncpus = 12 x ngpus):
+#         qsub -P mk27 -q gpuvolta -l ncpus=12 -l ngpus=1 -l mem=90GB \
+#              -v SOURCES="static aemu_harps" benchmarks/benchmark_spice_components.pbs
+#       Paper table (arXiv:2511.10998, Table "bench_gadi"): static + TPayne on
+#       the wavelength sweep (N_lambda = 200, 1000, 4000 at 2000 vertices) and
+#       the mesh sweep (300, 1000, 5000, 20000 vertices at N_lambda = 2000),
+#       plus a second pass with the TPayne mesh sweep at N_lambda = 1024:
+#         qsub -v SOURCES="static aemu_harps",SWEEPS="wavelengths mesh",\
+#EXTRA_ARGS="--n-wavelengths-sweep 200 1000 4000",\
+#SECOND_ARGS="--sources aemu_harps --sweeps mesh --fixed-n-wl-for-mesh 1024 --precision x64" \
+#              benchmarks/benchmark_spice_components.pbs
+#    3. Monitor:  qstat -fx <jobid>  ;  qcat <jobid>  (the .o file only lands
+#       in the submit dir when the job ends)
 #    4. Restart:  just resubmit — it re-runs from scratch and overwrites the CSV.
 #
-#  RESOURCE NOTES (gpuvolta)
-#    * ncpus must be a multiple of 12 and ngpus = ncpus/12; mem <= ~96 GB per
-#      GPU.  One V100 is plenty — synthesis is chunked over surface elements
-#      and wavelengths inside `simulate_observed_flux`.
-#    * Most of the walltime is XLA compilation: the full default run does
+#  RESOURCE NOTES
+#    * gpursaa (A100-PCIE-40GB): ncpus = 14 x ngpus.  gpuvolta (V100-SXM2-32GB):
+#      ncpus = 12 x ngpus, mem <= ~96 GB per GPU.  One GPU is plenty —
+#      synthesis is chunked over surface elements and wavelengths inside
+#      `simulate_observed_flux`.
+#    * Much of the walltime is XLA compilation: the full default run does
 #      ~60 distinct jit specialisations (one per source x chunk-size combo and
-#      per array-shape change).  01:00:00 is comfortable for the defaults;
-#      bump it if you enlarge --mesh-resolutions / --n-wavelengths-sweep a lot.
+#      per array-shape change).  The paper-table configuration above with the
+#      HARPS bundle took well under the 03:00:00 requested here; bump it if you
+#      enlarge --mesh-resolutions / --n-wavelengths-sweep a lot.
 #============================================================================
 
-#PBS -P mk27                                  # EDIT: your NCI project code
-#PBS -q gpuvolta                               # EDIT: GPU queue (gpuvolta / dgxa100 / an RSAA GPU queue)
+# EDIT the project (-P) and queue (-q): gpursaa = A100-PCIE-40GB (RSAA, project
+# dg97), gpuvolta = V100-SXM2-32GB (project mk27), dgxa100.  PBS Pro rejects
+# trailing comments on directive lines, so keep them bare.
+#PBS -P dg97
+#PBS -q gpursaa
 #PBS -l ngpus=1
-#PBS -l ncpus=12
+#PBS -l ncpus=14
 #PBS -l mem=90GB
-#PBS -l walltime=01:00:00
+#PBS -l walltime=03:00:00
 #PBS -l jobfs=20GB
-#PBS -l storage=scratch/y89+gdata/y89          # EDIT: storage your env / outputs live on
+# EDIT: storage your env / outputs live on
+#PBS -l storage=scratch/y89+gdata/y89
 #PBS -l wd
 #PBS -N spice_benchmark
 #PBS -j oe
@@ -77,9 +104,13 @@ module load python3/3.11.7        # nearest available; check `module avail pytho
 # wheels), uncomment and pin to whatever the env was built against:
 # module load cuda/12.6.2 cudnn/9.5.0-cuda12
 
-# Conda/venv with spice + jax[cuda] (and matplotlib, zarr, pandas, pyarrow;
-# plus stellar-spice[aemu] for the aemu_* sources) installed.
-PYTHON_BIN="${PYTHON_BIN:-/scratch/y89/mj8805/miniforge/envs/astro/bin/python}"
+# Conda/venv with jax[cuda] (and matplotlib, zarr, pandas, pyarrow; plus
+# astro_emulators_toolkit for the aemu_* sources) installed.  ``spice`` itself
+# is picked up from the checkout: the benchmark script prepends ``../src`` to
+# sys.path, so submitting from the repo root is enough; PYTHONPATH below lets
+# you point at a different source tree.
+PYTHON_BIN="${PYTHON_BIN:-/g/data/y89/mj8805/miniforge/envs/astro/bin/python}"
+[ -n "${PYTHONPATH:-}" ] && export PYTHONPATH
 
 # Don't let SPICE / JAX fall back to CPU; let XLA size its own GPU allocation.
 unset JAX_PLATFORMS
@@ -90,8 +121,10 @@ export TF_CPP_MIN_LOG_LEVEL=2
 export OMP_NUM_THREADS=${PBS_NCPUS:-12}
 export MKL_NUM_THREADS=${PBS_NCPUS:-12}
 export OPENBLAS_NUM_THREADS=${PBS_NCPUS:-12}
-# Hugging Face cache for the aemu_* bundles (override with `qsub -v HF_HOME=...`).
-export HF_HOME="${HF_HOME:-$PBS_O_WORKDIR/hf-cache}"
+# Bundle cache for the aemu_* sources.  astro_emulators_toolkit ignores
+# HF_HOME; leave ASTRO_EMU_CACHE_DIR unset to use ~/.cache/astro_emulators_toolkit/hub
+# (populate it on a login node first -- compute nodes are offline).
+[ -n "${ASTRO_EMU_CACHE_DIR:-}" ] && export ASTRO_EMU_CACHE_DIR
 
 # ---------------------------------------------------------------------------
 # 2) Knobs (override with `qsub -v NAME=value,...`)
@@ -104,6 +137,8 @@ PRECISION="${PRECISION:-both}"                       # x32 | x64 | both (SPICE t
 OUTPUT_DIR="${OUTPUT_DIR:-$PBS_O_WORKDIR/benchmark_results}"
 OUTPUT_PREFIX="${OUTPUT_PREFIX:-$OUTPUT_DIR/spice_components_${PBS_JOBID:-local}}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"                        # anything else, e.g. "--mesh-resolutions 300 1000 5000 20000 80000"
+SECOND_ARGS="${SECOND_ARGS:-}"                      # if set: a second, independent invocation with exactly these
+                                                    # args (plus --output-prefix ${OUTPUT_PREFIX}_b --skip-missing-sources)
 mkdir -p "$OUTPUT_DIR"
 
 ARGS=( --sources $SOURCES --sweeps $SWEEPS --n-runs "$N_RUNS" --precision "$PRECISION" \
@@ -118,16 +153,59 @@ echo "Job:        ${PBS_JOBID:-<interactive>}"
 echo "Node:       $(hostname)"
 echo "CPUs/GPUs:  ${PBS_NCPUS:-?} / ${PBS_NGPUS:-?}"
 echo "Python:     ${PYTHON_BIN}"
-echo "HF_HOME:    ${HF_HOME}"
+echo "PYTHONPATH: ${PYTHONPATH:-<unset>}"
+echo "Bundle dir: ${ASTRO_EMU_CACHE_DIR:-~/.cache/astro_emulators_toolkit/hub}"
 echo "Args:       ${ARGS[*]}"
+[ -n "$SECOND_ARGS" ] && echo "2nd pass:   ${SECOND_ARGS} --output-prefix ${OUTPUT_PREFIX}_b"
 echo "Output:     ${OUTPUT_PREFIX}.csv / .png"
 echo "==============================================================="
-nvidia-smi || true
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || nvidia-smi || true
 "${PYTHON_BIN}" -c "import jax; print('jax', jax.__version__, '| devices:', jax.devices())" || true
+"${PYTHON_BIN}" -c "import spice, sys; print('spice from', spice.__file__)" || true
+
+# Report which bundle revision each requested aemu_* source resolves to (the
+# wrapper refuses the known-bad revision; this makes the resolved one visible
+# in the log either way).
+case " $SOURCES $SECOND_ARGS " in *aemu_*)
+"${PYTHON_BIN}" - $SOURCES $SECOND_ARGS <<'PY' || true
+import os, sys
+try:
+    import jax
+    jax.config.update("jax_enable_x64", True)   # transformer_payne insists on x64
+    import astro_emulators_toolkit as aemu
+    from spice.spectrum.aemu_spectrum_emulator import IntensityPretrainedAemuSpectrumEmulator
+except Exception as exc:
+    print(f"aemu bundle check skipped: {exc}")
+    sys.exit(0)
+bundles = {"aemu_harps": "RozanskiT/TPayne-spice-harps",
+           "aemu_harps_interp": "mjablonska/TPayne-spice-harps-interp",
+           "aemu_small_random": "RozanskiT/TPayne-spice-small-random"}
+cache = (os.environ.get("ASTRO_EMU_CACHE_DIR")
+         or os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+                         "astro_emulators_toolkit", "hub"))
+wanted = " ".join(sys.argv[1:])
+for key, repo in bundles.items():
+    if key not in wanted:
+        continue
+    ref = os.path.join(cache, "models--" + repo.replace("/", "--"), "refs", "main")
+    rev = open(ref).read().strip() if os.path.exists(ref) else "<no refs/main in cache>"
+    try:
+        emu = IntensityPretrainedAemuSpectrumEmulator(repo)
+        print(f"[bundle] {key}: {repo} @ {rev[:7]}  params={emu.stellar_parameter_names}")
+    except Exception as exc:
+        print(f"[bundle] {key}: {repo} @ {rev[:7]}  FAILED TO LOAD: {exc}")
+PY
+;; esac
 
 # ---------------------------------------------------------------------------
 # 3) Run
 # ---------------------------------------------------------------------------
 "${PYTHON_BIN}" -u benchmarks/benchmark_spice_components.py "${ARGS[@]}"
+echo "[$(date '+%F %T')] pass 1 done — results in ${OUTPUT_PREFIX}.csv"
 
-echo "[$(date '+%F %T')] done — results in ${OUTPUT_PREFIX}.csv"
+if [ -n "$SECOND_ARGS" ]; then
+    echo "[$(date '+%F %T')] second pass: ${SECOND_ARGS}"
+    "${PYTHON_BIN}" -u benchmarks/benchmark_spice_components.py $SECOND_ARGS \
+        --output-prefix "${OUTPUT_PREFIX}_b" --skip-missing-sources
+    echo "[$(date '+%F %T')] pass 2 done — results in ${OUTPUT_PREFIX}_b.csv"
+fi

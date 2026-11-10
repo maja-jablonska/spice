@@ -13,6 +13,8 @@ Several intensity sources of increasing cost are compared, all driven through
   zarr grid: multilinear interpolation in (Teff, logg), linear wavelength
   resampling, and a linear limb-darkening law.  A stand-in for a real
   precomputed atmosphere grid.
+* ``aemu_harps_interp`` – the same adapter around the released
+  ``mjablonska/TPayne-spice-harps-interp`` bundle (11 inputs).
 * ``aemu_harps``        – ``IntensityPretrainedAemuSpectrumEmulator`` wrapping
   ``aemu.Emulator.from_pretrained('RozanskiT/TPayne-spice-harps')``.
 * ``aemu_small_random`` – same wrapper around
@@ -89,6 +91,8 @@ from _bench_common import _resolve_precisions, _planck_like
 AEMU_BUNDLES = {
     "aemu_harps": "RozanskiT/TPayne-spice-harps",
     "aemu_small_random": "RozanskiT/TPayne-spice-small-random",
+    # released interpolated-atmosphere HARPS emulator (11 inputs; v1.1.0 = Balmer-wing fine-tune)
+    "aemu_harps_interp": "mjablonska/TPayne-spice-harps-interp",
 }
 LIGHTWEIGHT_SOURCES = ("static", "linear_grid")
 SOURCES = LIGHTWEIGHT_SOURCES + tuple(AEMU_BUNDLES)   # everything selectable

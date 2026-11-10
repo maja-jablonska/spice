@@ -116,11 +116,13 @@ def repeat_last(arr: ArrayLike) -> ArrayLike:
     Returns:
         ArrayLike: Array with nan values filled with last non-nan values
     """    
-    return jax.lax.cond(jnp.any(jnp.all(jnp.isnan(arr), axis=1)),
-                        lambda: jax.lax.fori_loop(0, jnp.sum(jnp.all(jnp.isnan(arr), axis=1)),
-                                                  lambda i, _arr: append_to_last_nan(_arr, last_non_nan(_arr)),
-                                                  arr),
-                        lambda: arr)
+    # Every all-nan row receives the last non-nan row. The former fori_loop
+    # over the (data-dependent) number of nan rows produced exactly this, but
+    # a dynamic trip count blocks reverse-mode differentiation through the
+    # occlusion geometry; the masked form is static, identical, and lets
+    # radii / inclination be fitted by gradient.
+    nan_row = jnp.all(jnp.isnan(arr), axis=1)
+    return jnp.where(nan_row[:, None], last_non_nan(arr)[None, :], arr)
 
 
 def wrap(arr: ArrayLike) -> ArrayLike:

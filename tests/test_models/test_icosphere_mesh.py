@@ -1,3 +1,5 @@
+import pytest
+
 from spice.models import IcosphereModel
 import jax.numpy as jnp
 
@@ -92,7 +94,7 @@ class TestIcosphere:
                                            ]).T)
                        )
 
-    def test_icosphere_parameters_from_list_logg_overriding(self):
+    def test_icosphere_parameters_from_list_logg_computed_by_default(self):
         model = IcosphereModel.construct(
                 n_vertices=1000,
                 radius=1.,
@@ -112,15 +114,16 @@ class TestIcosphere:
                        )
 
 
-    def test_icosphere_parameters_from_list_logg_no_overriding(self):
-        model = IcosphereModel.construct(
-            n_vertices=1000,
-            radius=1.,
-            mass=1.,
-            parameters=[5777., 0.5],
-            parameter_names=['teff', 'logg'],
-            override_log_g=False
-        )
+    def test_icosphere_parameters_from_list_logg_user_override(self):
+        with pytest.warns(UserWarning, match="override_log_g is True"):
+            model = IcosphereModel.construct(
+                n_vertices=1000,
+                radius=1.,
+                mass=1.,
+                parameters=[5777., 0.5],
+                parameter_names=['teff', 'logg'],
+                override_log_g=True
+            )
 
         assert jnp.all(jnp.isclose(model.parameters,
                                    jnp.vstack([
@@ -179,3 +182,19 @@ class TestIcosphere:
         chex.assert_shape(model.vertices_pulsation_offsets, model.vertices.shape)
         chex.assert_shape(model.center_pulsation_offsets, model.centers.shape)
         chex.assert_shape(model.area_pulsation_offsets, model.areas.shape)
+
+
+def test_centrifugal_gravity_uses_kilometres_per_second():
+    from spice.models.mesh_model import calculate_log_gs
+    # Equatorial surface gravity of a solar-mass/radius star at 100 km/s.
+    acceleration = 274.20011165737316 - 100000.**2 / 695700000.
+    expected = jnp.log10(acceleration * 100.)
+    actual = calculate_log_gs(1., jnp.array([[1., 0., 0.]]), jnp.array([100.]))
+    assert float(actual[0]) == pytest.approx(float(expected), abs=1e-12)
+
+
+def test_integer_parameters_do_not_truncate_computed_logg():
+    model = IcosphereModel.construct(100, 1., 1., [5777, 0], ['teff', 'logg'])
+    assert jnp.issubdtype(model.parameters.dtype, jnp.floating)
+    assert jnp.allclose(model.parameters[:, 1], model.log_gs)
+    assert jnp.all(model.parameters[:, 1] > 4.4)

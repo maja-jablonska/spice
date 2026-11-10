@@ -21,6 +21,7 @@ _lazy_imports = {
     "horizontal_to_radial_ratio": ".utils",
     # eclipse_utils.py
     "find_eclipses": ".eclipse_utils",
+    "find_binary_eclipses": ".eclipse_utils",
 }
 
 # PHOEBE-related imports
