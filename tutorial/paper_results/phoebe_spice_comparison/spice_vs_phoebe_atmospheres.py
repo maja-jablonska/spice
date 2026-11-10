@@ -59,7 +59,56 @@ from pathlib import Path
 
 import numpy as np
 
-BUNDLE = "RozanskiT/TPayne-spice-harps"
+# The paper's emulator: interpolated-MARCS TransformerPayne, Balmer-wing
+# fine-tune. Pinned to the tag rather than ``main`` so the numbers in Appendix C
+# can be traced to one set of weights. (The Sept-2026 results in
+# atmosphere_out/ were made with the superseded RozanskiT/TPayne-spice-harps.)
+BUNDLE = "mjablonska/TPayne-spice-harps-interp"
+BUNDLE_REVISION = "v1.1.0"
+
+
+def resolve_bundle(bundle=BUNDLE, revision=BUNDLE_REVISION):
+    """Local snapshot directory of ``bundle`` at ``revision``, plus provenance.
+
+    A local directory is passed through unchanged. A Hugging Face repo id is
+    downloaded (or read from the toolkit cache) at the pinned revision, so the
+    SPICE wrapper -- which takes no revision argument -- loads exactly that
+    snapshot. Returns ``(path, provenance_dict)``.
+    """
+    if os.path.isdir(bundle):
+        path = bundle
+        prov = {"bundle": bundle, "revision": None}
+    else:
+        from astro_emulators_toolkit.bundle.hub import get_cache_dir, snapshot_download
+        path = snapshot_download(bundle, revision=revision,
+                                 cache_dir=str(get_cache_dir() / "hub"))
+        prov = {"bundle": bundle, "revision": revision}
+    prov["snapshot"] = str(path)
+    integrity = Path(path) / "bundle_integrity.json"
+    if integrity.exists():
+        prov["bundle_id"] = json.loads(integrity.read_text()).get("bundle_id")
+    return str(path), prov
+
+
+def emulator_parameter_values(names, teff, logg, feh, vmicro):
+    """Raw parameter dict for an aemu bundle, in that bundle's own names.
+
+    The Aug-2026 bundle calls the atmosphere inputs ``marcs_teff``/``marcs_logg``;
+    the interpolated-atmosphere bundles call them ``teff``/``logg`` and add the
+    abundance offsets a, c, n, o, r, s, left at 0 (scaled solar, as in ck2004
+    and phoenix). Anything not given is filled with 0 by ``to_parameters``, so
+    a missing temperature/gravity name is an error here, not a silent zero.
+    """
+    names = list(names)
+    t_key = "marcs_teff" if "marcs_teff" in names else "teff"
+    g_key = "marcs_logg" if "marcs_logg" in names else "logg"
+    values = {t_key: float(teff), g_key: float(logg),
+              "feh": float(feh), "vmicro": float(vmicro)}
+    missing = [k for k in values if k not in names]
+    if missing:
+        raise ValueError(
+            f"bundle does not expose {missing}; its parameters are {names}.")
+    return values, g_key
 
 # Two independent comparison suites. They answer different questions and must
 # not be mixed: comparing SPICE's MARCS emulator against PHOEBE's blackbody
@@ -179,14 +228,13 @@ class SpiceSide:
     the emulator for one suite against the atmosphere list of the other.
     """
 
-    def __init__(self, kind, bundle=BUNDLE):
+    def __init__(self, kind, bundle=BUNDLE, revision=BUNDLE_REVISION):
         self.kind = kind
+        self.provenance = None
         if kind == "aemu":
-            from spice.spectrum.aemu_spectrum_emulator import (
-                IntensityPretrainedAemuSpectrumEmulator,
-            )
-            self.emulator = IntensityPretrainedAemuSpectrumEmulator(bundle)
-            self.label = f"SPICE aemu ({bundle})"
+            self.emulator, self.provenance = load_emulator(bundle, revision)
+            rev = f"@{revision}" if self.provenance.get("revision") else ""
+            self.label = f"SPICE aemu ({bundle}{rev})"
         elif kind == "blackbody":
             from spice.spectrum.blackbody import Blackbody
             # No ld_law: the bare Planck function, matching PHOEBE's blackbody,
@@ -207,22 +255,21 @@ class SpiceSide:
             # rather than silently passed to something that ignores them.
             import jax.numpy as jnp
             return jnp.array([float(teff)])
-        values = {"marcs_teff": float(teff), "marcs_logg": float(logg),
-                  "feh": float(feh), "vmicro": float(vmicro)}
-        missing = [k for k in values if k not in self.emulator.stellar_parameter_names]
-        if missing:
-            raise ValueError(
-                f"bundle does not expose {missing}; its parameters are "
-                f"{self.emulator.stellar_parameter_names}. Fetch the current revision."
-            )
+        values, _ = emulator_parameter_values(
+            self.emulator.stellar_parameter_names, teff, logg, feh, vmicro)
         return self.emulator.to_parameters(values)
 
 
-def load_emulator(bundle=BUNDLE):
+def load_emulator(bundle=BUNDLE, revision=BUNDLE_REVISION):
+    """``(emulator, provenance)`` for ``bundle`` pinned at ``revision``."""
     from spice.spectrum.aemu_spectrum_emulator import (
         IntensityPretrainedAemuSpectrumEmulator,
     )
-    return IntensityPretrainedAemuSpectrumEmulator(bundle)
+    path, prov = resolve_bundle(bundle, revision)
+    emulator = IntensityPretrainedAemuSpectrumEmulator(path)
+    prov["parameters"] = list(emulator.stellar_parameter_names)
+    print(f"emulator: {prov}", flush=True)
+    return emulator, prov
 
 
 def spice_intensity_grid(spice, log_wavelengths, params, mus):
@@ -374,7 +421,7 @@ def run_intensity(args, extra_points=()):
 
     suite = SUITES[args.suite]
     bands = load_passbands(atms=suite["phoebe_atms"])
-    spice = SpiceSide(suite["spice"], args.bundle)
+    spice = SpiceSide(suite["spice"], args.bundle, args.revision)
     print(f"suite '{args.suite}': {suite['title']}")
     print(f"  SPICE side  : {spice.label}")
     print(f"  PHOEBE atms : {suite['phoebe_atms']}\n")
@@ -465,6 +512,7 @@ def run_intensity(args, extra_points=()):
         "axes": {"teffs": args.teffs, "loggs": args.loggs, "fehs": args.fehs},
         "vmicro": args.vmicro,
         "bundle": args.bundle,
+        "emulator_provenance": spice.provenance,
         "reference": REFERENCE_PARAMS,
         "suite": args.suite,
         "suite_title": suite["title"],
@@ -672,7 +720,10 @@ def main():
                              "PHOEBE ck2004/phoenix; 'blackbody' is the control, "
                              "SPICE's Blackbody against PHOEBE's, with identical "
                              "physics on both sides")
-    parser.add_argument("--bundle", default=BUNDLE)
+    parser.add_argument("--bundle", default=BUNDLE,
+                        help="Hugging Face repo id or local bundle directory")
+    parser.add_argument("--revision", default=BUNDLE_REVISION,
+                        help="bundle tag/commit (ignored for a local directory)")
     parser.add_argument("--teffs", type=float, nargs="+", default=DEFAULT_TEFFS)
     parser.add_argument("--loggs", type=float, nargs="+", default=DEFAULT_LOGGS)
     parser.add_argument("--fehs", type=float, nargs="+", default=DEFAULT_FEHS)

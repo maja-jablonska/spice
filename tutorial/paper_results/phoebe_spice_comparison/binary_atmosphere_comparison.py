@@ -44,6 +44,7 @@ import time
 import numpy as np
 
 DAYS_TO_YR = 0.0027378507871321013
+ORBIT_BATCH = 13  # epochs per evaluate_orbit_at_times call (GPU memory; see spice_light_curve)
 DEG_TO_RAD = 0.017453292519943295
 
 # Representative systems, spanning the axes the intensity grid says matter.
@@ -223,6 +224,7 @@ def spice_binary(b, n_mesh, emu, feh, vmicro, blackbody=False, n_neighbours=None
     from spice.models.binary import Binary, add_orbit
     from spice.models.mesh_model import IcosphereModel
     from spice.models.mesh_view import get_mesh_view
+    from spice_vs_phoebe_atmospheres import emulator_parameter_values
 
     if blackbody:
         from spice.spectrum.blackbody import Blackbody
@@ -239,12 +241,12 @@ def spice_binary(b, n_mesh, emu, feh, vmicro, blackbody=False, n_neighbours=None
     else:
         emulator = emu
         names = list(emulator.stellar_parameter_names)
-        log_g_index = names.index("marcs_logg")
+        _, g_key = emulator_parameter_values(names, 5000.0, 4.0, feh, vmicro)
+        log_g_index = names.index(g_key)
 
         def parameters(teff):
-            return emulator.to_parameters({
-                "marcs_teff": float(teff), "marcs_logg": 4.0,
-                "feh": float(feh), "vmicro": float(vmicro)})
+            values, _ = emulator_parameter_values(names, teff, 4.0, feh, vmicro)
+            return emulator.to_parameters(values)
 
     def body(mass, radius, teff):
         return get_mesh_view(
@@ -300,11 +302,18 @@ def spice_light_curve(binary, emulator, times, filters, wavelengths,
     from spice.spectrum.spectrum import AB_passband_luminosity, simulate_observed_flux
 
     log_wavelengths = jnp.log10(wavelengths)
-    pb1, pb2 = evaluate_orbit_at_times(binary, times * DAYS_TO_YR)
+    # evaluate_orbit_at_times vmaps the occlusion over every epoch at once; its
+    # clipping buffers scale as n_epochs x n_faces x n_neighbours, so 121 epochs
+    # at 20480 faces need >80 GB on the GPU (13 epochs fit). Evaluate in batches;
+    # each epoch is independent, so results are identical.
+    def orbit_batches(batch=ORBIT_BATCH):
+        for s in range(0, len(times), batch):
+            b1, b2 = evaluate_orbit_at_times(binary, times[s:s + batch] * DAYS_TO_YR)
+            yield from zip(b1, b2)
 
     mags = {k: [] for k in filters}
     per_body = []
-    for i, (_pb1, _pb2) in enumerate(zip(pb1, pb2)):
+    for i, (_pb1, _pb2) in enumerate(orbit_batches()):
         t0 = time.time()
         # ``wavelengths_chunk_size`` is left at its default, which since the
         # 2026-09 change means "one chunk, no padding" for any grid up to 1024
@@ -356,7 +365,8 @@ def run_binary(args):
     hi = min(EMULATOR_RANGE_A[1], max(b["wl"].max() for b in bands.values()))
     wavelengths = jnp.asarray(np.linspace(lo, hi, args.n_wavelengths))
 
-    emu = load_emulator(args.bundle) if spice_kind == "aemu" else None
+    emu, provenance = (load_emulator(args.bundle, args.revision)
+                       if spice_kind == "aemu" else (None, None))
 
     results = {}
     for name in systems:
@@ -422,6 +432,7 @@ def run_binary(args):
             "suite": suite, "spice_kind": spice_kind, "atms": list(args.atms),
             "n_mesh_phoebe": realized,
             "n_neighbours": getattr(args, "n_neighbours", None),
+            "emulator_provenance": provenance,
         }
     return results
 

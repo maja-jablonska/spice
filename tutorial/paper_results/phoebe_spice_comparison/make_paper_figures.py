@@ -8,19 +8,22 @@ and writes one PDF per figure into ``atmosphere_out/figures/``.
 
 Encoding, used identically in every panel so the reader learns it once:
 
-* **hue = atmosphere** -- MARCS/aemu, ck2004, phoenix, blackbody. Colour follows
-  the physics, not the code, so the same model is the same colour everywhere.
-* **linestyle = code** -- SPICE solid, PHOEBE dashed. Blackbody is the only model
-  both codes have, and it is the only place both linestyles appear for one hue;
-  identity is therefore never carried by colour alone.
+* **hue family = code** -- SPICE in blue (``cmr.gem``), PHOEBE in purple/pink
+  (``cmr.bubblegum``); within PHOEBE, ck2004 and phoenix take different
+  positions on the map. The same identity is the same colour everywhere.
+* **linestyle = code** -- SPICE is a thick translucent solid band, each PHOEBE
+  atmosphere its own dash pattern laid on top; identity is therefore never
+  carried by colour alone.
 
-The palette is the Okabe-Ito-derived set
-``#0072B2 / #D55E00 / #009E73 / #8C6D1F``, which passes all six checks of the
-dataviz validator against a light surface (lightness band, chroma floor, CVD
-separation, normal-vision floor, contrast >= 3:1) with no warnings. The
-diverging map used for the response heatmaps is built from the same blue and
-vermillion with a neutral -- not hued -- midpoint, so zero reads as "no
-difference" rather than as a colour.
+The palette is drawn from the two ``cmasher`` maps used throughout the paper
+(``cmr.gem`` for SPICE, ``cmr.bubblegum`` for the PHOEBE atmospheres), at
+positions chosen by search against the dataviz validator so the resulting
+triple passes all six checks on a light surface with no warnings (lightness
+band, chroma floor, CVD separation, normal-vision floor, contrast >= 3:1).
+The diverging map used for the response heatmaps is composed from the same
+two anchors with a neutral -- not hued -- midpoint, so zero reads as "no
+difference" rather than as a colour. See the ``ATM_COLOR`` block for why
+three hues suffice for four atmosphere identities.
 """
 import argparse
 import pickle
@@ -34,19 +37,48 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
 
 # --- encoding -------------------------------------------------------------
+# Hues are drawn from the two cmasher maps the rest of the paper uses --
+# cmr.bubblegum for discrete series (the delta Cephei phases, the spot
+# profiles) and cmr.gem for continuous maps -- so these figures share one
+# vocabulary with the others.
+#
+# Assignment is by *code*, not by table: SPICE from gem (blue), PHOEBE from
+# bubblegum (purple/pink). That gives the largest hue separation available,
+# and lets the hue family alone say which code a curve belongs to.
+#
+# Only three hues are needed rather than four: blackbody and phoenix never
+# appear on the same figure (they live in separate suites), so they share a
+# slot. Four categories sampled from bubblegum alone cannot be made distinct --
+# it is a single-family sequential map, and the best 4-sample window still
+# fails the normal-vision floor (adjacent purples at dE 12.7 < 15).
+#
+# The exact positions were chosen by search against the dataviz validator:
+# this triple passes all six checks on a light surface with no warnings
+# (CVD dE 17.8, normal-vision dE 22.0, contrast >= 3:1 for all). It fails the
+# lightness band on a *dark* surface, which is irrelevant for print.
+import cmasher  # noqa: F401  -- registers the cmr.* colormaps with matplotlib
+from matplotlib.colors import to_hex as _to_hex
+
+_BUBBLEGUM = matplotlib.colormaps["cmr.bubblegum"]
+_GEM = matplotlib.colormaps["cmr.gem"]
+
+_SPICE_HEX = _to_hex(_GEM(0.65))          # #6d83ff
+_CK2004_HEX = _to_hex(_BUBBLEGUM(0.30))   # #652bb3
+_PHOENIX_HEX = _to_hex(_BUBBLEGUM(0.70))  # #e05eaa
+
 ATM_COLOR = {
-    "aemu": "#0072B2",       # SPICE's MARCS intensity bundle
-    "spice_blackbody": "#0072B2",
-    "ck2004": "#D55E00",
-    "phoenix": "#009E73",
-    "blackbody": "#8C6D1F",
+    "aemu": _SPICE_HEX,            # SPICE's MARCS intensity bundle
+    "spice_blackbody": _SPICE_HEX, # SPICE's Blackbody: same code, same hue
+    "ck2004": _CK2004_HEX,
+    "phoenix": _PHOENIX_HEX,
+    "blackbody": _PHOENIX_HEX,     # never co-occurs with phoenix
 }
 ATM_LABEL = {
-    "aemu": "SPICE (MARCS emulator)",
+    "aemu": "SPICE (TransformerPayne)",   # the paper's name for the emulator
     "spice_blackbody": "SPICE (Blackbody)",
     "ck2004": "PHOEBE ck2004",
     "phoenix": "PHOEBE phoenix",
-    "blackbody": "blackbody",
+    "blackbody": "PHOEBE blackbody",      # parallels "PHOEBE ck2004"
 }
 CODE_STYLE = {"spice": "-", "phoebe": "--"}
 
@@ -79,6 +111,16 @@ def spice_kw(**kw):
 BANDS = ["Johnson:B", "Johnson:V", "Stromgren:b", "Stromgren:y"]
 BAND_LABEL = {"Johnson:B": "Johnson $B$", "Johnson:V": "Johnson $V$",
               "Stromgren:b": "Strömgren $b$", "Stromgren:y": "Strömgren $y$"}
+
+
+def dmag_label(band):
+    """Band-aware differential-magnitude axis label, e.g. ``$\\Delta y$ [mag]``.
+
+    Matches the convention of the paper's other light-curve figures (the
+    TZ For panels use ``Δb [mag]`` / ``Δy [mag]``), rather than a generic
+    ``Δ mag``.
+    """
+    return f"$\\Delta {band.split(':')[1]}$ [mag]"
 # Populated per suite from the results payload; the module-level value is only
 # the fallback for an old pickle that predates the suite split.
 PHOEBE_ATMS = ["ck2004", "phoenix", "blackbody"]
@@ -112,10 +154,23 @@ def spice_key_of(binary):
             return next(iter(r["spice_dmag"]))[0]
     return "aemu"
 
-# Neutral-midpoint diverging map from the palette's two poles. A hue at the
-# midpoint would make "no difference" look like a value.
+def _mix(hex_color, toward="#000000", t=0.35):
+    """Blend ``hex_color`` a fraction ``t`` toward ``toward`` (default: darken)."""
+    import numpy as _np
+    from matplotlib.colors import to_rgb
+    a, b = _np.array(to_rgb(hex_color)), _np.array(to_rgb(toward))
+    return _to_hex((1 - t) * a + t * b)
+
+
+# Diverging map for the *signed* response heatmap, built from the two
+# categorical anchors above so the map reads in the figure's own hues:
+# negative (PHOEBE brighter) -> the PHOEBE pink, positive (SPICE brighter) ->
+# the SPICE blue, with a neutral -- not hued -- midpoint so that zero reads as
+# "no difference" rather than as a colour. Neither cmr map is diverging on its
+# own, which is why this is composed rather than taken off the shelf.
 DIVERGING = LinearSegmentedColormap.from_list(
-    "spice_div", ["#0072B2", "#8FC7E3", "#F2F2F0", "#F0A882", "#D55E00"])
+    "spice_div",
+    [_mix(_PHOENIX_HEX, t=0.40), _PHOENIX_HEX, "#F2F2F0", _SPICE_HEX, _mix(_SPICE_HEX, t=0.40)])
 
 
 
@@ -130,6 +185,18 @@ def _save(fig, out, stem):
     for ext in SAVE_FORMATS:
         fig.savefig(Path(out) / f"{stem}.{ext}")
     return f"{stem}.pdf"
+
+
+
+# Figure-level titles. Off for the paper -- the caption carries the description
+# and a suptitle duplicates it -- but useful when reviewing figures interactively
+# in the notebook, so kept behind a flag rather than deleted.
+SHOW_TITLES = False
+
+
+def _suptitle(fig, *args, **kwargs):
+    if SHOW_TITLES:
+        _suptitle(fig, *args, **kwargs)
 
 
 def setup_style():
@@ -235,7 +302,7 @@ def fig_limb_darkening(grid, out):
             bot.set_ylabel("SPICE $-$ PHOEBE")
     fig.legend(handles=legend_handles([SPICE_ID] + PHOEBE_ATMS),
                loc="outside lower center", ncol=4)
-    fig.suptitle(f"Limb darkening in {BAND_LABEL[band]} "
+    _suptitle(fig, f"Limb darkening in {BAND_LABEL[band]} "
                  f"($\\log g = {logg}$, [M/H] $= {feh:+.1f}$); "
                  "residual row excludes the un-limb-darkened blackbody",
                  fontsize=9)
@@ -274,7 +341,7 @@ def fig_ldint(grid, out):
     axes[1, 0].set_ylabel("linear $u$")
     fig.legend(handles=legend_handles([SPICE_ID] + PHOEBE_ATMS),
                loc="outside lower center", ncol=4)
-    fig.suptitle("Intensity-to-flux conversion and limb-darkening strength "
+    _suptitle(fig, "Intensity-to-flux conversion and limb-darkening strength "
                  f"($\\log g = {logg}$, [M/H] $= {feh:+.1f}$); "
                  "a uniform disc has ldint $=1$, $u=0$", fontsize=9)
     _save(fig, out, "fig_ldint")
@@ -319,7 +386,7 @@ def fig_response_axes(grid, out):
     fig.legend(handles=[Line2D([], [], label=ATM_LABEL[a], **phoebe_kw(a))
                         for a in PHOEBE_ATMS],
                loc="outside lower center", ncol=3)
-    fig.suptitle("Intensity response, SPICE $-$ PHOEBE: "
+    _suptitle(fig, "Intensity response, SPICE $-$ PHOEBE: "
                  "$\\log_{10} I(P)/I(P_\\mathrm{ref})$ differenced between the codes\n"
                  f"(one axis varied, the others held at "
                  f"$T_\\mathrm{{eff}}={reference[0]:.0f}$ K, "
@@ -398,7 +465,7 @@ def fig_response_maps(grid, out):
     if im is not None:
         cb = fig.colorbar(im, ax=axarr, location="right", shrink=0.6, pad=0.02)
         cb.set_label("$\\Delta \\log_{10} I$  (SPICE $-$ PHOEBE) [dex]")
-    fig.suptitle("Intensity response difference across the "
+    _suptitle(fig, "Intensity response difference across the "
                  f"$T_\\mathrm{{eff}}$-$\\log g$ plane at [M/H] $= {feh:+.1f}$",
                  fontsize=9)
     _save(fig, out, "fig_response_maps")
@@ -452,7 +519,7 @@ def fig_light_ratios(binary, out):
                      mec=ATM_COLOR[a], mew=1.2, label=ATM_LABEL[a])
               for a in PHOEBE_ATMS]
     fig.legend(handles=marks, loc="outside lower center", ncol=4)
-    fig.suptitle("Out-of-eclipse light ratio: hollow = PHOEBE, filled diamond = SPICE.\n"
+    _suptitle(fig, "Out-of-eclipse light ratio: hollow = PHOEBE, filled diamond = SPICE.\n"
                  "A light-ratio error moves the two eclipse depths in opposite directions.",
                  fontsize=9)
     _save(fig, out, "fig_light_ratios")
@@ -479,7 +546,7 @@ def fig_binary_lightcurves(binary, out, band="Stromgren:y"):
         blocks = [("primary", slice(0, ref)), ("secondary", slice(ref + 1, ref + 1 + n))]
         for e, (label, sl) in enumerate(blocks):
             a_top, a_bot = axarr[0, e], axarr[1, e]
-            t = (times[sl] - times[sl].mean()) * 24.0  # hours from mid-eclipse
+            t = times[sl] / float(r["system"]["period"])  # orbital phase
             spice = r["spice_dmag"].get((SPICE_KEY, band))
             for atm in PHOEBE_ATMS:
                 d = r["phoebe_dmag"].get((atm, band))
@@ -497,15 +564,15 @@ def fig_binary_lightcurves(binary, out, band="Stromgren:y"):
             a_top.tick_params(labelsize=6)
             a_bot.tick_params(labelsize=6)
             if e == 0 and k == 0:
-                a_top.set_ylabel(f"$\\Delta m$ [mag]", fontsize=7)
+                a_top.set_ylabel(dmag_label(band), fontsize=7)
                 a_bot.set_ylabel("SPICE $-$ PHOEBE\n[mmag]", fontsize=7)
         sy = r["system"]
         sub.suptitle(f"{name}\n$T_\\mathrm{{eff}} = {sy['teff1']:.0f}/{sy['teff2']:.0f}$ K, "
                      f"[M/H] $= {sy['feh']:+.2f}$", fontsize=7.5)
-        sub.supxlabel("hours from mid-eclipse", fontsize=7)
+        sub.supxlabel("orbital phase", fontsize=7)
     fig.legend(handles=legend_handles([SPICE_ID] + PHOEBE_ATMS),
                loc="outside lower center", ncol=4)
-    fig.suptitle(f"Eclipse light curves in {BAND_LABEL[band]} "
+    _suptitle(fig, f"Eclipse light curves in {BAND_LABEL[band]} "
                  "(SPICE solid band, PHOEBE dashed; residual below each)",
                  fontsize=9)
     _save(fig, out, "fig_binary_lightcurves")
@@ -557,7 +624,7 @@ def fig_depth_residuals(binary, out):
                                color=ATM_COLOR[a], label=ATM_LABEL[a])
                         for a in PHOEBE_ATMS],
                loc="outside lower center", ncol=3)
-    fig.suptitle("Eclipse-depth residual, SPICE (MARCS emulator) $-$ PHOEBE.\n"
+    _suptitle(fig, "Eclipse-depth residual, SPICE (TransformerPayne) $-$ PHOEBE.\n"
                  "Dotted line marks 1 mmag; note the logarithmic axis.", fontsize=9)
     _save(fig, out, "fig_depth_residuals")
     plt.close(fig)
@@ -623,7 +690,7 @@ def fig_eclipse_depths(binary, out):
                      mec=ATM_COLOR[a], mew=1.2, label=ATM_LABEL[a])
               for a in PHOEBE_ATMS]
     fig.legend(handles=marks, loc="outside lower center", ncol=4)
-    fig.suptitle("Eclipse depths predicted by each code and atmosphere "
+    _suptitle(fig, "Eclipse depths predicted by each code and atmosphere "
                  "(filled diamond = SPICE, hollow = PHOEBE);\n"
                  "each panel has its own scale", fontsize=9)
     _save(fig, out, "fig_eclipse_depths")
@@ -653,25 +720,28 @@ def fig_eclipse_residual_stack(binary, out, band="Stromgren:y"):
     for name, r in binary.items():
         times = np.asarray(r["times"])
         ref, n = r["baseline_index"], r["n_per_eclipse"]
-        blocks = [("Primary eclipse", slice(0, ref)),
-                  ("Secondary eclipse", slice(ref + 1, ref + 1 + n))]
+        # Lower-case titles and an orbital-phase axis, matching the paper's
+        # other eclipse figures ("deep eclipse ...", "phase from T_P").
+        blocks = [("primary eclipse", slice(0, ref)),
+                  ("secondary eclipse", slice(ref + 1, ref + 1 + n))]
         spice = r["spice_dmag"].get((SPICE_KEY, band))
         if spice is None:
             continue
+        period = float(r["system"]["period"])
 
         fig, axarr = plt.subplots(3, 2, figsize=(7.4, 5.4), sharex="col",
                                   constrained_layout=True,
                                   gridspec_kw={"height_ratios": [2.6, 1, 1]})
         for e, (title, sl) in enumerate(blocks):
             a_lc, a_res, a_frac = axarr[0, e], axarr[1, e], axarr[2, e]
-            t = times[sl]
+            t = times[sl] / period                       # orbital phase
             depth = float(np.nanmax(spice[sl]))
             for atm in PHOEBE_ATMS:
                 d = r["phoebe_dmag"].get((atm, band))
                 if d is None:
                     continue
                 a_lc.plot(t, d[sl], **phoebe_kw(atm, marker="s", ms=3, zorder=4))
-                a_res.plot(t, spice[sl] - d[sl],
+                a_res.plot(t, (spice[sl] - d[sl]) * 1e3,    # mmag, like O-M
                            **phoebe_kw(atm, marker="o", ms=3, zorder=4))
                 if depth > 0:
                     a_frac.plot(t, (spice[sl] - d[sl]) / depth * 100.0,
@@ -682,15 +752,15 @@ def fig_eclipse_residual_stack(binary, out, band="Stromgren:y"):
             for a in (a_res, a_frac):
                 a.axhline(0.0, color="0.5", lw=0.6, zorder=1)
             a_lc.set_title(title)
-            a_frac.set_xlabel("Time [days]")
+            a_frac.set_xlabel("orbital phase")
             if e == 0:
-                a_lc.set_ylabel("$\\Delta$ mag (zeroed at $t_0$)")
-                a_res.set_ylabel("SPICE $-$ PHOEBE\n[mag]")
+                a_lc.set_ylabel(dmag_label(band))
+                a_res.set_ylabel("SPICE $-$ PHOEBE\n[mmag]")
                 a_frac.set_ylabel("residual /\ndepth [%]")
         fig.legend(handles=legend_handles([SPICE_ID] + PHOEBE_ATMS),
                    loc="outside lower center", ncol=4)
         sy = r["system"]
-        fig.suptitle(f"{name}: $T_\\mathrm{{eff}} = {sy['teff1']:.0f}/{sy['teff2']:.0f}$ K, "
+        _suptitle(fig, f"{name}: $T_\\mathrm{{eff}} = {sy['teff1']:.0f}/{sy['teff2']:.0f}$ K, "
                      f"[M/H] $= {sy['feh']:+.2f}$, {BAND_LABEL[band]} "
                      f"({r['n_mesh']} elements)", fontsize=9)
         fname = _save(fig, out, f"fig_eclipse_residuals_{name}")
@@ -765,7 +835,7 @@ def fig_parameter_sweep(grid, out):
                 Line2D([], [], color="0.35", ls="--", marker="s", ms=3.5,
                        label="maximum")]
     fig.legend(handles=handles, loc="outside lower center", ncol=5)
-    fig.suptitle("Deviation of SPICE from each PHOEBE atmosphere, summarised "
+    _suptitle(fig, "Deviation of SPICE from each PHOEBE atmosphere, summarised "
                  "over the grid\n(statistic taken across all combinations of "
                  "the two axes not shown)", fontsize=9)
     _save(fig, out, "fig_parameter_sweep")
@@ -877,7 +947,7 @@ def fig_mesh_convergence(sweep, out, suite):
     if realized:
         note = ("; PHOEBE realizes more than requested "
                 f"({meshes[0]} -> {realized['primary']})")
-    fig.suptitle(f"Mesh convergence, {suite} suite: one line per passband{note}",
+    _suptitle(fig, f"Mesh convergence, {suite} suite: one line per passband{note}",
                  fontsize=9)
     _save(fig, out, "fig_mesh_convergence")
     plt.close(fig)
@@ -913,8 +983,7 @@ def fig_ingress_shape(binary, out, band="Stromgren:y", suffix=""):
         r = binary[name]
         ref, n = r["baseline_index"], r["n_per_eclipse"]
         sl = slice(0, ref)                       # primary eclipse
-        t = np.asarray(r["times"])[sl]
-        t = (t - t.mean()) * 24.0                # hours from mid-eclipse
+        t = np.asarray(r["times"])[sl] / float(r["system"]["period"])  # orbital phase
         a_top, a_bot = axarr[0, k], axarr[1, k]
         sp = r["spice_dmag"].get((spice_kind, band))
         if sp is None:
@@ -931,14 +1000,14 @@ def fig_ingress_shape(binary, out, band="Stromgren:y", suffix=""):
                        **phoebe_kw(atm, zorder=4))
         a_bot.axhline(0.0, color="0.5", lw=0.6, zorder=1)
         a_top.invert_yaxis()
-        a_top.set_title(f"{name}  ({len(t)} pts)", fontsize=8)
-        a_bot.set_xlabel("hours from mid-eclipse")
+        a_top.set_title(f"{name}  ({len(t)} epochs)", fontsize=8)
+        a_bot.set_xlabel("orbital phase")
         if k == 0:
             a_top.set_ylabel(f"$\\Delta m / \\Delta m_\\mathrm{{max}}$")
             a_bot.set_ylabel("shape residual\n[% of depth]")
     fig.legend(handles=legend_handles([SPICE_ID] + PHOEBE_ATMS),
                loc="outside lower center", ncol=4)
-    fig.suptitle(f"Eclipse shape in {BAND_LABEL[band]}, depth normalised out "
+    _suptitle(fig, f"Eclipse shape in {BAND_LABEL[band]}, depth normalised out "
                  "(isolates limb darkening from the light ratio)", fontsize=9)
     fname = _save(fig, out, f"fig_ingress_shape{suffix}")
     plt.close(fig)
@@ -1010,7 +1079,7 @@ def fig_shape_summary(dense, out, control=None):
         if l not in seen:
             seen.add(l); h2.append(h); l2.append(l)
     fig.legend(h2, l2, loc="outside lower center", ncol=3)
-    fig.suptitle("Eclipse-shape disagreement per passband, depth normalised out\n"
+    _suptitle(fig, "Eclipse-shape disagreement per passband, depth normalised out\n"
                  "(shape is set by limb darkening; the light ratio cancels)",
                  fontsize=9)
     _save(fig, out, "fig_shape_summary")

@@ -387,7 +387,10 @@ def lightcurve_times(b, n_ecl, n_out):
     e = [float(x) / DAYS_TO_YR for x in (t1p, t4p, t1s, t4s)]
     P = b.get_parameter("period@binary@component").value
     t0 = b.get_value("t0_supconj@binary@component")
-    out = t0 + np.linspace(0.05, 0.45, n_out) * P      # clear of both eclipses
+    # n_out epochs on EACH half of the orbit, clear of both eclipses. (Until 2026-11-03 only 0.05-0.45 after t0_supconj was
+    # sampled, so the other half of the out-of-eclipse light curve was a straight line between the eclipses and the
+    # ellipsoidal variation showed up on one side only.)
+    out = t0 + np.concatenate([np.linspace(0.05, 0.45, n_out), np.linspace(0.55, 0.95, n_out)]) * P
     return np.sort(np.concatenate([np.linspace(e[0], e[1], n_ecl),
                                    np.linspace(e[2], e[3], n_ecl), out]))
 
@@ -432,7 +435,7 @@ def main():
                     help="override Teff2 (export-lc): the hybrid has only ever "
                          "run at the 6650 default and never against real data")
     ap.add_argument("--n-out", type=int, default=12,
-                    help="out-of-eclipse epochs, needed to set the zero point")
+                    help="out-of-eclipse epochs per half orbit (both halves are sampled)")
     ap.add_argument("--dteff", default="-300,-150,0,150,300",
                     help="grid mode: Teff offsets [K] applied per star")
     ap.add_argument("--dlogg", default="-0.3,0,0.3",
