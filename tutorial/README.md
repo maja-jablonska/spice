@@ -1,31 +1,12 @@
-# SPICE tutorials
+# SPICE examples
 
-Example notebooks for [SPICE](https://arxiv.org/abs/2511.10998) (`stellar-spice`),
-the JAX library for synthesizing spectra of stars with inhomogeneous surfaces.
+Notebooks and scripts for [SPICE](https://arxiv.org/abs/2511.10998) (`stellar-spice`),
+the JAX library for synthesizing spectra of stars with inhomogeneous surfaces. Everything
+here is used either by the documentation or by the paper.
 
 Most notebooks make the in-tree `spice` package importable on their own (they add
 `src/` to `sys.path`), so an editable install (`pip install -e ".[dev]"`) is
 recommended but not strictly required.
-
-## Getting started
-
-| Notebook | What it shows |
-|---|---|
-| [`binary.ipynb`](binary.ipynb) | Binary-star systems — Keplerian orbits and eclipses |
-| [`planetary_transit_tutorial.ipynb`](planetary_transit_tutorial.ipynb) | Planetary transit light curves |
-| [`phoebe.ipynb`](phoebe.ipynb) | Using PHOEBE models with SPICE |
-| [`custom_filter.ipynb`](custom_filter.ipynb) | Defining a custom photometric filter / passband |
-| [`synphot.ipynb`](synphot.ipynb) | Synthetic photometry via `synphot` |
-| [`solar_oscillations_physical_line.ipynb`](solar_oscillations_physical_line.ipynb) | Solar-like oscillations with the Physical Line Emulator |
-| [`aemu_harps_test.ipynb`](aemu_harps_test.ipynb) | Smoke test of the `RozanskiT/TPayne-spice-harps` aemu bundle (`[aemu]` extra) |
-
-## Pulsation & visualization — [`pulsation/`](pulsation/)
-
-| Notebook | What it shows |
-|---|---|
-| [`plot_vsh_basis_vectors.ipynb`](pulsation/plot_vsh_basis_vectors.ipynb) | Vector spherical harmonic (VSH) basis vectors on a mesh |
-| [`pulsation_plot_utils_demo.ipynb`](pulsation/pulsation_plot_utils_demo.ipynb) | Pulsation plotting utilities (`spice.plots`) |
-| [`pulsation_horizontal_distortion_3d.ipynb`](pulsation/pulsation_horizontal_distortion_3d.ipynb) | 3D animation of horizontal-mode distortion (produces the `.gif`) |
 
 ## Documentation examples — [`docs_examples/`](docs_examples/)
 
@@ -50,10 +31,20 @@ scratch notebook these supersede.
 
 ## Paper reproduction — [`paper_results/`](paper_results/)
 
-Code and notebooks reproducing the figures/analyses in the SPICE paper, organized
-by topic: `cepheid/`, `tz_fornacis/`, `phoebe_spice_comparison/`, `spots/`,
-`paper_plots/`, `phoebe_passbands/`, and `technical_checks/`.
+Code that produces the figures, tables and numbers of the SPICE paper, by section:
 
-> Interpolator benchmarks/diagnostics that used to live here now sit in the
-> repository's top-level [`benchmarks/`](../benchmarks/) directory
-> (`lazy_zarr_*`, `run_lazy_zarr_decimation_sweep.pbs`).
+| Directory | Paper content |
+|---|---|
+| `paper_plots/` | Method figures: rotation velocity field, spot and spherical-harmonic configurations (with their parameter tables), pulsation snapshots, spot smoothness, blackbody pulsation test |
+| `spots/` | Sect. 3.1, the Kochukhov (2017) spotted-star test (notebook, Turbospectrum config, grid README) |
+| `cepheid/` | Sect. 3.2, delta Cephei: literature-model figures, Mg b projection factor and its errors (`dcep_lit_pfactor_errors.py`), synthetic p-factor pipeline (`dcep_ts_*`, `pfactor_v11/`) |
+| `tz_fornacis/` | Sect. 3.3, TZ Fornacis: figures notebook, photometry scoring, PHOEBE mesh export, SuppNet normalisation of the HARPS spectra |
+| `phoebe_spice_comparison/` | Sect. 3.4 and Appendix C, SPICE vs PHOEBE |
+| `technical_checks/` | Appendices A and D: icosphere properties, solar luminosity/constant, single-spectrum test |
+| `emulator_validation/` | Appendix F: emulator vs Turbospectrum over H-beta (Figs. F1-F2) |
+| `mesh_resolution_effects.ipynb` | Appendix E: line-profile effects of mesh resolution |
+
+The data these scripts read are in the Hugging Face dataset
+[mjablonska/spice-paper-data](https://huggingface.co/datasets/mjablonska/spice-paper-data);
+`python tutorial/paper_results/fetch_paper_data.py` downloads them. The paper's timing
+benchmarks are in the top-level [`benchmarks/`](../benchmarks/) directory.
