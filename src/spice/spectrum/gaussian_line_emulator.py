@@ -140,15 +140,18 @@ class GaussianLineEmulator:
         """Convert passed values to the accepted parameters format
 
         Args:
-            parameter_values: Dictionary with parameter values {'Teff': value}
+            parameter_values: Dictionary with parameter values {'Teff': value} ('teff' also
+                accepted; any other name raises ValueError)
 
         Returns:
             Array of parameters [Teff]
         """
         if parameter_values is None:
             return self.solar_parameters
-        
-        Teff = parameter_values.get('Teff', self.solar_parameters[0])
+
+        from .parameters import resolve_parameter_names
+        values = resolve_parameter_names(parameter_values, self.parameter_names)   # Teff or teff
+        Teff = values.get('Teff', self.solar_parameters[0])
         return jnp.array([Teff])
     
     def intensity(self, log_wavelengths: ArrayLike, mu: float, 

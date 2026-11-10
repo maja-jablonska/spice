@@ -200,14 +200,17 @@ class PhysicalLineEmulator:
     ) -> jnp.ndarray:
         """
         Convert a parameter dict {name: value} to a 3-element vector
-        [Teff, logg, mu], all as float64.
+        [Teff, logg, mu], all as float64. ``teff`` is accepted for ``Teff``;
+        any other unknown name raises ``ValueError``.
         """
         if parameter_values is None:
             return jnp.array([5777.0, 4.44, 0.8], dtype=jnp.float64)
 
-        Teff = float(parameter_values.get("Teff", 5777.0))
-        logg = float(parameter_values.get("logg", 4.44))
-        mu   = float(parameter_values.get("mu",   0.8))
+        from .parameters import resolve_parameter_names
+        values = resolve_parameter_names(parameter_values, self.parameter_names)   # Teff or teff
+        Teff = float(values.get("Teff", 5777.0))
+        logg = float(values.get("logg", 4.44))
+        mu   = float(values.get("mu",   0.8))
         return jnp.array([Teff, logg, mu], dtype=jnp.float64)
 
     # ------------------------------------------------------------------

@@ -84,10 +84,13 @@ class Blackbody:
     def to_parameters(self, parameter_values: Optional[Dict[str, Any]] = None) -> ArrayLike:
         """Convert a ``{name: value}`` dict to the ``[Teff]`` parameter vector.
 
-        Accepts either ``"Teff"`` or ``"teff"`` (the key used by ``SOLAR_PARAMETERS``)."""
+        Accepts either ``"Teff"`` or ``"teff"`` (the key used by ``SOLAR_PARAMETERS``); any
+        other name raises ``ValueError``."""
         if parameter_values is None:
             return self.solar_parameters
-        Teff = parameter_values.get("Teff", parameter_values.get("teff", float(self.solar_parameters[0])))
+        from .parameters import resolve_parameter_names
+        values = resolve_parameter_names(parameter_values, self.parameter_names)
+        Teff = values.get("Teff", float(self.solar_parameters[0]))
         return jnp.array([Teff])
 
     def intensity(

@@ -252,6 +252,23 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
             return values
 
         if isinstance(parameters, dict):
+            # Alias names are matched case-insensitively (Teff == teff); any other name must be
+            # one of the grid's own parameters, otherwise it would be silently ignored.
+            # Limb-darkening coefficients travel in the same dict (consumed by intensity()).
+            alias_names = set(TEFF_NAMES) | set(LOG_G_NAMES) | set(METALLICITY_NAMES) | set(LIMB_DARKENING_NAMES)
+            normalised, unknown = {}, []
+            for key, value in parameters.items():
+                name = key.lower() if isinstance(key, str) and key.lower() in alias_names else key
+                if name in alias_names or name in self._parameter_names:
+                    normalised[name] = value
+                else:
+                    unknown.append(key)
+            if unknown:
+                raise ValueError(
+                    f"Unknown parameter name(s) {unknown}; this interpolator's parameters are "
+                    f"{list(self._parameter_names)} (temperature, gravity and metallicity also accept "
+                    "the usual aliases, e.g. teff/Teff, logg, m/h; limb-darkening coefficients as ld)")
+            parameters = normalised
             # Extract Teff from various possible keys
             teff = None
             for key in TEFF_NAMES:

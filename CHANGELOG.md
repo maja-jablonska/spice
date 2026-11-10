@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docstrings for the computed properties of `MeshModel`.
 
 ### Changed
+- **Breaking**: `to_parameters` raises `ValueError` for parameter names an emulator does not
+  have (aemu bundles, `Blackbody`, `GaussianLineEmulator`, `PhysicalLineEmulator`,
+  `UserSpectrumInterpolator` and the zarr grid interpolators) instead of silently leaving
+  that parameter at its default; `teff` and `Teff` are accepted interchangeably
+  everywhere. Previously, for example, `logteff` passed to a bundle that takes `teff`
+  was ignored and the spectrum computed at 5777 K.
 - The `aemu` extra now requires `astro-emulators-toolkit>=0.2,<0.3`; bundles trained
   with toolkit 0.2 (such as `mjablonska/TPayne-spice-harps-interp`) cannot be loaded by
   0.1. TransformerPayne bundles need 64-bit JAX (`JAX_ENABLE_X64=1`).

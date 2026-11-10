@@ -69,9 +69,9 @@ Input/output min-max scaling declared by the bundle (both the older split
    Parameter names, units and the wavelength range come from the bundle. Check
    ``emu.stellar_parameter_names`` (current TPayne bundles take linear ``teff`` in
    Kelvin; some older bundles used ``logteff``) and ``emu.wavelength_range``.
-   ``emu.to_parameters`` ignores keys that are not bundle parameters, so a misspelled
-   name silently leaves that parameter at its default; SPICE warns when an emulator
-   is asked for wavelengths outside its range.
+   ``emu.to_parameters`` raises ``ValueError`` for names the bundle does not have
+   (``teff`` and ``Teff`` are interchangeable), and SPICE warns when an emulator is
+   asked for wavelengths outside its range.
 
 Synthesizing spectra
 --------------------

@@ -93,8 +93,10 @@ Stellar parameters
   unless the model was constructed with ``override_log_g=True``.
 - Effective temperature is linear Kelvin (``teff``) for :class:`~spice.spectrum.Blackbody`,
   the grid interpolators and the current TPayne aemu bundles; some older bundles used
-  log10 Kelvin (``logteff``). Check your emulator's ``stellar_parameter_names``:
-  ``to_parameters`` ignores names the emulator does not have.
+  log10 Kelvin (``logteff``). Check your emulator's ``stellar_parameter_names``.
+- ``to_parameters`` accepts ``teff`` and ``Teff`` interchangeably and raises
+  ``ValueError`` for any name the emulator does not have, instead of silently
+  leaving that parameter at its default.
 
 Spots and pulsations
 --------------------

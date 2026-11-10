@@ -209,6 +209,9 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
 
     if isinstance(parameter_values, dict):
         names = interpolator.stellar_parameter_names
+        if parameter_values is not SOLAR_PARAMETERS:
+            from .parameters import resolve_parameter_names
+            parameter_values = resolve_parameter_names(parameter_values, names)
         parameter_values = dict(parameter_values)
         # Bundles with a ``marcs_fe_h`` input (HARPS cno-v2, 2026-10): when only ``feh`` is
         # given, derive the atmosphere metallicity from it rather than defaulting to 0.
