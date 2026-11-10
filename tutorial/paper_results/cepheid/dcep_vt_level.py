@@ -1,4 +1,4 @@
-"""Absolute level and shape of the delta Cep V_T residuals of a dcep_joint_fit.py result (exact photometry).
+"""Absolute level and shape of the delta Cep V_T residuals of a delta Cep literature-model result (exact photometry).
 
     python dcep_vt_level.py RESULT.pkl [...]
 """

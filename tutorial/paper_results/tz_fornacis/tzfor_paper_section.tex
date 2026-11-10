@@ -41,8 +41,7 @@ it, so no macroturbulence is added. The photometry is phased with the ephemeris 
 \citet{Andersen1991} derived from these same light curves. The surfaces are \phoebe\ meshes imported as
 described in Section~\ref{sec:phoebe_integration}, the specific intensities come from the \tpayne\
 emulator of Appendix~\ref{sec:appendix_transformer_emulators}, and every spectrum and light curve is the
-exact per-element sum of Section~\ref{sec:integrating_flux_from_mesh}, with no velocity kernels and no
-pixels masked. Nothing is adjusted to the data except one zero point per photometric band, which the
+exact per-element sum of Section~\ref{sec:integrating_flux_from_mesh}, with no pixels masked. Nothing is adjusted to the data except one zero point per photometric band, which the
 differential photometry leaves undetermined; there is no phase offset, no per-night zero point and no
 correction of the spectroscopic continuum. Of the 2338 photometric points, 7 lie more than 15\,mmag from
 the model and are not counted.
@@ -96,11 +95,7 @@ The zoomed-in view of the eclipses in Figure~\ref{fig:tz_fornacis_eclipse} also 
 wavelength dependence: with limb darkening and the partial occultation of the primary modelled, the
 eclipse profile is steeper in bluer filters. This dependence is more commonly emphasised for planetary
 transits, and its implications for the use of \spice\ in exoplanet applications will be explored in
-future work. Every model in this section is reproducible from the scripts and the notebook in the
-repository\footnote{\texttt{tutorial/paper\_results/tz\_fornacis/}: \texttt{tzfor\_fullrange\_fit.py}
-evaluates the model (\texttt{--maxiter 0}), \texttt{tzfor\_phot\_rescore.py} scores the light curves of
-\spice\ and \phoebe\ alike, \texttt{tzfor\_fe1\_ew.py} performs the equivalent-width analysis and
-\texttt{tzfor\_literature\_figures.ipynb} draws the figures.}.
+future work.
 
 \begin{table}
     \centering
