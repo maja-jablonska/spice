@@ -1,0 +1,39 @@
+#!/bin/bash
+# SPICE disc integration of the delta Cep Turbospectrum intensity tables (dcep_ts_synthesis.py).
+# Submit from /scratch/y89/mj8805/dcep_ts through the GPU-cap wrapper, after the TS job:
+#   /scratch/y89/mj8805/spice_docsexp/run/qsub_gpu.sh -W depend=afterok:<ts job> dcep_ts_synthesis.pbs
+# Spherical-transfer variant only (after the --spherical TS job):
+#   qsub_gpu.sh -W depend=afterok:<ts sph job> -v SPH=1 dcep_ts_synthesis.pbs
+# Second wavelength range, baseline variant only:
+#   qsub_gpu.sh -W depend=afterok:<ts red job> -v TS_OUT=out_red,BASELINE_ONLY=1,EXTRA="--wl 6000 6300" dcep_ts_synthesis.pbs
+#PBS -P y89
+#PBS -q gpuvolta
+#PBS -N dcep-ts-synth
+#PBS -l ncpus=12
+#PBS -l ngpus=1
+#PBS -l mem=96GB
+#PBS -l walltime=03:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -j oe
+#PBS -m a
+set -eu
+cd /scratch/y89/mj8805/dcep_ts
+export PYTHONPATH=/scratch/y89/mj8805/spice_docsexp/src
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+PY=/g/data/y89/mj8805/miniforge/envs/astro/bin/python
+TS=/scratch/y89/mj8805/dcep_ts/${TS_OUT:-out}
+if [ "${SPH:-0}" = 1 ]; then
+    # spherical-transfer baseline (dcep_ts_intensities.py --spherical --radius-from-table, OUT=out_sph);
+    # synth_*.npz land in $TS. SPH_VARIANT=geff_xiphi_sph for the unshifted 1 M_sun radii
+    $PY -u dcep_ts_synthesis.py --ts-dir /scratch/y89/mj8805/dcep_ts/out_sph --variant "${SPH_VARIANT:-geff_xiphi_sphR}" \
+        --ld atm --out "$TS" ${EXTRA:-}
+    exit 0
+fi
+# baseline: TS mu-dependence plus the linear limb-darkening sweep on its mu = 1 spectrum
+$PY -u dcep_ts_synthesis.py --ts-dir "$TS" --variant geff_xiphi \
+    --ld atm --ld lin:0 --ld lin:0.5 --ld lin:0.7 --ld lin:0.85 --ld lin:1 ${EXTRA:-}
+# BASELINE_ONLY=1 stops here (e.g. the 6000-6300 A run: TS_OUT=out_red, EXTRA="--wl 6000 6300")
+[ "${BASELINE_ONLY:-0}" = 1 ] && exit 0
+# controls: constant xi, static log g
+$PY -u dcep_ts_synthesis.py --ts-dir "$TS" --variant geff_xi3 --ld atm ${EXTRA:-}
+$PY -u dcep_ts_synthesis.py --ts-dir "$TS" --variant static_xiphi --ld atm ${EXTRA:-}

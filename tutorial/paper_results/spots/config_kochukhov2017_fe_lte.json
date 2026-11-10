@@ -1,0 +1,67 @@
+{
+  "_comment": "Kochukhov (2017) Doppler-imaging test star for the SPICE paper, Sect. 3.1: Teff=8000 K, logg=4.0, solar-metallicity MARCS atmosphere, LTE, Intensity mode, 5000-5020 A. Fe is varied as an absolute abundance A(Fe)=12+log(N_Fe/N_H): Kochukhov's log(N_Fe/N_tot)=-4.0 (background) and -2.5 (spot centres) are A(Fe)=8.035 and 9.535 on the Magg 2022 scale (log N_H/N_tot = -0.035), i.e. [Fe/H]=+0.57 and +2.07. Nodes every 0.1 dex bracket both values.",
+  "grid": {
+    "grid_version": "kochukhov2017-fe-lte-v1",
+    "axes": {
+      "teff": "8000",
+      "logg": "4.0",
+      "feh": "0.0",
+      "turbvel": "02"
+    },
+    "abundances": {
+      "fe": "8.00:9.60:0.10"
+    },
+    "synthesis": {
+      "lam_min": 5000.0,
+      "lam_max": 5020.0,
+      "lam_step": 0.01,
+      "output_mode": "Intensity",
+      "mode": "1D",
+      "calculation_mode": "LTE",
+      "mu_range": "0.05:1.0:0.05"
+    },
+    "limits": {
+      "max_rows": 100000
+    },
+    "io": {
+      "csv_compression": "zstd",
+      "csv_compression_level": 5,
+      "zarr_chunks": 512,
+      "zarr_compressor": {
+        "cname": "zstd",
+        "clevel": 5,
+        "shuffle": true
+      }
+    }
+  },
+  "turbospectrum": {
+    "config": "../synthesis/config_sample_comprehensive.json",
+    "overrides": {
+      "paths": {
+        "linelist_path": "../../input_files/linelists",
+        "linelist_files": [
+          "nlte_ges_linelist_jmg16jan2026_I_II"
+        ]
+      }
+    }
+  },
+  "outputs": {
+    "run_root": "../../runs/kochukhov2017-fe-lte",
+    "grid_csv": "outputs/grids/regular_parameter_grid.csv",
+    "grid_zarr": "outputs/grids/regular_parameter_grid.zarr",
+    "grid_index_parquet": "outputs/grids/index.parquet",
+    "spectra_zarr": "outputs/zarr/regular_synthesized_spectra.zarr",
+    "spectra_shard_template": "outputs/shards/spectra_shard_{shard_index}.zarr"
+  },
+  "runtime": {
+    "workers": 6,
+    "shard_count": null,
+    "rows_per_shard": null,
+    "scratch": null,
+    "chunk_rows": 64,
+    "output_tmp": null,
+    "log_level": "INFO",
+    "log_file": null,
+    "skip_synthesis": false
+  }
+}

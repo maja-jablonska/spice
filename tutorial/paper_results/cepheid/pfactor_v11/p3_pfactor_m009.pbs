@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -N pf9-est
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=4
+#PBS -l mem=32GB
+#PBS -l walltime=01:00:00
+#PBS -l storage=scratch/mk27+scratch/y89+gdata/y89
+#PBS -j oe
+# delta Cep synthetic p-factor, step 3: the four RV estimators per line / window for the three syntheses. CPU only, no PBS commands.
+set -u
+cd /scratch/y89/mj8805/dcep_ts2
+PY=/g/data/y89/mj8805/miniforge/envs/astro/bin/python
+$PY -u dcep_ts_pfactor.py out_m009/synth_paper_atm.npz out_m009/synth_paper_lin0.npz out_m009/synth_paper_tpayne.npz \
+    --csv out_m009/dcep_ts_pfactor_paper.csv --plot out_m009/dcep_ts_pfactor_paper.png

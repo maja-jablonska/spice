@@ -68,6 +68,7 @@ Contents
    synthetic_photometry
    api
    troubleshooting
+   paper_data
 
 Citation
 --------

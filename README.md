@@ -31,6 +31,8 @@ pip install stellar-spice[grid]
 
 📖 Read the full [documentation](https://spice.readthedocs.io) for detailed API reference and tutorials.
 
+The grids and model outputs behind the paper are in the Hugging Face dataset [mjablonska/spice-paper-data](https://huggingface.co/datasets/mjablonska/spice-paper-data); `python tutorial/paper_results/fetch_paper_data.py` downloads them (see the *Paper data* page of the documentation).
+
 ## Key Features
 
 ### 🌟 **Stellar Surface Modeling**
