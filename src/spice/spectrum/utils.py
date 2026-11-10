@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Tuple
 
 try:
@@ -87,49 +88,54 @@ def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
     return flux_conv[0, :, 0]
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("segment_size",))
 def apply_variable_resolution(
     log_wavelength: jnp.ndarray,
     flux: jnp.ndarray,
     R_array: jnp.ndarray,
     segment_size: int = 512,
 ):
+    """Convolve a uniform log10 wavelength grid with segment-mean resolving power.
+
+    All inputs have shape (N,), with N >= 2. ``segment_size`` is a positive
+    static integer. Each segment includes neighbouring spectrum samples out
+    to the Gaussian kernel's 2046-pixel cap; only the spectrum's outer edges
+    are padded with the global mean, matching :func:`apply_spectral_resolution`.
+    The final, shorter segment uses only its real R samples in the mean.
     """
-    Apply wavelength-dependent spectral resolution using local convolutions (JIT-friendly).
+    if (flux.ndim != 1 or log_wavelength.shape != flux.shape
+            or R_array.shape != flux.shape or flux.shape[0] < 2):
+        raise ValueError("wavelength, flux, and R_array must have matching 1-D shapes with at least two samples")
+    if not isinstance(segment_size, int) or segment_size <= 0:
+        raise ValueError("segment_size must be a positive static integer")
+    n = flux.shape[0]
+    n_segments = (n + segment_size - 1) // segment_size
+    tail = n_segments * segment_size - n
+    pad = 2046
+    delta_log = (log_wavelength[-1] - log_wavelength[0]) / (n - 1)
+    padded_flux = jnp.pad(flux, (pad, pad + tail), mode="mean")
+    padded_R = jnp.pad(R_array, (0, tail))
+    grid = jnp.arange(-pad, pad + 1)
 
-    Parameters
-    ----------
-    log_wavelength : (N,)
-        Wavelength grid in log10(λ).
-    flux : (N,)
-        Input flux array.
-    R_array : (N,)
-        Resolving power as a function of wavelength (one per pixel).
-    segment_size : int
-        Segment width where R is locally constant.
+    def process_segment(_, i):
+        start = i * segment_size
+        values = jax.lax.dynamic_slice_in_dim(padded_flux, start, segment_size + 2 * pad)
+        r_values = jax.lax.dynamic_slice_in_dim(padded_R, start, segment_size)
+        r_mean = jnp.sum(r_values) / jnp.minimum(segment_size, n - start)
+        sigma_log = 1.0 / (2.0 * jnp.sqrt(2.0 * _log2()) * r_mean * _ln10())
+        half_width = jnp.minimum(jnp.floor(4.0 * sigma_log / delta_log).astype(int), pad)
+        weights = jnp.exp(-0.5 * (grid * delta_log / sigma_log)**2)
+        weights = jnp.where(jnp.abs(grid) <= half_width, weights, 0.0)
+        weights = (weights / jnp.sum(weights)).astype(flux.dtype)
+        result = jax.lax.conv_general_dilated(
+            values[None, :, None], weights[:, None, None], (1,), "VALID",
+            dimension_numbers=("NWC", "WIO", "NWC"),
+            precision=jax.lax.Precision.HIGHEST,
+        )
+        return None, result[0, :, 0]
 
-    Returns
-    -------
-    flux_lowres : (N,)
-        Spectrum convolved with variable resolution.
-    """
-    N = flux.shape[0]
-    num_segments = N // segment_size + (N % segment_size > 0)
-
-    # Indices of segments (JAX-friendly)
-    segment_idx = jnp.arange(num_segments)
-
-    def process_segment(i, _):
-        i0 = i * segment_size
-        i1 = jnp.minimum(i0 + segment_size, N)
-        lam_seg = log_wavelength[i0:i1]
-        flux_seg = flux[i0:i1]
-        R_seg = jnp.mean(R_array[i0:i1])
-        seg_flux = apply_spectral_resolution(lam_seg, flux_seg, R_seg)
-        return None, seg_flux
-
-    _, seg_results = jax.lax.scan(process_segment, None, segment_idx)
-    return jnp.concatenate(seg_results)
+    _, segments = jax.lax.scan(process_segment, None, jnp.arange(n_segments))
+    return segments.reshape(-1)[:n]
 
 
 

@@ -90,3 +90,21 @@ def test_evaluate_rotation_after_add_rotation_is_consistent():
     np.testing.assert_allclose(
         np.asarray(spinning.d_centers), np.asarray(again.d_centers), rtol=1e-10, atol=1e-10
     )
+
+
+@pytest.mark.parametrize('axis', [[0., 1., 0.], [1., 0., 0.], [0, 1, 0]])
+def test_view_along_explicit_rotation_axis_is_pole_on(axis):
+    mesh = IcosphereModel.construct(100, 1., 1., [5777.], ['teff'])
+    spinning = add_rotation(mesh, 50., rotation_axis=jnp.asarray(axis))
+    pole_on = get_mesh_view(spinning, jnp.asarray(axis, dtype=float))
+    np.testing.assert_array_equal(pole_on.rotation_axis, spinning.rotation_axis)
+    np.testing.assert_array_equal(pole_on.rotation_velocities, spinning.rotation_velocities)
+    np.testing.assert_allclose(pole_on.los_velocities, 0., atol=1e-12)
+
+
+def test_default_axis_is_chosen_for_the_current_view():
+    mesh = IcosphereModel.construct(100, 1., 1., [5777.], ['teff'])
+    mesh = get_mesh_view(mesh, jnp.array([0., 1., 0.]))
+    spinning = add_rotation(mesh, 50.)
+    assert float(jnp.max(jnp.abs(spinning.los_velocities))) > 40.
+    assert float(jnp.dot(spinning.rotation_axis, spinning.los_vector)) == pytest.approx(0.)

@@ -170,13 +170,23 @@ def period_to_velocity(period: float, radius: float) -> float:
 
 def inclination_to_los_axis(inclination: float) -> Float[Array, "3"]:
     """
-    Convert inclination to tilt angle.
-    
+    Line-of-sight vector (observer -> star) for a star whose rotation axis is +z.
+
+    The returned vector ``(0, sin i, -cos i)`` makes the angle ``i`` with the
+    **z axis only**. It presupposes ``rotation_axis = [0, 0, 1]``, which is also
+    the axis that :func:`lat_to_theta` / :func:`lon_to_phi` measure spot
+    positions about. The default rotation axis chosen by ``add_rotation`` is
+    *not* z (it is derived from the mesh's line of sight), so pass
+    ``rotation_axis=jnp.array([0., 0., 1.])`` explicitly when using this helper;
+    otherwise the effective inclination differs silently from ``inclination``
+    (e.g. 30 deg instead of 60 deg with the default y axis).
+
     Args:
-        inclination (float): Inclination angle in degrees (0 to 90)
-    
+        inclination (float): Inclination angle in degrees (0 to 90), the angle
+            between the z rotation axis and the line of sight.
+
     Returns:
-        float: LOS axis
+        Float[Array, "3"]: LOS vector pointing from the observer towards the star.
     """
     incl_rad = jnp.deg2rad(inclination)
     return jnp.array([0., jnp.sin(incl_rad), -jnp.cos(incl_rad)])

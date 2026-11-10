@@ -86,7 +86,7 @@ class Filter(ABC):
         self.__transmission_curve_freq = jnp.vstack([tc_freq[tc_freq_mask],
                                                      transmission_curve[1][tc_freq_mask]])
 
-        self.__name = name or re.sub(r"([A-Z])", r" \1", type(self).__name__).split()
+        self.__name = name or " ".join(re.sub(r"([A-Z])", r" \1", type(self).__name__).split())
         self.__non_photonic = non_photonic
         self.__AB_zeropoint = AB_zeropoint
         self.__ST_zeropoint = ST_zeropoint
@@ -129,6 +129,34 @@ class Filter(ABC):
     def filter_responses_for_wavelengths(self, wavelengths: Float[Array, "n_wavelengths"]) -> Float[Array, "n_wavelengths"]:
         return _filter_responses(wavelengths, self.transmission_curve_wavelengths[0],
                                  self.transmission_curve_wavelengths[1])
+
+    def wavelength_coverage(self, wavelengths: ArrayLike) -> float:
+        """Fraction of the passband's response inside the span of ``wavelengths``.
+
+        The transmission curve is integrated between ``min(wavelengths)`` and
+        ``max(wavelengths)`` and divided by its integral over the whole curve, so
+        1.0 means the grid covers the passband. Synthetic photometry on a grid
+        that covers only part of it is the band average over that part (see
+        :mod:`spice.spectrum.wavelength_coverage`).
+
+        Args:
+            wavelengths (ArrayLike): wavelength grid [Angstrom]; must be concrete (not traced).
+
+        Returns:
+            float: covered fraction of the response, between 0 and 1.
+        """
+        wl = np.asarray(wavelengths, dtype=np.float64)
+        lo, hi = float(wl.min()), float(wl.max())
+        lam = np.asarray(self.transmission_curve_wavelengths[0], dtype=np.float64)
+        resp = np.asarray(self.transmission_curve_wavelengths[1], dtype=np.float64)
+        order = np.argsort(lam)
+        lam, resp = lam[order], resp[order]
+        total = np.trapezoid(resp, lam)
+        if total <= 0.0:
+            return 1.0
+        grid = np.unique(np.concatenate([[lo, hi], lam[(lam > lo) & (lam < hi)]]))
+        inside = np.trapezoid(np.interp(grid, lam, resp, left=0.0, right=0.0), grid) if grid.size > 1 else 0.0
+        return float(min(max(inside / total, 0.0), 1.0))
 
     def filter_responses_for_frequencies(self, wavelengths: Float[Array, "n_wavelengths"]) -> Float[Array, "n_wavelengths"]:
         return _filter_responses(wavelengths, self.transmission_curve_frequencies[0],
@@ -320,8 +348,17 @@ class GaiaRP(Filter):
 # Sartoretti et al. (2022)
 class GaiaRVS(Filter):
     def __init__(self):
-        transmission_curve = np.loadtxt((_FILTER_DATA_DIR /'grvsfilter.csv'), skiprows=1, delimiter=',')
-        super().__init__(jnp.array([transmission_curve[0]*10., transmission_curve[1]]), name='Gaia RVS', AB_zeropoint=21.317)
+        table = np.loadtxt(_FILTER_DATA_DIR / 'grvsfilter.csv', skiprows=1, delimiter=',')
+        wavelengths = table[:, 0] * 10.0  # published wavelengths are in nm
+        response = table[:, 1]
+        # 21.317 is the published Vega-system count-rate zero point. Derive
+        # the AB zero point with the same photon-count convention as spectrum.py.
+        reference_flux = 3.631e-20 * 2.99792458e18 / wavelengths**2
+        reference_counts = 3663830098681164.5 * np.trapezoid(
+            table[:, 0] * (1e-2 * reference_flux) * response, table[:, 0])
+        super().__init__(jnp.array([wavelengths, response]), name='Gaia RVS',
+                         AB_zeropoint=float(2.5 * np.log10(reference_counts)),
+                         Vega_zeropoint=21.317)
 
 # Doi et al. (2010)
 
@@ -543,7 +580,7 @@ class Bolometric(Filter):
 FILTERS = [
     JohnsonCousinsU, JohnsonCousinsB, JohnsonCousinsV, JohnsonCousinsR, JohnsonCousinsI,
     TychoBT, TychoVT,
-    GaiaG, GaiaRP, GaiaBP,
+    GaiaG, GaiaRP, GaiaBP, GaiaRVS,
     SDSSu, SDSSg, SDSSr, SDSSi, SDSSz,
     TWOMASSJ, TWOMASSH, TWOMASSK,
     GALEXFUV, GALEXNUV,

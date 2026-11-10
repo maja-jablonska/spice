@@ -13,7 +13,7 @@ from spice.utils import log as _log
 from overrides import override
 
 # Parameter naming conventions to support flexible input formats
-METALLICITY_NAMES = ["default_metals_h", "metals/h", "me/h",
+METALLICITY_NAMES = ["m/h", "default_metals_h", "metals/h", "me/h",
                      "[metals/h]", "[me/h]", "metallicity", "metals_h", "me_h"]
 
 LOG_G_NAMES: List[str] = ['logg', 'log_g', 'log g',
@@ -77,17 +77,9 @@ def _interpolate_spectrum(log10_wavelengths, continuum_wavelengths, intensities,
                                             (all_parameters.shape[0], 1)).reshape((-1, 1))
     
     params_with_wavelength = jnp.hstack([parameters, log10_wavelength]).reshape(1, -1)
-    # The error is due to a shape mismatch between the points and query_points in linear_multivariate_interpolation
-    # Make sure the dimensions match by ensuring params_with_wavelength has the same number of features as repeated_params + wavelength
-    
-    # Get the number of parameters in the input
-    num_params = repeated_params.shape[1]
-    
-    # Make sure params_with_wavelength has the same number of columns as the points we're comparing against
-    if params_with_wavelength.shape[1] != num_params + 1:
-        # Adjust the shape to match what's expected
-        params_with_wavelength = params_with_wavelength[:, :num_params+1]
-    
+    if params_with_wavelength.shape[1] != all_parameters.shape[1] + 1:
+        raise ValueError("Query parameters must match the grid parameter columns (including mu only when present)")
+
     return jnp.concatenate([
         linear_multivariate_interpolation(
             jnp.hstack([repeated_params, repeated_log10_wavelengths]),
@@ -249,18 +241,17 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
         """
         if parameters is None:
             parameters = {}
-        if isinstance(parameters, (list, tuple)):
-            parameters = jnp.array(parameters)
-            
-        if isinstance(parameters, np.ndarray):
-            if len(parameters.shape) > 1:
-                if parameters.shape[1] != len(self._parameter_names):
-                    raise ValueError(
-                        f"Parameters must have {len(self._parameter_names)} columns, got {parameters.shape[1]}")
-                return parameters
-            return parameters
-        
-        elif isinstance(parameters, dict):
+        if not isinstance(parameters, dict):
+            if not isinstance(parameters, (list, tuple, np.ndarray, jax.Array, jax.core.Tracer)):
+                raise ValueError("Parameters must be an array, list, or dictionary")
+            values = jnp.asarray(parameters)
+            if values.ndim not in (1, 2) or values.shape[-1] != len(self._parameter_names):
+                raise ValueError(
+                    f"Parameters must have {len(self._parameter_names)} columns; "
+                    f"got shape {values.shape}")
+            return values
+
+        if isinstance(parameters, dict):
             # Extract Teff from various possible keys
             teff = None
             for key in TEFF_NAMES:
@@ -334,19 +325,15 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
         Returns:
             Array of intensities [erg/cm2/s/angstrom] at the specified wavelengths
         """
-        # Convert parameters to the correct format if needed
-        if isinstance(parameters, dict) or (isinstance(parameters, np.ndarray) and parameters.shape[-1] != len(self._parameter_names)):
-            parameters = self.to_parameters(parameters)
-        
-        # Check if parameters include limb darkening coefficients
+        # Read auxiliary metadata before converting the stellar parameters.
         limb_darkening_coeffs = None
         if isinstance(parameters, dict):
-            # Extract limb darkening coefficients from parameters
             for ld_name in LIMB_DARKENING_NAMES:
                 if ld_name in parameters:
                     limb_darkening_coeffs = parameters[ld_name]
                     break
-        
+        parameters = self.to_parameters(parameters)
+
         if self._has_mu:
             # Standard case - grid includes mu values
             # Add mu to parameters for interpolation
@@ -376,8 +363,8 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
                     limb_darkening_coeffs = None
                 warnings.warn(f"No limb darkening coefficients provided. Using default values: {limb_darkening_coeffs}")
             
-            # Interpolate at disk center (mu=1.0) - this is the reference intensity
-            params_with_mu_center = jnp.hstack([parameters, jnp.atleast_1d(1.0)])
+            # The grid already stores disk-center intensity without a mu axis.
+            # Appending mu here would displace the wavelength in the query.
             
             # Perform disk center interpolation
             disk_center_intensities = interpolate_spectrum(
@@ -386,7 +373,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
                 self.intensities, 
                 self.continuum_intensities, 
                 self.parameters,
-                params_with_mu_center, 
+                parameters,
                 log_wavelengths
             )
             

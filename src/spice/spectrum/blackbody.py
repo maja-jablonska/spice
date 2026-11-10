@@ -31,7 +31,7 @@ def blackbody_intensity(
         ld_coeffs (Optional[ArrayLike]): Coefficients for the selected law. Required when ``ld_law`` is given.
 
     Returns:
-        ArrayLike: Array of blackbody intensities in erg/s/cm2/A
+        ArrayLike: Two identical intensity channels in erg/s/cm2/Angstrom/sr.
     """
     # Convert log wavelength from angstroms to cm
     wave_cm = 10 ** (log_wave - 8)  # 1 Angstrom = 1e-8 cm
@@ -102,8 +102,15 @@ class Blackbody:
         )
 
     def flux(self, log_wavelengths: ArrayLike, parameters: ArrayLike) -> ArrayLike:
-        """Disc-integrated flux at μ=1 (no geometric integration here — callers
-        wanting a true flux should use :func:`spice.spectrum.simulate_observed_flux`)."""
+        """Intensity at mu=1, with the same two channels as :meth:`intensity`.
+
+        Despite its name, this method does not integrate over solid angle.
+        For a blackbody without limb darkening, multiply by pi to obtain
+        emergent surface flux in erg/s/cm2/Angstrom for the luminosity functions.
+        With limb darkening, integrate ``2*pi*I(mu)*mu`` over mu from 0 to 1.
+        Use :func:`spice.spectrum.simulate_observed_flux` with :meth:`intensity`
+        to obtain the disc-integrated flux at an observer's distance.
+        """
         return blackbody_intensity(
             log_wavelengths, 1.0, parameters,
             ld_law=self.ld_law, ld_coeffs=self.ld_coeffs,

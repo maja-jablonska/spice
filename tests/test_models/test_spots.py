@@ -1,5 +1,3 @@
-import pickle
-
 import pytest
 import jax.numpy as jnp
 from spice.models.spots import add_spot, add_spherical_harmonic_spots, add_spherical_harmonic_spot, add_spots
@@ -62,8 +60,8 @@ class TestSpotFunctions:
         with pytest.raises(ValueError):
             add_spherical_harmonic_spot(mock_mesh, 1, 0, param_deltas[0], param_indices[0])
 
-    def test_raises_error_for_read_only_phoebe_model_add_spherical_harmonic_spots(self, spherical_harmonic_params, shared_datadir):
-        phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
+    def test_raises_error_for_read_only_phoebe_model_add_spherical_harmonic_spots(self, spherical_harmonic_params, phoebe_model):
+        phoebe_mesh = phoebe_model
         m_values, n_values, param_deltas, param_indices = spherical_harmonic_params.values()
         with pytest.raises(ValueError):
             add_spherical_harmonic_spots(phoebe_mesh, m_values, n_values, param_deltas, param_indices)
@@ -78,8 +76,8 @@ class TestSpotFunctions:
         result = add_spot(mock_mesh, 0.0, 0.0, 50.0, 100.0, 0)
         assert not jnp.allclose(result.parameters, mock_mesh.parameters)
 
-    def test_add_spot_raises_error_for_phoebe_model(self, shared_datadir):
-        phoebe_mesh = pickle.load(open(shared_datadir / "phoebe_model.pkl", "rb"))
+    def test_add_spot_raises_error_for_phoebe_model(self, phoebe_model):
+        phoebe_mesh = phoebe_model
         with pytest.raises(ValueError):
             add_spot(phoebe_mesh, jnp.pi / 2, 0.0, jnp.pi / 4, 1.0, 0)
 

@@ -9,6 +9,7 @@ import math
 from functools import partial
 from spice.spectrum.utils import ERG_S_TO_W
 from spice.spectrum.filter import Filter
+from spice.spectrum.wavelength_coverage import warn_if_outside_emulator_range, warn_if_passband_uncovered
 from spice.constants import C_KM_S, SOLAR_RAD_CM
 
 from jaxtyping import Array, Float
@@ -282,7 +283,7 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
     Args:
         intensity_fn (Callable): Function that computes intensity given wavelengths, mu and parameters
         m (MeshModel): The mesh model containing geometry and physical parameters
-        log_wavelengths (Float[Array, "n_wavelengths"]): Log of wavelength points to evaluate
+        log_wavelengths (Float[Array, "n_wavelengths"]): Log10 wavelengths in Angstroms
         distance (float, optional): Distance to object in parsecs. Defaults to 10.0.
         chunk_size (int, optional): Surface elements per compiled chunk. Defaults to
             ``DEFAULT_CHUNK_SIZE`` (256). Raising it widens the vmap that ``intensity_fn``
@@ -306,6 +307,7 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
         channels — [flux, continuum] for the grid interpolators; ``Blackbody`` duplicates
         its intensity into both. Units are erg/s/cm^2/Å.
     """
+    warn_if_outside_emulator_range(intensity_fn, log_wavelengths)
     if ld_law is not None or ld_coeffs is not None:
         # ``LdBoundIntensity`` hashes by (intensity_fn, ld_law, coeffs values)
         # so repeat calls with the same LD config hit the existing jit cache
@@ -435,15 +437,17 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
                                       disable_doppler_shift: bool = False) -> Float[Array, "n_wavelengths 2"]:
     """Simulate the monochromatic luminosity from a mesh model.
 
-    This function calculates the monochromatic luminosity from a mesh model by combining the flux function,
-    mesh geometry, and radiative transfer effects. It accounts for visible areas, line-of-sight velocities,
-    and radius effects.
+    Integrate emergent surface flux over every surface element, scaled to its
+    physical area. This uses the full surface, including elements hidden from
+    the observer; it optionally samples the flux at Doppler-shifted wavelengths.
 
     Args:
         flux_fn (Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]]): 
-            Function that computes flux given wavelengths and parameters
+            Emergent surface-flux function in erg/s/cm2/Angstrom, taking log10
+            wavelengths in Angstroms and one parameter row. It must return two
+            channels with shape (n_wavelengths, 2).
         m (MeshModel): The mesh model containing geometry and physical parameters
-        log_wavelengths (Float[Array, "n_wavelengths"]): Log of wavelength points to evaluate
+        log_wavelengths (Float[Array, "n_wavelengths"]): Log10 wavelengths in Angstroms
         chunk_size (int, optional): Surface elements per compiled chunk. Defaults to
             ``DEFAULT_CHUNK_SIZE`` (256); raising it costs compile time, not runtime.
         wavelengths_chunk_size (int, optional): Wavelengths per chunk. Defaults to None,
@@ -451,10 +455,11 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
         disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
 
     Returns:
-        Float[Array, "n_wavelengths 2"]: Array containing the computed luminosity at each wavelength point.
-        The second dimension contains [luminosity, luminosity_error].
-        Units are erg/s/Å.
+        Float[Array, "n_wavelengths 2"]: Luminosity density in erg/s/Angstrom.
+        Both emulator channels are integrated separately; for atmosphere grids
+        they are spectrum and continuum, not luminosity and uncertainty.
     """
+    warn_if_outside_emulator_range(flux_fn, log_wavelengths)
     return jnp.nan_to_num(__flux_flash_sum_with_padding(flux_fn,
                                            log_wavelengths,
                                            _adjust_dim(m.areas, chunk_size),
@@ -467,32 +472,42 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
                                            disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)[:len(log_wavelengths), :]
 
 
-@partial(jax.jit, static_argnums=(0, 3, 4))
 def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                model: MeshModel,
                wavelengths: Float[Array, "n_wavelengths"],
                chunk_size: int = DEFAULT_CHUNK_SIZE,
                wavelengths_chunk_size: Optional[int] = None) -> float:
-    """Calculate the bolometric luminosity of the model.
+    """Integrate luminosity over the supplied wavelength range.
 
-    This function computes the total bolometric luminosity by integrating the monochromatic luminosity
-    over all wavelengths. It uses the trapezoidal rule for numerical integration.
+    Integrate the first monochromatic-luminosity channel using the trapezoidal
+    rule, with wavelengths in Angstroms and density in erg/s/Angstrom. The
+    result approximates a bolometric luminosity only when the wavelength range
+    captures essentially all of the emitted energy.
 
     Args:
         flux_fn (Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]]):
-            Function that computes flux given wavelengths and parameters
+            Emergent surface-flux function in erg/s/cm2/Angstrom, taking log10
+            wavelengths in Angstroms and one parameter row. It must return two
+            channels with shape (n_wavelengths, 2).
         model (MeshModel): The mesh model containing geometry and physical parameters
-        wavelengths (Float[Array, "n_wavelengths"]): Wavelength points to evaluate [Angstrom]
+        wavelengths (Float[Array, "n_wavelengths"]): Increasing linear wavelengths [Angstrom]
         chunk_size (int, optional): Surface elements per compiled chunk. Defaults to
             ``DEFAULT_CHUNK_SIZE`` (256); raising it costs compile time, not runtime.
         wavelengths_chunk_size (int, optional): Wavelengths per chunk. Defaults to None,
             meaning ``min(n_wavelengths, 1024)`` so the grid is never padded up.
 
     Returns:
-        float: Total bolometric luminosity [erg/s]
+        float: Luminosity integrated over the supplied wavelength range [erg/s]
     """
+    # checked here, outside the jit: inside it the wavelengths are tracers
+    warn_if_outside_emulator_range(flux_fn, jnp.log10(wavelengths))
+    return _luminosity_impl(flux_fn, model, wavelengths, chunk_size, wavelengths_chunk_size)
+
+
+@partial(jax.jit, static_argnums=(0, 3, 4))
+def _luminosity_impl(flux_fn, model, wavelengths, chunk_size=DEFAULT_CHUNK_SIZE, wavelengths_chunk_size=None):
     flux = jnp.nan_to_num(simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size, wavelengths_chunk_size))
-    return trapezoid(y=flux[:, 0], x=wavelengths * 1e-8)
+    return trapezoid(y=flux[:, 0], x=wavelengths)
 
 
 @jax.jit
@@ -509,7 +524,7 @@ def filter_responses(wavelengths: ArrayLike, sample_wavelengths: ArrayLike, samp
 @partial(jax.jit, static_argnums=(0,))
 def __AB_passband_luminosity_photonic(filter: Filter,
                                       wavelengths: Float[Array, "n_wavelengths"],
-                                      observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                      observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the AB magnitude in a given filter passband.
 
     This function computes the AB magnitude by integrating the observed flux weighted by
@@ -518,7 +533,7 @@ def __AB_passband_luminosity_photonic(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
@@ -526,16 +541,17 @@ def __AB_passband_luminosity_photonic(filter: Filter,
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
+    # Integrate in Angstroms; the AB zero point uses c in cm/s, hence 1e-8.
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths * 1e-8, y=wavelengths * 1e-8 * observed_flux * transmission_responses) /
-            (trapezoid(x=wavelengths * 1e-8, y=transmission_responses / (wavelengths * 1e-8)))
+            1e-8 * trapezoid(x=wavelengths, y=wavelengths * observed_flux * transmission_responses) /
+            trapezoid(x=wavelengths, y=transmission_responses / wavelengths)
         ) + filter.AB_zeropoint
     
     
 @partial(jax.jit, static_argnums=(0,))
 def __AB_passband_luminosity_photonic_gaia(filter: Filter,
                                            wavelengths: Float[Array, "n_wavelengths"],
-                                           observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                           observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the AB magnitude in a given filter passband.
 
     This function computes the AB magnitude by integrating the observed flux weighted by
@@ -544,7 +560,7 @@ def __AB_passband_luminosity_photonic_gaia(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
@@ -555,7 +571,7 @@ def __AB_passband_luminosity_photonic_gaia(filter: Filter,
     # P_A/(10^9 h*c) * int(lambda * f_lambda * T_zeta dlambda)
     
     nm_lambda = wavelengths/10.
-    watt_flux = 1e-10*observed_flux
+    watt_flux = 1e-2 * observed_flux  # erg/s/cm^2/Angstrom -> W/m^2/nm
 
     return -2.5 * jnp.log10(3663830098681164.5* 
             trapezoid(x=nm_lambda, y=nm_lambda * watt_flux * transmission_responses)
@@ -564,7 +580,7 @@ def __AB_passband_luminosity_photonic_gaia(filter: Filter,
 @partial(jax.jit, static_argnums=(0,))
 def __AB_passband_luminosity_non_photonic(filter: Filter,
                                           wavelengths: Float[Array, "n_wavelengths"],
-                                          observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                          observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the AB magnitude in a given filter passband.
 
     This function computes the AB magnitude by integrating the observed flux weighted by
@@ -573,7 +589,7 @@ def __AB_passband_luminosity_non_photonic(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
@@ -581,16 +597,17 @@ def __AB_passband_luminosity_non_photonic(filter: Filter,
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
 
+    # Integrate in Angstroms; the AB zero point uses c in cm/s, hence 1e-8.
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=observed_flux / 1e8 * transmission_responses) /
-            trapezoid(x=wavelengths, y=transmission_responses)
+            1e-8 * trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
+            trapezoid(x=wavelengths, y=transmission_responses / wavelengths**2)
     ) + filter.AB_zeropoint
     
     
 @partial(jax.jit, static_argnums=(0,))
 def __AB_passband_luminosity_non_photonic_panstarrs_ps1(filter: Filter,
                                                         wavelengths: Float[Array, "n_wavelengths"],
-                                                        observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                                        observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the AB magnitude in a given filter passband for PanSTARRS PS1.
 
     This function computes the AB magnitude by integrating the observed flux weighted by
@@ -599,22 +616,18 @@ def __AB_passband_luminosity_non_photonic_panstarrs_ps1(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
         float: AB magnitude in the filter passband [mag]
     """
-    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    return __AB_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
 
-    return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
-            trapezoid(x=wavelengths, y=transmission_responses / ((wavelengths*1e-8)**2))
-    ) + filter.AB_zeropoint
 
 def AB_passband_luminosity(filter: Filter,
                            wavelengths: Float[Array, "n_wavelengths"],
-                           observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                           observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the AB magnitude in a given filter passband.
 
     This function computes the AB magnitude by integrating the observed flux weighted by
@@ -623,12 +636,13 @@ def AB_passband_luminosity(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
         float: AB magnitude in the filter passband [mag]
     """
+    warn_if_passband_uncovered(filter, wavelengths)
     if 'gaia' in filter.name.lower():
         return __AB_passband_luminosity_photonic_gaia(filter, wavelengths, observed_flux)
     elif 'panstarrs' in filter.name.lower():
@@ -642,7 +656,7 @@ def AB_passband_luminosity(filter: Filter,
 @partial(jax.jit, static_argnums=(0,))
 def __ST_passband_luminosity_non_photonic(filter: Filter,
                                           wavelengths: Float[Array, "n_wavelengths"],
-                                          observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                          observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the ST magnitude in a given filter passband.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
@@ -651,7 +665,7 @@ def __ST_passband_luminosity_non_photonic(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
@@ -660,7 +674,7 @@ def __ST_passband_luminosity_non_photonic(filter: Filter,
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=observed_flux / 1e8 * transmission_responses) /
+            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
             trapezoid(x=wavelengths, y=transmission_responses)
         ) + filter.ST_zeropoint
     
@@ -668,7 +682,7 @@ def __ST_passband_luminosity_non_photonic(filter: Filter,
 @partial(jax.jit, static_argnums=(0,))
 def __ST_passband_luminosity_non_photonic_panstarrs_ps1(filter: Filter,
                                                         wavelengths: Float[Array, "n_wavelengths"],
-                                                        observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                                        observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the ST magnitude in a given filter passband for PanSTARRS PS1.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
@@ -677,24 +691,19 @@ def __ST_passband_luminosity_non_photonic_panstarrs_ps1(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
         float: ST magnitude in the filter passband [mag]
     """
-    transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
+    return __ST_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
 
-    return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
-            trapezoid(x=wavelengths, y=transmission_responses / ((wavelengths*1e-8)**2))
-    ) + filter.ST_zeropoint
 
-    
 @partial(jax.jit, static_argnums=(0,))
 def __ST_passband_luminosity_photonic(filter: Filter,
                                       wavelengths: Float[Array, "n_wavelengths"],
-                                      observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                      observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the ST magnitude in a given filter passband.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
@@ -703,7 +712,7 @@ def __ST_passband_luminosity_photonic(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
@@ -712,14 +721,14 @@ def __ST_passband_luminosity_photonic(filter: Filter,
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=wavelengths * observed_flux / 1e8 * transmission_responses) /
+            trapezoid(x=wavelengths, y=wavelengths * observed_flux * transmission_responses) /
             trapezoid(x=wavelengths, y=wavelengths * transmission_responses)
         ) + filter.ST_zeropoint
     
     
 def ST_passband_luminosity(filter: Filter,
                            wavelengths: Float[Array, "n_wavelengths"],
-                           observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                           observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the ST magnitude in a given filter passband.
 
     This function computes the ST magnitude by integrating the observed flux weighted by
@@ -728,7 +737,7 @@ def ST_passband_luminosity(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
@@ -736,7 +745,8 @@ def ST_passband_luminosity(filter: Filter,
     """
     if 'gaia' in filter.name.lower():
         raise ValueError("Gaia filters are not supported for ST magnitude calculations.")
-    elif 'panstarrs' in filter.name.lower():
+    warn_if_passband_uncovered(filter, wavelengths)
+    if 'panstarrs' in filter.name.lower():
         return __ST_passband_luminosity_non_photonic_panstarrs_ps1(filter, wavelengths, observed_flux)
     elif filter.non_photonic:
         return __ST_passband_luminosity_non_photonic(filter, wavelengths, observed_flux)
@@ -747,7 +757,7 @@ def ST_passband_luminosity(filter: Filter,
 @partial(jax.jit, static_argnums=(0,))
 def __Vega_passband_luminosity_photonic_gaia(filter: Filter,
                                              wavelengths: Float[Array, "n_wavelengths"],
-                                             observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                             observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the Vega magnitude in a given filter passband.
 
     This function computes the Vega magnitude by integrating the observed flux weighted by
@@ -756,18 +766,18 @@ def __Vega_passband_luminosity_photonic_gaia(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
-        float: AB magnitude in the filter passband [mag]
+        float: Vega magnitude in the filter passband [mag]
     """
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     # Montegriffo (2023)
     # P_A/(10^9 h*c) * int(lambda * f_lambda * T_zeta dlambda)
     
     nm_lambda = wavelengths/10.
-    watt_flux = 1e-10*observed_flux
+    watt_flux = 1e-2 * observed_flux  # erg/s/cm^2/Angstrom -> W/m^2/nm
 
     return -2.5 * jnp.log10(3663830098681164.5* 
             trapezoid(x=nm_lambda, y=nm_lambda * watt_flux * transmission_responses)
@@ -777,7 +787,7 @@ def __Vega_passband_luminosity_photonic_gaia(filter: Filter,
 @partial(jax.jit, static_argnums=(0,))
 def __Vega_passband_luminosity_non_photonic(filter: Filter,
                                             wavelengths: Float[Array, "n_wavelengths"],
-                                            observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                            observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the Vega magnitude in a given filter passband.
 
     This function computes the Vega magnitude by integrating the observed flux weighted by
@@ -786,8 +796,8 @@ def __Vega_passband_luminosity_non_photonic(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
-            [erg/s/cm^3]
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
 
     Returns:
         float: Vega magnitude in the filter passband [mag]
@@ -795,14 +805,14 @@ def __Vega_passband_luminosity_non_photonic(filter: Filter,
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=observed_flux / 1e8 * transmission_responses) /
+            trapezoid(x=wavelengths, y=observed_flux * transmission_responses) /
             trapezoid(x=wavelengths, y=transmission_responses)
         ) + filter.Vega_zeropoint
 
 @partial(jax.jit, static_argnums=(0,))
 def __Vega_passband_luminosity_photonic(filter: Filter,
                                         wavelengths: Float[Array, "n_wavelengths"],
-                                        observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                                        observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the Vega magnitude in a given filter passband.
 
     This function computes the Vega magnitude by integrating the observed flux weighted by
@@ -811,8 +821,8 @@ def __Vega_passband_luminosity_photonic(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
-            [erg/s/cm^3]
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
+            [erg/s/cm^2/Å]
 
     Returns:
         float: Vega magnitude in the filter passband [mag]
@@ -820,14 +830,14 @@ def __Vega_passband_luminosity_photonic(filter: Filter,
     transmission_responses = filter.filter_responses_for_wavelengths(wavelengths)
     
     return -2.5 * jnp.log10(
-            trapezoid(x=wavelengths, y=wavelengths * observed_flux / 1e8 * transmission_responses) /
+            trapezoid(x=wavelengths, y=wavelengths * observed_flux * transmission_responses) /
             trapezoid(x=wavelengths, y=wavelengths * transmission_responses)
         ) + filter.Vega_zeropoint
 
 
 def Vega_passband_luminosity(filter: Filter,
                              wavelengths: Float[Array, "n_wavelengths"],
-                             observed_flux: Float[Array, "n_wavelengths 2"]) -> float:
+                             observed_flux: Float[Array, "n_wavelengths"]) -> float:
     """Calculate the Vega magnitude in a given filter passband.
 
     This function computes the Vega magnitude by integrating the observed flux weighted by
@@ -836,12 +846,13 @@ def Vega_passband_luminosity(filter: Filter,
     Args:
         filter (Filter): Filter object containing the transmission curve
         wavelengths (Float[Array, "n_wavelengths"]): Wavelength points [Angstrom]
-        observed_flux (Float[Array, "n_wavelengths 2"]): Observed flux at each wavelength point
+        observed_flux (Float[Array, "n_wavelengths"]): Observed flux at each wavelength point
             [erg/s/cm^2/Å]
 
     Returns:
-        float: AB magnitude in the filter passband [mag]
+        float: Vega magnitude in the filter passband [mag]
     """
+    warn_if_passband_uncovered(filter, wavelengths)
     if filter.Vega_zeropoint is None:
         raise ValueError("Vega zeropoint is not set for this filter.")
     
@@ -858,8 +869,8 @@ def absolute_bol_luminosity(luminosity: float) -> float:
     """Calculate the absolute bolometric magnitude from a given luminosity.
 
     This function converts a bolometric luminosity in erg/s to an absolute bolometric
-    magnitude using the standard formula M_bol = -2.5 * log10(L) + M_bol,⊙, where
-    M_bol,⊙ = 71.1974 is the zero point calibrated to the Sun's bolometric magnitude.
+    magnitude using M_bol = -2.5 * log10(L / W) + 71.1974. The input is
+    converted from erg/s to watts before applying this bolometric zero point.
 
     Args:
         luminosity (float): Total bolometric luminosity [erg/s]

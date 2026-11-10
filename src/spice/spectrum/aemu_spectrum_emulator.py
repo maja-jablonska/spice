@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Callable, Optional
+from typing import List, Dict, Any, Callable, Optional, Tuple
 from typing_extensions import override
 from jaxtyping import ArrayLike
 import numpy as np
@@ -181,6 +181,26 @@ def _input_domain_param_bounds(emulator: "aemu.Emulator", which: str) -> Optiona
     return None
 
 
+def _bundle_wavelength_range(emulator: "aemu.Emulator") -> Optional[Tuple[float, float]]:
+    """``(min, max)`` [Angstrom] of the spectra a bundle was trained on.
+
+    Wavelength-conditioned bundles record their training grid in the extras as
+    ``source_log10_wavelength`` (or ``source_wavelength``); fixed-grid flux
+    bundles as ``wavelength_angstrom``. Returns None when none is recorded."""
+    extras = getattr(emulator, "bundle_extras", None) or {}
+    for key, is_log in (("source_log10_wavelength", True), ("source_wavelength", False),
+                        ("wavelength_angstrom", False)):
+        try:
+            values = np.asarray(extras.get(key, []), dtype=np.float64).ravel()
+        except (TypeError, ValueError):      # an unresolved sidecar reference rather than an array
+            continue
+        values = values[np.isfinite(values)]
+        if values.size:
+            lo, hi = float(values.min()), float(values.max())
+            return (10.0 ** lo, 10.0 ** hi) if is_log else (lo, hi)
+    return None
+
+
 def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) -> ArrayLike:
     # Use ``is None`` / dict-empty check explicitly: ``if not parameter_values``
     # raises on multi-element numpy arrays ("truth value is ambiguous").
@@ -188,8 +208,16 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
         parameter_values = SOLAR_PARAMETERS
 
     if isinstance(parameter_values, dict):
-        parameters = np.array([parameter_values.get(name, SOLAR_PARAMETERS.get(name, 0.0)) for name in interpolator.stellar_parameter_names])
-        for i, name in enumerate(interpolator.stellar_parameter_names):
+        names = interpolator.stellar_parameter_names
+        parameter_values = dict(parameter_values)
+        # Bundles with a ``marcs_fe_h`` input (HARPS cno-v2, 2026-10): when only ``feh`` is
+        # given, derive the atmosphere metallicity from it rather than defaulting to 0.
+        if "marcs_fe_h" in names and "marcs_fe_h" not in parameter_values and "feh" in parameter_values:
+            from .marcs_nodes import resolve_marcs_fe_h
+            mode = getattr(interpolator, "marcs_fe_h_mode", "feh")
+            parameter_values["marcs_fe_h"] = resolve_marcs_fe_h(parameter_values["feh"], mode)
+        parameters = np.array([parameter_values.get(name, SOLAR_PARAMETERS.get(name, 0.0)) for name in names])
+        for i, name in enumerate(names):
             if name in parameter_values:
                 parameters[i] = parameter_values[name]
     else:
@@ -281,6 +309,14 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
         bounds = np.asarray(bounds)
         idx = self._mu_index()
         return bounds if idx is None else np.delete(bounds, idx)
+
+    @override
+    @property
+    def wavelength_range(self) -> Optional[Tuple[float, float]]:
+        """Training wavelength range [Angstrom] recorded in the bundle extras, or None if absent."""
+        if not hasattr(self, "_wavelength_range"):
+            self._wavelength_range = _bundle_wavelength_range(self.emulator)
+        return self._wavelength_range
 
     def to_parameters(self, parameters: ArrayLike = None) -> ArrayLike:
         # Convert a (possibly partial) parameter dict into an ordered array of
@@ -452,7 +488,15 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
     normalise → apply → denormalise → ``10**y``.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, marcs_fe_h_mode: str = "feh"):
+        """``marcs_fe_h_mode`` sets how ``to_parameters`` fills the ``marcs_fe_h`` input
+        of bundles that have one when only ``feh`` is given: ``"feh"`` (default) copies
+        the synthesis metallicity, ``"snap"`` uses the nearest MARCS node
+        (see :mod:`spice.spectrum.marcs_nodes`). Ignored for bundles without it."""
+        from .marcs_nodes import MARCS_FE_H_MODES
+        if marcs_fe_h_mode not in MARCS_FE_H_MODES:
+            raise ValueError(f"marcs_fe_h_mode must be one of {MARCS_FE_H_MODES}, got {marcs_fe_h_mode!r}")
+        self.marcs_fe_h_mode = marcs_fe_h_mode
         super().__init__(name)
         ref_outputs = _affine_reference_scaling(self.emulator, "outputs")
         if self.ref is None or ref_outputs is None:

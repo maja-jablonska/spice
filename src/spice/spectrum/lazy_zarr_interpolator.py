@@ -540,7 +540,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             self.store = zarr.open(zarr_path, mode='r')
             self.length = int(self.store['flux'].shape[0])
             if params is None:
-                params = self.store['param_names']
+                params = list(self.store['param_names'][:])
 
             index_path = f'{zarr_path}/index.parquet'
             if not os.path.exists(index_path):
@@ -589,10 +589,12 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             static_arrays = {}
             for k in arrays:
                 arr = self.store[k]
-                if arr.ndim > 0 and arr.shape[0] == self.length:
-                    rowwise_arrays[k] = arr
-                else:
+                # Wavelength is shared even when its length equals the number
+                # of model rows. Classify by schema, not coincidental sizes.
+                if k == 'wavelength':
                     static_arrays[k] = arr
+                else:
+                    rowwise_arrays[k] = arr
 
             rowwise_bytes = sum(
                 int(np.prod(a.shape)) * np.dtype(a.dtype).itemsize
@@ -789,13 +791,21 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
     def __init__(self, zarr_path, params=None, device=None, sparse=True,
                  in_memory=False, in_memory_threshold_bytes=2 * 1024 ** 3,
                  solar_parameters=None, accumulate_chunk_size=64):
-        if 'mu' not in params:
+        if params is not None and 'mu' not in params:
             raise ValueError("mu must be included in params")
         super().__init__(zarr_path, params, device, sparse=sparse,
                          in_memory=in_memory, in_memory_threshold_bytes=in_memory_threshold_bytes,
                          solar_parameters=solar_parameters,
                          accumulate_chunk_size=accumulate_chunk_size)
-        self._stellar_parameter_names = [p for p in params if p != 'mu']
+        columns = list(self.grid_index.columns)
+        if 'mu' not in columns:
+            raise ValueError("mu must be included in params")
+        self._stellar_parameter_names = [p for p in columns if p != 'mu']
+        # Public intensity inputs contain stellar parameters followed by mu;
+        # the stored index may place the mu axis anywhere.
+        self._query_order = tuple(
+            len(self._stellar_parameter_names) if p == 'mu'
+            else self._stellar_parameter_names.index(p) for p in columns)
         self.min_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].min() for p in self._stellar_parameter_names])
         self.max_stellar_parameters = jnp.array([self.grid_index.axes[self.grid_index.columns.index(p)].max() for p in self._stellar_parameter_names])
 
@@ -816,6 +826,7 @@ class IntensityLazyZarrInterpolator(LazyZarrInterpolator):
     @override
     def intensity(self, log_wavelengths, mu, parameters):
         query = jnp.concatenate([jnp.atleast_1d(parameters), jnp.atleast_1d(jnp.squeeze(mu))])
+        query = query[jnp.asarray(self._query_order)]
         weighted_batch = self.get_weighted_batch(jnp.atleast_2d(query))
         flux, continuum = self._resample_weighted_batch(log_wavelengths, weighted_batch)
         return jnp.stack([flux[0], continuum[0]], axis=-1)

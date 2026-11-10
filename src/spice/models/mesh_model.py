@@ -29,7 +29,7 @@ from spice.utils.dtypes import float_dtype as _float_dtype
 
 def _default_los_vector():
     # Points observer -> star; [0, 0, -1] is the standard astronomical
-    # convention shared by PhoebeModel and the binary-orbit utilities.
+    # convention used by the native binary-orbit utilities.
     return jnp.array([0., 0., -1.], dtype=_float_dtype())
 
 
@@ -63,9 +63,14 @@ def calculate_log_gs(mass: float, d_centers: ArrayLike, rot_velocities: ArrayLik
     Returns:
         log10(g) per mesh element, with g in cm/s^2.
     """
+    return _log_g_from_squared_speeds(mass, d_centers, jnp.square(jnp.asarray(rot_velocities)))
+
+
+def _log_g_from_squared_speeds(mass, d_centers, squared_speeds):
+    # Use squared speeds directly so gradients remain finite at zero rotation.
     # g in m/s^2 (d_centers in solar radii, mass in solar masses; 274.20011... = GM_sun/R_sun^2)
     r = jnp.linalg.norm(d_centers, axis=1)
-    g_mks = (274.20011165737316 * mass / jnp.power(r, 2)) - jnp.power(rot_velocities, 2) / (695700000.0 * r)
+    g_mks = (274.20011165737316 * mass / jnp.power(r, 2)) - squared_speeds * 1e6 / (695700000.0 * r)
     # Return log10(g) in cgs (cm/s^2), the standard astronomical convention.
     return jnp.log10(g_mks * 100.0)
 
@@ -92,7 +97,8 @@ MeshModelNamedTuple = namedtuple("MeshModel",
                                   "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
                                   "pulsation_periods", "fourier_series_parameters",
-                                  "pulsation_axes", "pulsation_angles"])
+                                  "pulsation_axes", "pulsation_angles", "override_log_g"],
+                                 defaults=(False,))
 
 
 class MeshModel(Model, MeshModelNamedTuple):
@@ -134,6 +140,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     parameters: Float[Array, "n_mesh_elements n_parameters"]
     log_g_index: Optional[int]
+    override_log_g: bool
 
     # Motion properties per-triangle
     # km/s
@@ -182,19 +189,21 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def areas(self) -> Float[Array, "n_mesh_elements"]:
-        """Surface-element areas (unit-sphere normalised, summing to ~4*pi for any
-        radius), including pulsation offsets. Note these follow a different unit
-        convention than :attr:`cast_areas` — see the "Mesh area conventions"
-        section of the README."""
+        """Surface areas divided by the reference stellar radius squared.
+
+        An undeformed sphere sums to approximately 4*pi; pulsations change this
+        sum. Unlike :attr:`cast_areas`, these need the reference radius squared
+        when converting to physical area (see "Mesh area conventions" in README).
+        """
         return self.base_areas + self.area_pulsation_offsets
 
     @property
     def log_gs(self) -> Float[Array, "n_mesh_elements"]:
         """log10 surface gravity per element in cgs, including rotational reduction."""
-        return calculate_log_gs(
+        return _log_g_from_squared_speeds(
             self.mass,
             self.centers - self.center,
-            jnp.linalg.norm(self.rotation_velocities, axis=1)
+            jnp.sum(jnp.square(self.rotation_velocities), axis=1)
         )
 
     @property
@@ -213,7 +222,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def centers(self) -> Float[Array, "n_mesh_elements 3"]:
-        """Absolute face-centroid positions (reference centers + center + pulsation offsets) [R_sun]."""
+        """Absolute face sample positions (reference centers + center + pulsation offsets) [R_sun]."""
         if len(self.d_centers.shape) == 2:
             return self.d_centers + self.center + self.center_pulsation_offsets
         else:
@@ -266,7 +275,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def cast_areas(self) -> Float[Array, "n_mesh_elements"]:
-        """Projected (sky-plane) area of each element, same units as :attr:`areas` [R_sun^2]."""
+        """Projected (sky-plane) physical area of each element [R_sun^2]."""
         return get_cast_areas(self.cast_vertices[self.faces.astype(int)])
 
     @property
@@ -295,16 +304,21 @@ class IcosphereModel(MeshModel):
         centers). It also handles the calculation of surface gravity (log g) values if required.
 
         Args:
-            n_vertices (int): Number of vertices for the icosphere mesh.
-            radius (float): Radius of the icosphere.
-            mass (float): Mass of the stellar object.
-            parameters (Union[float, Float[Array, "n_mesh_elements n_parameters"]]): Parameters for the model, can be a single value or an array.
+            n_vertices (int): Mesh resolution request, rounded to a discrete refinement level.
+            radius (float): Radius in solar radii.
+            mass (float): Mass in solar masses.
+            parameters (Union[float, Float[Array, "n_mesh_elements n_parameters"]]):
+                Scalar for one parameter, a list or 1-D array shared by all faces,
+                or a 2-D array with one row per face. Converted to the active
+                JAX floating-point dtype.
             parameter_names (List[str]): Names of the parameters, used for identifying log g parameter.
             max_pulsation_mode (int, optional): Maximum pulsation mode for the model. Defaults to a predefined value.
             max_fourier_order (int, optional): Maximum order of Fourier series for pulsation calculation. Defaults to a predefined value.
             override_log_g (bool, optional): If False (the default), SPICE computes log g per element from the model's
                 mass and per-element radius, overwriting any log g value passed in parameters. Set to True to keep
-                explicitly passed log g values as-is; a warning is issued. Defaults to False.
+                explicitly passed log g values as-is; a warning is issued. This choice is retained across
+                rotation and pulsation updates: computed values are refreshed, overrides are preserved.
+                Defaults to False.
             log_g_index (Optional[int], optional): Index of the log g parameter in the parameters array. Only needed
                 when no name in parameter_names matches one of the recognized log g names (see LOG_G_NAMES).
 
@@ -318,13 +332,9 @@ class IcosphereModel(MeshModel):
             "IcosphereModel constructed in {elapsed:.1f} s",
         ):
             vertices, faces, areas, centers = icosphere(n_vertices)
-            # The packaged icosphere pickles were dumped from a float32 session,
-            # so under jax_enable_x64 they come back float32 while every other
-            # field below is built at _float_dtype(). The mismatch is invisible
-            # until something branches on the model: get_mesh_view's lax.cond
-            # traces one branch through _add_rotation (which promotes to float64)
-            # and the other unchanged, and jax rejects the pair. Normalize here
-            # so a model's dtype never depends on how its cache was written.
+            # Cached meshes may have been created in float32. Normalize their
+            # arrays to the active JAX precision so derived operations agree
+            # on dtype regardless of how the cache was written.
             vertices = jnp.asarray(vertices, dtype=_float_dtype())
             areas = jnp.asarray(areas, dtype=_float_dtype())
             centers = jnp.asarray(centers, dtype=_float_dtype())
@@ -346,7 +356,7 @@ class IcosphereModel(MeshModel):
             center_norms = jnp.linalg.norm(centers, axis=1, keepdims=True)
             centers = centers * jnp.where(center_norms > 0.0, radius / center_norms, 1.0)
 
-            parameters = jnp.atleast_1d(parameters)
+            parameters = jnp.atleast_1d(jnp.asarray(parameters, dtype=_float_dtype()))
             if len(parameters.shape) == 1:
                 parameters = jnp.repeat(parameters[jnp.newaxis, :], repeats=areas.shape[0], axis=0)
             log_g_name_indices = [i for i, pn in enumerate(parameter_names) if pn in LOG_G_NAMES]
@@ -380,6 +390,7 @@ class IcosphereModel(MeshModel):
                                      base_areas=areas,
                                      parameters=parameters,
                                      log_g_index=log_g_index,
+                                     override_log_g=override_log_g,
                                      rotation_velocities=jnp.zeros_like(centers, dtype=_float_dtype()),
                                      vertices_pulsation_offsets=jnp.zeros_like(vertices, dtype=_float_dtype()),
                                      center_pulsation_offsets=jnp.zeros_like(centers, dtype=_float_dtype()),

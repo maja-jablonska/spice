@@ -78,8 +78,11 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
     distances = v_cartesian_distance(d_centers[:, 0], d_centers[:, 1], d_centers[:, 2],
                                      spot_center_x, spot_center_y, spot_center_z)
 
-    # Calculate the difference from the spot edge
-    distance_from_edge = jnp.deg2rad(spot_radius) * mesh_radius - distances
+    # Both quantities must be chord lengths. An angular radius alpha spans
+    # a chord of 2 R sin(alpha/2), rather than the arc length R alpha.
+    angular_radius = jnp.deg2rad(jnp.clip(spot_radius, 0., 180.))
+    chord_radius = 2. * mesh_radius * jnp.sin(angular_radius / 2.)
+    distance_from_edge = chord_radius - distances
 
     # Apply smoothness to interpolate values at the spot's edge
     # Use a small fraction of mesh radius for scaling, but ensure it's not too small
@@ -92,7 +95,9 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
     adjusted_smoothness = (1.0 - smoothness) + 0.01 * smoothness
     differences = sigmoid(normalized_distance, adjusted_smoothness) * parameter_diff
 
-    return differences
+    # Degenerate caps have exact empty/full coverage, including their poles.
+    return jnp.where(spot_radius <= 0., 0.,
+                     jnp.where(spot_radius >= 180., parameter_diff, differences))
 
 
 generate_spherical_spots = jax.jit(jax.vmap(generate_spherical_spot, in_axes=(None, None,
@@ -104,7 +109,7 @@ def _add_spherical_harmonic_spot(mesh: MeshModel,
                                  m_order: int, l_degree: int,
                                  param_delta: float,
                                  param_index: int) -> MeshModel:
-    spot_parameters = spherical_harmonic(m_order, l_degree, mesh.centers) * param_delta
+    spot_parameters = spherical_harmonic(m_order, l_degree, mesh.d_centers) * param_delta
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
     
@@ -116,7 +121,7 @@ def _add_spherical_harmonic_spot_with_tilt(mesh: MeshModel,
                                  param_index: int,
                                  tilt_axis: ArrayLike = jnp.array([0., 0., 1.]),
                                  tilt_angle: float = 0.) -> MeshModel:
-    spot_parameters = spherical_harmonic_with_tilt(m_order, l_degree, mesh.centers, tilt_axis, tilt_angle) * param_delta
+    spot_parameters = spherical_harmonic_with_tilt(m_order, l_degree, mesh.d_centers, tilt_axis, tilt_angle) * param_delta
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
 
@@ -256,8 +261,10 @@ def add_spots(mesh: MeshModel,
         raise ValueError("PHOEBE models are read-only.")
     else:
         if parameter_indices is None:
-            parameter_indices = jnp.ones_like(parameter_deltas)
-        
+            parameter_indices = jnp.ones_like(parameter_deltas, dtype=jnp.int32)
+        if smoothness is None:
+            smoothness = jnp.zeros_like(parameter_deltas)
+
         def scan_fn(carry, x):
             mesh, theta, phi, radius, delta, index, smooth = carry, *x
             return _add_spot(mesh, theta, phi, radius, delta, index, smooth), None

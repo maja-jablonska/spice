@@ -135,3 +135,40 @@ def test_result_is_insensitive_to_neighbour_count():
         f"k=10 gives {small:.5f} but k=40 gives {large:.5f}: the neighbour "
         "search is starved"
     )
+
+
+def test_total_eclipse_of_nonuniformly_tessellated_mesh():
+    # Subdivide the visible side without changing the closed polyhedral surface.
+    # Visibility is a geometric property, not a fixed fraction of the face count.
+    mesh = _body(100, 1., 1., [0., 0., 0.])
+    vertices = list(np.asarray(mesh.d_vertices))
+    faces = []
+    for face, mu in zip(np.asarray(mesh.faces, dtype=int), np.asarray(mesh.mus)):
+        if mu > 0:
+            vertices.append(np.mean([vertices[i] for i in face], axis=0))
+            center = len(vertices) - 1
+            faces.extend([[face[0], face[1], center], [face[1], face[2], center],
+                          [face[2], face[0], center]])
+        else:
+            faces.append(list(face))
+    vertices, faces = np.asarray(vertices), np.asarray(faces)
+    triangles = vertices[faces]
+    centers = triangles.mean(axis=1)
+    n = len(faces)
+    areas = np.linalg.norm(np.cross(triangles[:, 1] - triangles[:, 0],
+                                   triangles[:, 2] - triangles[:, 0]), axis=1) / 2
+    mesh = mesh._replace(
+        d_vertices=jnp.asarray(vertices), faces=jnp.asarray(faces),
+        d_centers=jnp.asarray(centers), base_areas=jnp.asarray(areas),
+        parameters=jnp.tile(mesh.parameters[0], (n, 1)),
+        rotation_velocities=jnp.zeros((n, 3)),
+        vertices_pulsation_offsets=jnp.zeros(vertices.shape),
+        center_pulsation_offsets=jnp.zeros((n, 3)),
+        area_pulsation_offsets=jnp.zeros(n), pulsation_velocities=jnp.zeros((n, 3)),
+        axis_radii=jnp.ones(n), occluded_areas=jnp.zeros(n),
+    )
+    assert int((mesh.mus > 0).sum()) > 0.6 * n + 1
+    occulter = _body(100, 1.1, 1., [0., 0., 5.])
+    eclipsed = resolve_occlusion(mesh, occulter, n_neighbors=80)
+    residual = float(eclipsed.visible_cast_areas.sum() / mesh.visible_cast_areas.sum())
+    assert residual == pytest.approx(0., abs=1e-10)
