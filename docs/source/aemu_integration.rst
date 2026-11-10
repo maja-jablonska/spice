@@ -14,6 +14,15 @@ Install with:
 
     pip install "stellar-spice[aemu]"
 
+.. important::
+
+   TransformerPayne bundles handle wavelengths in float64, so enable 64-bit JAX before
+   importing SPICE: ``export JAX_ENABLE_X64=1``, or
+   ``jax.config.update("jax_enable_x64", True)`` at the top of the script. Bundles trained
+   with ``astro-emulators-toolkit`` 0.2, such as the emulator of the SPICE paper,
+   ``mjablonska/TPayne-spice-harps-interp`` (inputs ``teff``, ``logg``, ``feh``, ``vmicro``, the
+   six abundance offsets and ``mu``), need toolkit 0.2 or newer.
+
 .. note::
 
    Every code snippet and figure on this page has a matching section in the companion notebook
@@ -57,9 +66,12 @@ Input/output min-max scaling declared by the bundle (both the older split
 
 .. warning::
 
-   TPayne-style bundles expect the temperature as ``logteff``
-   (log10 Kelvin), not linear ``teff`` — check
-   ``emu.stellar_parameter_names`` and see :doc:`conventions`.
+   Parameter names, units and the wavelength range come from the bundle. Check
+   ``emu.stellar_parameter_names`` (current TPayne bundles take linear ``teff`` in
+   Kelvin; some older bundles used ``logteff``) and ``emu.wavelength_range``.
+   ``emu.to_parameters`` ignores keys that are not bundle parameters, so a misspelled
+   name silently leaves that parameter at its default; SPICE warns when an emulator
+   is asked for wavelengths outside its range.
 
 Synthesizing spectra
 --------------------
@@ -75,13 +87,13 @@ bundle's parameters, then synthesize:
     from spice.spectrum import simulate_observed_flux
     from spice.models.mesh_transform import add_rotation, evaluate_rotation
 
-    m = IcosphereModel.construct(1000, 1., 1.,
-                                 emu.to_parameters(dict(logteff=jnp.log10(7000), logg=4.3)),
+    m = IcosphereModel.construct(5000, 1., 1.,
+                                 emu.to_parameters(dict(teff=7000., logg=4.3)),
                                  emu.stellar_parameter_names)
 
     mt = evaluate_rotation(add_rotation(m, 100, jnp.array([0., 1., 0.])), 0.)
 
-    vws = np.linspace(4670, 4960, 2000)
+    vws = np.linspace(5000, 5020, 2000)   # inside this bundle's 5000-5020 A range
     spec_no_rot = simulate_observed_flux(emu.intensity, m, jnp.log10(vws))
     spec_rot = simulate_observed_flux(emu.intensity, mt, jnp.log10(vws))
 
@@ -100,7 +112,7 @@ Abundance spots and line profiles
 
 Because bundle parameters typically include individual abundances, surface
 abundance patterns become time-dependent line-profile variations. A
-manganese spot on a rotating star:
+iron spot on a rotating star:
 
 .. code-block:: python
 
@@ -109,21 +121,21 @@ manganese spot on a rotating star:
     timestamps = np.linspace(0, 48*3600, 100)
 
     m_spotted = add_spot(m, spot_center_theta=1., spot_center_phi=1., spot_radius=30.,
-                         parameter_delta=5.0,
-                         parameter_index=emu.stellar_parameter_names.index('Mn'))
+                         parameter_delta=0.5,
+                         parameter_index=emu.stellar_parameter_names.index('[Fe/H]'))
     m_spotted = [evaluate_rotation(add_rotation(m_spotted, 25.), t) for t in timestamps]
 
-    vws = np.linspace(4762, 4769, 2000)
-    spec_rot_spotted = [simulate_observed_flux(emu.intensity, _m, jnp.log10(vws))
+    vws_line = np.linspace(5004.5, 5007.5, 1000)   # Fe I 5005.71 + 5006.12 A
+    spec_rot_spotted = [simulate_observed_flux(emu.intensity, _m, jnp.log10(vws_line))
                         for _m in m_spotted]
 
-.. image:: ../img/mn_spot_0.png
+.. image:: ../img/feh_spot_0.png
    :width: 600
-   :alt: Manganese spot at phase 0
+   :alt: Iron spot at phase 0
 
-.. image:: ../img/mn_line_profile.png
+.. image:: ../img/feh_line_profile.png
    :width: 600
-   :alt: Manganese line profiles
+   :alt: Iron line profiles
 
 Similarly, pulsating models produce phase-dependent line profiles (see the
 companion notebook for the full plotting code):
@@ -148,8 +160,3 @@ companion notebook for the full plotting code):
    :alt: Pulsation line profiles
    :class: only-dark
 
-.. note::
-
-   The figures on this page were produced with the TPayne-architecture
-   predecessor of the current bundles; running the companion notebook with
-   an intensity bundle regenerates them with the emulator you choose.

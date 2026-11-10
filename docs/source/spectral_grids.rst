@@ -25,7 +25,7 @@ Grid layout
 
 A grid is a zarr store with (at least) these arrays:
 
-- ``wavelength`` — shared wavelength sampling, shape ``(L,)``
+- ``wavelength`` — shared wavelength sampling, shape ``(L,)``, including when ``L == N``
 - ``flux`` and ``continuum`` — one row per grid node, shape ``(N, L)``
 - ``params`` — node parameters, shape ``(N, P)``
 - ``param_names`` — the ``P`` parameter labels (e.g. ``teff``, ``logg``, ``mu``)
@@ -79,7 +79,10 @@ Two subclasses adapt a grid to the two synthesis interfaces:
     For grids with a ``mu`` axis (specific intensities). Its ``intensity``
     method plugs directly into
     :func:`~spice.spectrum.simulate_observed_flux`; ``flux`` integrates over
-    ``mu`` with Gauss–Legendre quadrature.
+    ``mu`` with Gauss–Legendre quadrature. The ``mu`` axis may appear anywhere
+    in ``params``; the interpolator maps the supplied stellar parameters and
+    separate ``mu`` argument into the index's axis order. If ``params`` is
+    omitted, it reads the stored ``param_names`` metadata.
 
 :class:`~spice.spectrum.FluxLazyZarrInterpolator`
     For flux-only grids. Its ``intensity`` derives angle dependence from a

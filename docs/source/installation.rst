@@ -2,7 +2,8 @@ Installation
 ============
 
 SPICE is published on PyPI as ``stellar-spice`` and installs as the ``spice``
-package:
+package. Python 3.11 or newer is required; the current JAX backend uses
+NumPy >=2.0,<3 with JAX and JAXlib >=0.10:
 
 .. code-block:: bash
 
@@ -34,8 +35,8 @@ Optional extras
      - ``huggingface-hub``
    * - ``[aemu]``
      - Neural-network spectrum emulators loaded as bundles
-       (:doc:`aemu_integration`)
-     - ``astro-emulators-toolkit``
+       (:doc:`aemu_integration`); TransformerPayne bundles need 64-bit JAX
+     - ``astro-emulators-toolkit`` (>= 0.2)
    * - ``[dev]``
      - Running the test suite
      - ``pytest``, ``pytest-datadir``, ``coverage``
@@ -45,6 +46,22 @@ Extras combine freely, e.g.:
 .. code-block:: bash
 
     pip install "stellar-spice[grid,phoebe]"
+
+Updating an existing environment
+--------------------------------
+
+The former NumPy 1.26 constraint is incompatible with the current JAX
+requirement. Use Python 3.11 or newer and let the package requirements
+resolve together. For the development checkout, start from its root:
+
+.. code-block:: bash
+
+    python3.11 -m venv .venv
+    source .venv/bin/activate
+    python -m pip install -e ".[dev]"
+    python -m pip check
+
+See :doc:`conventions` for changes affecting existing scientific results.
 
 Verifying the install
 ---------------------

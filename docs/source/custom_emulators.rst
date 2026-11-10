@@ -33,14 +33,19 @@ Two members are required:
 Two are optional capabilities, raising ``NotImplementedError`` by default:
 
 ``intensity(log_wavelengths, mu, parameters)``
-    Specific intensity for one surface element at viewing angle ``mu``.
+    Specific intensity in erg/s/cm²/Å/sr for one surface element at
+    viewing angle ``mu``.
     Must return shape ``(n_wavelengths, 2)`` — by convention
     ``[flux-like, continuum-like]`` channels; duplicate your intensity if
     you have no continuum. This is what
     :func:`~spice.spectrum.simulate_observed_flux` consumes.
 
 ``flux(log_wavelengths, parameters)``
-    Disc-integrated flux, used by the luminosity functions.
+    Emergent surface flux in erg/s/cm²/Å, shape ``(n_wavelengths, 2)``,
+    used by the luminosity functions. For an azimuthally symmetric
+    intensity, this is :math:`F_\lambda = 2\pi\int_0^1 I_\lambda(\mu)\mu\,d\mu`.
+    Do not pass an observed flux diluted by distance or an unintegrated
+    intensity as a surface-flux function.
 
 Requirements on the implementation:
 
@@ -120,3 +125,25 @@ Built-in implementations to crib from
   reference, including ``mu`` handling and lazy loading.
 - The aemu wrappers (:doc:`aemu_integration`) — neural-network emulator
   bundles consumed through the same interface.
+
+User spectrum parameter inputs
+------------------------------
+
+``UserSpectrumInterpolator.to_parameters`` accepts a dictionary or a list,
+tuple, NumPy array, or JAX array in ``parameter_names`` order. Array inputs
+may be a single parameter row or a two-dimensional batch of rows; pass one
+row at a time to ``intensity`` (or map it with JAX). The default dictionary
+keys are ``teff``, ``logg``, and ``m/h``; supported aliases such as
+``metallicity`` are also accepted.
+
+The stored parameter matrix has one column per stellar parameter, plus a
+final ``mu`` column only when ``has_mu=True``. The wavelength is supplied
+separately and is retained during interpolation. Inconsistent query and grid
+dimensions raise ``ValueError``.
+
+For a table without angular samples (``has_mu=False``), a dictionary passed
+to ``intensity`` may also contain ``limb_darkening``. This
+metadata is read before the atmosphere parameters are converted to an array.
+For a linear law, a coefficient of 0 gives no darkening and a coefficient
+of 1 multiplies the disk-centre intensity by ``mu``. If coefficients are
+omitted, the interpolator warns and uses the law's default values.

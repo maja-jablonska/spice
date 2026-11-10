@@ -8,12 +8,18 @@ should agree with it.
 Geometry and line of sight
 --------------------------
 
-- The line-of-sight vector defaults to ``[0., 0., -1.]`` everywhere — single
-  :class:`~spice.models.MeshModel`\ s, PHOEBE models, and the binary-orbit
-  utilities all share this standard astronomical convention (it points
-  observer → star). The default rotation axis is ``[0., 1., 0.]``, which lies
-  in the default sky plane, so a rotating star is viewed equator-on by
-  default.
+- Native :class:`~spice.models.MeshModel` objects and binary-orbit utilities
+  default to line of sight ``[0., 0., -1.]`` (observer → star). The default
+  rotation axis is ``[0., 1., 0.]``, giving an equator-on view.
+- PHOEBE models use ``[0., 0., +1.]`` for their velocity projection because
+  the imported uvw velocities have a different sign convention. Their
+  viewing cosines and projected geometry come directly from PHOEBE; retain
+  this adapter convention to preserve PHOEBE's radial-velocity signs.
+- :func:`~spice.models.mesh_view.get_mesh_view` changes the observer direction
+  while preserving the rotation axis and velocity field. To choose an
+  equator-on axis for a custom LOS, call it **before** ``add_rotation`` and
+  leave ``rotation_axis`` unspecified. Viewing along an existing rotation
+  axis gives a pole-on star with zero projected rotational velocity.
 - ``mesh.mus`` is the cosine of the angle between an element's surface normal
   and the line of sight; only elements with positive ``mus`` contribute to
   synthesized flux.
@@ -56,8 +62,10 @@ Time and periods
 Wavelengths and spectra
 -----------------------
 
-- All synthesis entry points take ``log10`` of the wavelength in Angstroms
-  (``np.log10(wavelengths)``), not the wavelength itself.
+- ``simulate_observed_flux`` and ``simulate_monochromatic_luminosity`` take
+  ``log10`` of the wavelength in Angstroms.
+  ``luminosity`` and the photometry functions instead take **linear**
+  wavelengths in Angstroms.
 - Flux is in erg/s/cm²/Å at the requested ``distance`` in parsecs
   (default 10 pc); intensities are erg/s/cm²/Å/sr.
 - Synthesis results have shape ``(n_wavelengths, 2)``: the disc-integrated
@@ -69,20 +77,35 @@ Stellar parameters
 ------------------
 
 - Mesh radius and mass are in solar units (solRad, solMass).
+- Mesh construction accepts a scalar for one parameter, a list or 1-D array
+  shared by all faces, or a 2-D array with one row per face. Values are
+  converted to the active floating-point dtype, so integer inputs do not
+  truncate computed surface gravity.
 - Surface gravity is :math:`\log_{10} g` in cgs (cm/s²). By default, any
   parameter named like ``logg`` (see ``LOG_G_NAMES``) is computed by SPICE
   per element from mass and per-element radius. Pass ``override_log_g=True``
   to keep explicitly supplied log g values instead; a warning is issued to
   flag that SPICE's computed values are being overridden.
-- Effective temperature is linear Kelvin for :class:`~spice.spectrum.Blackbody`
-  and the grid interpolators, but **log10 Kelvin** (``logteff``) for
-  TPayne-style aemu bundles — check your emulator's ``parameter_names``.
+- ``mesh.log_gs`` includes the centrifugal reduction from the current
+  per-element rotation speeds. ``calculate_log_gs`` accepts those speeds
+  in km/s and converts them to m/s for the acceleration calculation. Rotation
+  and pulsation updates copy this gravity into the atmosphere parameter column
+  unless the model was constructed with ``override_log_g=True``.
+- Effective temperature is linear Kelvin (``teff``) for :class:`~spice.spectrum.Blackbody`,
+  the grid interpolators and the current TPayne aemu bundles; some older bundles used
+  log10 Kelvin (``logteff``). Check your emulator's ``stellar_parameter_names``:
+  ``to_parameters`` ignores names the emulator does not have.
 
 Spots and pulsations
 --------------------
 
 - Spot centers (``spot_center_theta``, ``spot_center_phi``) are in
   **radians**; spot radii are in **degrees**; tilt angles are in **degrees**.
+  The angular boundary is converted to a chord length before distance
+  comparisons. Zero-radius spots are empty; radii of 180 degrees or more
+  cover the whole surface. ``add_spots`` defaults to the same zero smoothness
+  as ``add_spot``. Harmonic spot patterns use the reference surface relative
+  to the star, so translating a mesh does not change its pattern.
 - Spherical-harmonic spots and pulsation modes are indexed by order ``m`` and
   degree ``l`` with :math:`m \le l`.
 - Pulsation Fourier parameters have shape ``(3, N, 2)`` per mode — the first
@@ -97,8 +120,9 @@ Photometric systems
 - :func:`~spice.spectrum.AB_passband_luminosity`,
   :func:`~spice.spectrum.ST_passband_luminosity`, and
   :func:`~spice.spectrum.Vega_passband_luminosity` return magnitudes in
-  their respective systems from the same flux array (linear wavelengths
-  here, in Angstroms).
+  their respective systems from a 1-D flux density in erg/s/cm²/Å
+  (``spectrum[:, 0]``) and linear wavelengths in Angstroms. Pass the
+  synthesis output directly, without converting it to flux per centimetre.
 - Gaia filters are photonic and **not supported for ST magnitudes**; see
   :doc:`synthetic_photometry` for the per-filter capabilities.
 
@@ -109,3 +133,27 @@ Precision
   ``jax.config.update("jax_enable_x64", True)`` (set it before constructing
   meshes). Mixed float32 wavelengths with float64 mesh state are handled
   internally by casting the velocity term to the wavelength dtype.
+
+Updating existing calculations
+------------------------------
+
+The corrections on this branch change absolute predictions. Recompute
+stored results with the corrected functions:
+
+- The per-Angstrom photometry correction removes a +20 magnitude offset
+  from affected AB, ST, and Vega paths, including Gaia. Energy-response
+  weighting was corrected as well, so recomputation is preferable to
+  applying a single offset to every stored magnitude.
+- ``luminosity`` now integrates erg/s/Å over Angstroms. For the same input
+  surface-flux spectrum and mesh, it is a factor of :math:`10^8` larger
+  than the previous result; the corresponding bolometric magnitude is
+  20 magnitudes smaller. Check the emulator's surface-flux convention too
+  (:doc:`spectral_synthesis`).
+- Changing the observer direction preserves the rotation axis. Code that
+  relies on an equator-on default should set the view before adding rotation
+  (:doc:`mesh`).
+- Eclipses process every target face, including meshes with more than 60%
+  of their faces visible. Recheck eclipse curves from uneven tessellations.
+- The centrifugal gravity reduction now uses consistent velocity units;
+  rebuild or re-evaluate previously saved rotating meshes. Automatically
+  managed atmosphere gravity now follows rotation and pulsation changes.

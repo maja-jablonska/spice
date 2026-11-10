@@ -101,7 +101,7 @@ An eclipsing binary with a light curve
         i=np.pi / 2,              # inclination [rad], edge-on
         omega=0.0,                # argument of periastron [rad]
         Omega=0.0,                # longitude of the ascending node [rad]
-        mean_anomaly=0.0,         # mean anomaly at the reference time [rad]
+        mean_anomaly=0.0,         # additive phase offset from periastron timing [rad]
         reference_time=0.0,       # reference time [years]
         vgamma=0.0,               # systemic velocity [km/s]
         orbit_resolution_points=50,

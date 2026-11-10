@@ -5,6 +5,8 @@ T = TypeVar('T')
 
 
 class Model:
+    """Interface shared by the stellar-surface models (:class:`~spice.models.mesh_model.MeshModel` and the
+    PHOEBE-imported meshes): geometry and per-element properties used by the synthesis."""
     @property
     def vertices(self) -> T:
         raise NotImplementedError

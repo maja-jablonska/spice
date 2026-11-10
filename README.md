@@ -8,7 +8,8 @@ The paper is submitted and available as a [preprint](https://arxiv.org/abs/2511.
 
 ## Installation
 
-Install from PyPI:
+Use Python **3.11 or newer**. The current dependency constraints require
+JAX/JAXlib ≥0.10 and NumPy ≥2.0,<3. Install from PyPI:
 
 ```bash
 pip install stellar-spice
@@ -17,14 +18,23 @@ pip install stellar-spice
 For PHOEBE integration support:
 
 ```bash
-pip install stellar-spice[phoebe]
+pip install "stellar-spice[phoebe]"
 ```
 
 For zarr-backed model-atmosphere grid interpolation (`LazyZarrInterpolator` and friends):
 
 ```bash
-pip install stellar-spice[grid]
+pip install "stellar-spice[grid]"
 ```
+
+For neural-network emulator bundles (aemu), such as the paper's `mjablonska/TPayne-spice-harps-interp`:
+
+```bash
+pip install "stellar-spice[aemu]"
+```
+
+TransformerPayne bundles need 64-bit JAX: set `JAX_ENABLE_X64=1` (or call
+`jax.config.update("jax_enable_x64", True)`) before importing SPICE.
 
 
 ## Documentation
@@ -80,7 +90,7 @@ The grids and model outputs behind the paper are in the Hugging Face dataset [mj
 ### 🔍 **Synthetic Photometry**
 
 - **Multiple passband support** (Johnson, Stromgren, Gaia, etc.)
-- **AB magnitude system** calculations
+- **AB, ST and Vega magnitude systems**
 - **Bolometric luminosity** computations
 - **Time-series photometry** for variable stars
 
@@ -106,7 +116,7 @@ bb = Blackbody()
 
 # Create a solar-like star
 star = IcosphereModel.construct(
-    n_vertices=1000,                 # Mesh resolution (number of vertices)
+    n_vertices=1000,                 # Resolution request; rounded to a refinement level
     radius=1.0,                      # Solar radii
     mass=1.0,                        # Solar masses
     parameters=bb.solar_parameters,
@@ -122,6 +132,16 @@ star = add_rotation(star, rotation_velocity=2.0)
 wavelengths = np.logspace(3, 4, 1000)            # 1000-10000 Å
 flux = simulate_observed_flux(bb.intensity, star, np.log10(wavelengths))
 ```
+
+The flux is in erg/s/cm²/Å at the default distance of 10 pc. Pass linear
+wavelengths in Å and `flux[:, 0]` directly to the AB, ST, or Vega magnitude
+functions; no spectral-density conversion is needed. See the
+[photometry guide](https://spice.readthedocs.io/en/latest/synthetic_photometry.html).
+
+For a custom viewing direction, call `get_mesh_view` before `add_rotation`
+to choose an equator-on default axis. Changing the view of an already
+rotating model preserves its physical axis; looking along that axis gives
+zero projected rotational velocity.
 
 ### Binary Star System
 
@@ -155,7 +175,7 @@ binary = add_orbit(
     i=np.pi / 3,              # inclination [rad]
     omega=0.0,                # argument of periastron [rad]
     Omega=0.0,                # longitude of the ascending node [rad]
-    mean_anomaly=0.0,         # mean anomaly at the reference time [rad]
+    mean_anomaly=0.0,         # additive phase offset from periastron timing [rad]
     reference_time=0.0,       # reference time [years]
     vgamma=0.0,               # systemic velocity [km/s]
     orbit_resolution_points=50,
@@ -196,6 +216,7 @@ bb = Blackbody()
 b = phoebe.default_binary()
 times = np.linspace(0, 1, 10)
 b.add_dataset('mesh', compute_times=times, columns=_mesh_columns, dataset='mesh01')
+b.add_dataset('orb', compute_times=times, dataset='orb01')
 b.run_compute(coordinates='uvw', overwrite=True)
 
 # Wrap the PHOEBE meshes for SPICE (PHOEBE models are read-only inside SPICE)
@@ -224,8 +245,13 @@ conventions**:
 
 | Property | Convention | Sum over the mesh |
 |---|---|---|
-| `m.areas` / `m.base_areas` | unit-sphere normalised | ≈ 4π for any R |
-| `m.cast_areas` / `m.visible_cast_areas` | physical R⊙² | ≈ 4π R² / ≈ π R² |
+| `m.areas` / `m.base_areas` | divided by the reference radius squared | ≈ 4π for an undeformed sphere |
+| `m.cast_areas` / `m.visible_cast_areas` | physical R⊙² | ≈ 2π R² / ≈ π R² |
+
+The sums above describe undeformed, uneclipsed spheres. Pulsations change
+`m.areas` and the projected areas; the normalization still uses the reference
+radius. With multiple modes, SPICE combines vertex displacements before
+calculating the area change. Zero displacement preserves the original geometry.
 
 Any code that integrates over the stellar surface must apply the matching
 cgs prefactor:

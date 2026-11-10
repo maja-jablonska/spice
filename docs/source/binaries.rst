@@ -49,7 +49,7 @@ Attach the orbit — component masses come from the meshes; the elements are:
         i=np.pi / 2,              # inclination [rad], edge-on so eclipses occur
         omega=0.0,                # argument of periastron [rad]
         Omega=0.0,                # longitude of the ascending node [rad]
-        mean_anomaly=0.0,         # mean anomaly at the reference time [rad]
+        mean_anomaly=0.0,         # additive phase offset from periastron timing [rad]
         reference_time=0.0,       # reference time [years]
         vgamma=0.0,               # systemic velocity [km/s], positive = receding
         orbit_resolution_points=50,
@@ -94,6 +94,16 @@ Passing the summed spectra through
 curve (see :doc:`quickstart` for the complete example), and each component's
 ``los_velocities`` carry the orbital radial-velocity signal, so spectral
 time series show the orbital Doppler shifts (plus ``vgamma``).
+
+Occlusion and mesh resolution
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Occlusion checks every target face, so an uneven tessellation can have more
+than half of its faces visible without losing them from the calculation.
+Neighbour-search and mesh resolution still affect eclipse accuracy: check
+convergence for grazing events, very different component sizes, and
+locally refined meshes. This all-face calculation can use more work and
+memory than earlier versions that truncated the target faces.
 
 Locating eclipses
 ^^^^^^^^^^^^^^^^^
@@ -153,7 +163,7 @@ distortion matter, compute the meshes in PHOEBE and wrap them for SPICE
     b.add_dataset('orb', compute_times=times, dataset='orb01')
     b.add_dataset('lc', compute_times=times, passband='Johnson:V', dataset='lc01')
 
-    b.set_value('distance@system', 10)  # in solar radii
+    b.set_value('distance@system', 10)  # in PHOEBE's default distance unit (m)
 
     # Make sure to set the coordinates to 'uvw'
     b.run_compute(coordinates='uvw')

@@ -26,8 +26,7 @@ reproduced by running the matching notebook end-to-end.
 | [`phoebe_integration_examples.ipynb`](docs_examples/phoebe_integration_examples.ipynb) | PHOEBE Integration | `[phoebe]` extra |
 
 Figure sections write both light and dark variants directly into `docs/img/`
-with the filenames the docs reference. `docs_imgs.ipynb` is the legacy
-scratch notebook these supersede.
+with the filenames the docs reference.
 
 ## Paper reproduction — [`paper_results/`](paper_results/)
 

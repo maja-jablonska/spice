@@ -4,6 +4,10 @@ SPICE: API
 Models
 ------
 
+Model
+~~~~~
+.. autoclass:: spice.models.model.Model
+
 MeshModel
 ~~~~~~~~~
 .. autoclass:: spice.models.mesh_model.MeshModel
@@ -150,10 +154,10 @@ IcosphereModel
       stellar properties (mass, radius) and mesh properties (vertices, faces, areas, centers). 
       It also handles the calculation of surface gravity (log g) values if required.
 
-      :param n_vertices: Number of vertices for the icosphere mesh
+      :param n_vertices: Mesh resolution request, rounded to a discrete refinement level
       :param radius: Radius of the icosphere in solar radii
       :param mass: Mass of the stellar object in solar masses
-      :param parameters: Parameters for the model, can be a single value or an array
+      :param parameters: Scalar for one parameter, a list or 1-D array shared by all faces, or a 2-D array with one row per face. Converted to the active JAX floating-point dtype.
       :param parameter_names: Names of the parameters, used for identifying log g parameter
       :param max_pulsation_mode: Maximum pulsation mode for the model, defaults to 5
       :param max_fourier_order: Maximum order of Fourier series for pulsation calculation, defaults to 5

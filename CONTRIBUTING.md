@@ -6,6 +6,10 @@ project follows.
 
 ## Development setup
 
+Use Python 3.11 or newer with NumPy 2 and JAX/JAXlib 0.10 or newer,
+as declared in `pyproject.toml`. A fresh virtual environment avoids carrying
+over the incompatible NumPy 1.26 pin from older checkouts.
+
 ```bash
 # Clone your fork, then from the repository root:
 pip install -e ".[dev]"
@@ -23,11 +27,30 @@ for the test run, so an editable install is the most reliable way to develop.
 ```bash
 pytest                                   # full suite
 pytest tests/test_lazy_zarr_interpolator.py        # one file
-pytest tests/test_models/test_binary.py::test_name # one test
+pytest tests/test_absolute_flux_units.py           # absolute flux calibration
 ```
 
 The suite discovers both `test_*.py` files and pytest-BDD-style
 `Test*`/`Describe*` classes with `test_`/`it_`/`and_`/`but_`/`they_` methods.
+
+PHOEBE read-only model tests use deterministic in-memory mesh fixtures.
+The integration smoke test skips when the optional `phoebe` package is absent;
+core import failures fail the test. No external PHOEBE pickle is needed for
+these checks. The suite normally enables JAX float64.
+
+## Building the documentation
+
+From the repository root:
+
+```bash
+python -m pip install -r docs/requirements.txt
+python -m sphinx -b html -W --keep-going docs/source docs/_build/html
+```
+
+Open `docs/_build/html/index.html` to review the result. This builds the API
+reference from the source docstrings and treats Sphinx warnings as errors.
+Run any examples you change as well: building a `code-block` does not execute
+it. Read the Docs uses Python 3.11 and the same requirements file.
 
 ## Conventions
 

@@ -54,6 +54,16 @@ There are a few requirements PHOEBE needs to be set up so that SPICE can extract
 - The `coordinates` parameter needs to be set to `uvw`
 - For some emulators, a dictionary of stellar parameters and the corresponding values needs to be provided. Some parameters are not provided by PHOEBE and need to be manually assigned to the mesh model
 
+Viewing convention
+------------------
+
+PHOEBE supplies the projected mesh geometry and viewing cosines. SPICE
+uses ``[0., 0., +1.]`` for the imported uvw velocity projection to preserve
+PHOEBE radial-velocity signs; keep this adapter convention rather than
+replacing it with the native mesh default ``[0., 0., -1.]``. PHOEBE meshes
+are read-only in SPICE. Set rotation and viewing geometry in PHOEBE, then
+recompute the meshes. See :doc:`conventions`.
+
 Generating Spectra
 ------------------
 

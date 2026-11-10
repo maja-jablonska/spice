@@ -5,7 +5,7 @@ The SPICE library provides functionality to create and manipulate icosphere mode
 
 .. note::
 
-   Every code snippet and figure on this page has a matching section in the companion notebook
+   The companion notebook contains mesh and plotting examples:
    `tutorial/docs_examples/mesh_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/mesh_examples.ipynb>`_;
    running it end-to-end regenerates all figures below.
 
@@ -24,30 +24,32 @@ To create a basic icosphere model, you can use the `IcosphereModel.construct()` 
 
     # Create an icosphere model
     m = IcosphereModel.construct(
-        1000,  # Minimal number of vertices
+        1000,  # Resolution request; rounded to a refinement level
         1.,     # Radius in solar radii
         1.,     # Mass in solar masses
         bb.to_parameters(),  # Parameters for the spectrum model
         bb.parameter_names   # Names of the parameters used to match between overridable parameters and mesh parameters
     )
 
-The parameter of vertices is the minimal number of vertices for the icosphere. The actual number of vertices will be higher, and depends on the refinement level.
-Icosphere is a tessellation of a sphere, and the number of mesh elements is given by the formula:
+``n_vertices`` selects a discrete refinement level; inspect
+``m.vertices.shape[0]`` and ``m.faces.shape[0]`` for the actual array sizes.
+The number of triangular surface elements at subdivision level ``L`` is:
 
 .. math::
-    V = 5 \times 4^{L+1}
+    N_{\mathrm{faces}} = 20 \times 4^L
 
-where L is the level of refinement.
+Here ``L = 0`` is the initial 20-face icosahedron. The values below count
+faces, each of which has one row of stellar parameters.
 
 
-The following table shows the number of vertices for different refinement levels:
+The following table shows the number of faces for different refinement levels:
 
 .. list-table:: Icosphere Refinement Levels
    :header-rows: 1
    :widths: 25 25
 
    * - Refinement Level
-     - Number of Vertices
+     - Number of Faces
    * - 1
      - 80
    * - 2
@@ -60,7 +62,10 @@ The following table shows the number of vertices for different refinement levels
      - 20480
 
 
-The icosphere model requires a spectrum model to be provided, which is used to calculate the parameters of each vertex.
+The mesh stores parameters for each face. A scalar (one parameter) or
+1-D list/array is broadcast to all faces; a 2-D array provides one row per
+face. Inputs are converted to the active JAX floating-point dtype.
+The parameter names and their order must match the spectrum model.
 In the case of the Blackbody model, the parameters are the temperature, but more complex models contain more parameters such as logg, individual abundances, etc.
 In principle, any model can be used for the spectrum, and the model can contain any number of parameters - as long as the parameters are defined in the spectrum model.
 
@@ -92,6 +97,41 @@ You can add rotation to your model using the `add_rotation()` function:
     # To get the rotated mesh at a specific time:
     rotated_mesh = evaluate_rotation(rm, t)  # t is the time in seconds
 
+``add_rotation`` populates the velocity field immediately; evaluating at
+``t=0`` is unnecessary for rotational broadening. ``evaluate_rotation``
+advances the surface geometry to the requested time in seconds.
+
+Choosing the viewing direction
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If ``rotation_axis`` is omitted, ``add_rotation`` chooses an axis
+perpendicular to the mesh's current line of sight. Set a custom view first
+when you want this equator-on default:
+
+.. code-block:: python
+
+    from spice.models.mesh_view import get_mesh_view
+
+    custom_view = get_mesh_view(m, jnp.array([0., 1., 0.]))
+    equator_on = add_rotation(custom_view, rotation_velocity=50.)
+
+Changing the view afterwards preserves the configured axis and velocity
+field, including an explicitly supplied axis equal to the default. A view
+along the spin axis is pole-on and has zero projected rotational velocity:
+
+.. code-block:: python
+
+    spinning = add_rotation(m, 50., rotation_axis=jnp.array([0., 1., 0.]))
+    pole_on = get_mesh_view(spinning, jnp.array([0., 1., 0.]))
+    print(jnp.max(jnp.abs(pole_on.los_velocities)))  # 0 km/s
+
+``spinning.log_gs`` gives the current effective surface gravity, including
+the centrifugal reduction. Its rotation speeds are in km/s and its result
+is log10 of acceleration in cm/s². Rotation and pulsation updates also refresh
+the recognized log-g column in ``parameters``, so synthesis receives the
+current gravity. Construct the model with ``override_log_g=True`` to preserve
+explicit atmosphere gravity values across these transformations;
+``mesh.log_gs`` still reports the gravity computed from the mesh.
 
 Visualizing the Mesh
 --------------------
@@ -162,10 +202,14 @@ The pulsation amplitude is given by the fourier series parameters. It can be cal
    A = D + \sum_{n=1}^N A_n \cos\left(\frac{2\pi n}{P}t - \phi_n\right)
 
 where :math:`D` is the mean amplitude, :math:`A_n` are the amplitudes, :math:`\phi_n` are the phases, and :math:`P` is the pulsation period.
-The amplitude corresponds to the percent of the original radius.
+The amplitude is a fraction of the reference stellar radius: 0.1 means 10%.
 
 The Fourier series parameters are provided either as a 2D array with shape (N, 2) — interpreted as a purely radial pulsation — or as a full (3, N, 2) array whose first axis indexes the [radial, spheroidal, toroidal] vector-spherical-harmonic components. N is the number of terms in the series, and each innermost pair contains [A_n, phi_n], where A_n is the amplitude and phi_n is the phase for the nth term. For example, [[0.1, 0.0], [0.05, 1.57]] represents a radial series with two terms: the first with amplitude 0.1 and phase 0, and the second with amplitude 0.05 and phase π/2.
-Again, note that the amplitude is given in percent of the original radius.
+SPICE sums the displacement from all modes before calculating area changes.
+The stored areas remain normalized by the reference radius squared. Face
+sample centers move by the mean displacement of their triangle's vertices;
+zero displacement preserves their original positions and the atmosphere
+gravity. ``reset_pulsations`` removes both displacement and pulsation velocity.
 
 This example pulsation will look like this:
 

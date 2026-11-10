@@ -7,8 +7,7 @@ disc-integrated spectrum an observer would record.
 
 .. note::
 
-   Every code snippet on this page has a matching section in the companion
-   notebook
+   The companion notebook contains additional synthesis examples:
    `tutorial/docs_examples/spectral_synthesis_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/spectral_synthesis_examples.ipynb>`_.
 
 How it works
@@ -64,9 +63,13 @@ Parameters that matter
     Skips the per-element Doppler sampling — useful for isolating geometric
     effects or speeding up static models.
 
-``chunk_size`` / ``wavelengths_chunk_size`` (int, default 1024)
-    Trade memory for speed. Larger chunks help on GPU; reduce them if you
-    hit out-of-memory errors on large meshes or dense wavelength grids.
+``chunk_size`` (int, default 256)
+    Surface elements evaluated together. Smaller chunks reduce memory use;
+    larger values can increase compilation cost for neural emulators.
+
+``wavelengths_chunk_size`` (int or None, default None)
+    Defaults to ``min(n_wavelengths, 1024)``, avoiding padding short grids to
+    1024 samples. Set an explicit size to control memory on long grids.
 
 ``ld_law`` / ``ld_coeffs``
     Bind a limb-darkening law into the intensity function (e.g.
@@ -86,42 +89,73 @@ familiar line broadening:
 
 .. code-block:: python
 
-    from spice.models.mesh_transform import add_rotation, evaluate_rotation
+    from spice.models.mesh_transform import add_rotation
 
-    fast = evaluate_rotation(add_rotation(star, rotation_velocity=50.), 0.)
+    fast = add_rotation(star, rotation_velocity=50.)
     flux_rot = simulate_observed_flux(bb.intensity, fast, np.log10(wavelengths))
 
 Luminosities
 ------------
 
-Three companions integrate over the whole stellar surface instead of the
-visible disc:
+``simulate_monochromatic_luminosity`` integrates an emulator's surface flux
+over the whole star and returns ``(n_wavelengths, 2)`` in erg/s/Å.
+``luminosity`` integrates its first channel over the supplied **linear**
+wavelengths in Angstroms and returns erg/s. The result covers only that
+wavelength range; it approximates a bolometric luminosity only if the
+range captures essentially all of the emitted energy.
+
+The emulator must supply a true emergent surface flux,
+:math:`F_\lambda = 2\pi\int_0^1 I_\lambda(\mu)\mu\,d\mu`.
+``Blackbody.flux`` currently returns the intensity at ``mu=1``. For the
+un-darkened ``bb = Blackbody()`` used above, multiply that intensity by
+:math:`\pi` before using the luminosity functions:
 
 .. code-block:: python
 
-    from spice.spectrum import simulate_monochromatic_luminosity, luminosity, absolute_bol_luminosity
+    from spice.spectrum import (simulate_monochromatic_luminosity,
+                                luminosity, absolute_bol_luminosity)
 
-    # L_lambda(lambda): (n_wavelengths, 2), erg/s/Angstrom
-    mono_lum = simulate_monochromatic_luminosity(bb.flux, star, np.log10(wavelengths))
+    def surface_flux(log_wavelengths, parameters):
+        return np.pi * bb.intensity(log_wavelengths, 1., parameters)
 
-    # Bolometric luminosity in erg/s (trapezoidal integral over wavelength)
-    L = luminosity(bb.flux, star, wavelengths)
-
-    # Absolute bolometric magnitude (IAU zero point)
+    lum_wavelengths = np.geomspace(100., 1.e6, 4096)  # Angstroms
+    mono_lum = simulate_monochromatic_luminosity(
+        surface_flux, star, np.log10(lum_wavelengths))  # erg/s/Angstrom
+    L = luminosity(surface_flux, star, lum_wavelengths)  # erg/s
     M_bol = absolute_bol_luminosity(L)
 
-These take the emulator's ``flux`` function (no ``mu`` dependence), not
-``intensity``.
+No conversion to centimetres is needed for the integral. For a limb-darkened
+intensity, integrate its angular dependence instead of multiplying its
+``mu=1`` value by :math:`\pi`. Atmosphere emulators that already provide
+surface flux should be passed directly, without another factor of :math:`\pi`.
 
-.. note::
+Instrumental resolution
+-----------------------
 
-   The result is physically meaningful only when the emulator's ``flux``
-   channel is a true surface flux. :meth:`Blackbody.flux
-   <spice.spectrum.Blackbody.flux>` returns the :math:`\mu = 1` intensity
-   (see its docstring), so blackbody "luminosities" are useful for
-   resolution-convergence comparisons but are not absolute physical values —
-   compare the theoretical Stefan–Boltzmann calculation in
-   :doc:`synthetic_photometry`.
+Use ``apply_spectral_resolution`` for a single resolving power, or
+``apply_variable_resolution`` for an array of resolving powers on the same
+uniform log10 wavelength grid:
+
+.. code-block:: python
+
+    import jax.numpy as jnp
+    from spice.spectrum.utils import apply_variable_resolution
+
+    log_wavelengths = jnp.linspace(jnp.log10(4960.), jnp.log10(5040.), 2001)
+    flux_fast = simulate_observed_flux(bb.intensity, fast, log_wavelengths)
+    resolving_power = jnp.linspace(20000., 30000., len(log_wavelengths))
+    broadened = apply_variable_resolution(
+        log_wavelengths, flux_fast[:, 0], resolving_power, segment_size=512)
+
+These functions accept one spectrum channel at a time. Resolving power is
+positive and defined by wavelength divided by Gaussian FWHM. The variable
+function uses the mean resolving power within each segment, including a
+shorter final segment. Adjacent segments share input spectrum samples for
+convolution; only the spectrum's outer edges are padded with its global
+mean. ``segment_size`` is a positive static integer under JIT. Smaller
+segments track changes in resolving power more closely. Both functions
+truncate Gaussian support at four sigma, capped at 2046 pixels per side
+(the single-resolution function also accepts ``window_size``).
 
 Performance notes
 -----------------
