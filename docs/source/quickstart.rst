@@ -17,7 +17,7 @@ A single rotating star
 
     import numpy as np
     from spice.models import IcosphereModel
-    from spice.models.mesh_transform import add_rotation
+    from spice.models.mesh_transform import add_rotation, evaluate_rotation
     from spice.spectrum import simulate_observed_flux, Blackbody
 
     bb = Blackbody()
@@ -25,8 +25,8 @@ A single rotating star
     # A solar-like star: ~1000 mesh vertices, 1 solar radius, 1 solar mass
     star = IcosphereModel.construct(1000, 1., 1., bb.solar_parameters, bb.parameter_names)
 
-    # Solid-body rotation with a 2 km/s equatorial velocity
-    star = add_rotation(star, rotation_velocity=2.0)
+    # Solid-body rotation with a 2 km/s equatorial velocity, evaluated at t = 0 s
+    star = evaluate_rotation(add_rotation(star, rotation_velocity=2.0), 0.)
 
     # simulate_observed_flux expects *log10* wavelengths (in Angstroms) and
     # returns an (n_wavelengths, 2) array; column 0 is the flux in
