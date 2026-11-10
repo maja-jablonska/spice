@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-10
+
 ### Added
 - Documentation page *Paper data* and `tutorial/paper_results/fetch_paper_data.py`,
   which downloads the paper's grids and model outputs from the Hugging Face dataset
@@ -32,11 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `PhoebeBinary` it scans PHOEBE's own precomputed uvw orbit samples, so
   the events match the PHOEBE meshes exactly (verified against
   `phoebe.default_binary()`: mid-eclipse at phases 0.0/0.5).
-- `LICENSE` (MIT), `CONTRIBUTING.md`, and `docs/requirements.txt` (the latter
-  unblocks the Read the Docs build, which referenced a missing file).
-- Shared `spice.constants` module collecting the physical constants that were
-  previously duplicated across `spectrum/` and `models/`.
-- Docstrings for the computed properties of `MeshModel`.
 
 ### Changed
 - **Breaking**: `to_parameters` raises `ValueError` for parameter names an emulator does not
@@ -64,13 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passing `override_log_g=True` now means "keep the explicitly supplied
   log g values" and issues a warning. `log_g_index` is resolved from
   `parameter_names` in all cases and stored on the model.
-- `SpectrumEmulator` now inherits from `abc.ABC`, so its abstract methods are
-  enforced.
-- Limb-darkening law-id maps and helpers are consolidated to avoid the
-  conflicting definitions between `limb_darkening.py` and
-  `flux_limb_darkening.py`.
-- Progress/diagnostic `print()` calls in library code now go through
-  `spice.utils.log`.
 
 ### Fixed
 - `add_rotation` now fills the per-element rotation velocity field immediately. In 1.8.0
@@ -130,6 +120,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `IcosphereModel.construct` no longer ignores `log_g_index=0` (a truthiness
   bug silently skipped the log g computation and emitted a spurious warning
   for index 0).
+
+## [1.8.0] - 2026-07-27
+
+### Added
+- `LICENSE` (MIT), `CONTRIBUTING.md`, and `docs/requirements.txt` (the latter
+  unblocks the Read the Docs build, which referenced a missing file).
+- Shared `spice.constants` module collecting the physical constants that were
+  previously duplicated across `spectrum/` and `models/`.
+- Docstrings for the computed properties of `MeshModel`.
+
+### Changed
+- `SpectrumEmulator` now inherits from `abc.ABC`, so its abstract methods are
+  enforced.
+- Limb-darkening law-id maps and helpers are consolidated to avoid the
+  conflicting definitions between `limb_darkening.py` and
+  `flux_limb_darkening.py`.
+- Progress/diagnostic `print()` calls in library code now go through
+  `spice.utils.log`.
+
+### Fixed
 - `IntensityLazyZarrInterpolator.parameter_names` is now a property, matching the
   base class (it was previously a plain method).
 - Array-truthiness hazard (`if not parameter_values`) in the parameter helpers,
