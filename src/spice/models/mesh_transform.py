@@ -279,10 +279,16 @@ def add_rotation(mesh: MeshModel,
 
     Args:
         mesh (MeshModel): The mesh model to add rotation to.
-        rotation_velocity (float): The velocity of the rotation.
+        rotation_velocity (float): Equatorial rotation speed [km/s].
         rotation_axis (Float[Array, "3"]): The rotation axis. If omitted, choose an axis
             perpendicular to the mesh's current line of sight (equator-on). Changing
             the view afterwards preserves this axis.
+
+    Note:
+        The surface moves with ``v = (v_eq / R) * (r x a)`` for unit axis ``a``,
+        i.e. *clockwise* seen from the tip of ``a``: the angular momentum points
+        along ``-rotation_axis``. Flip the axis to spin the other way (e.g. to
+        align the spin with an orbit's angular momentum).
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.
@@ -379,7 +385,14 @@ def evaluate_rotation(mesh: MeshModel, t: float) -> MeshModel:
 
     Args:
         mesh (MeshModel): The mesh model to evaluate rotation for.
-        t (float): The time at which to evaluate the rotation. [seconds]
+        t (float): Time to rotate by [seconds]: the surface turns by
+            ``rotation_velocity * t / R`` from its *current* orientation.
+
+    Note:
+        This is incremental: ``evaluate_rotation(evaluate_rotation(m, t1), t2)`` is
+        the state at ``t1 + t2``. Always start from the un-rotated mesh to get the
+        state at an absolute time. Pulsation displacements and velocities turn with
+        the surface.
 
     Returns:
         MeshModel: The mesh model with updated rotation parameters.

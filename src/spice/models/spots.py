@@ -98,8 +98,10 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
     # Clip distance_from_edge to prevent numerical issues with very large negative values
     normalized_distance = jnp.clip(distance_from_edge / scale_factor, -100.0, 100.0)
     
-    # Invert smoothness parameter so 0.0 is sharp (high sigmoid slope) and 1.0 is smooth (low sigmoid slope)
-    # Map smoothness from [0.0, 1.0] to [10.0, 0.01] for sigmoid steepness
+    # Invert smoothness parameter so 0.0 is sharp (high sigmoid slope) and 1.0 is smooth (low sigmoid slope).
+    # Smoothness [0, 1] maps to a sigmoid slope of [1, 0.01] per 0.01 R of distance from the edge.
+    # With the +-100 clip below, smoothness near 1 spreads the spot over the whole star
+    # (s = 1 keeps only 0.27-0.73 of the contrast anywhere); use s <~ 0.9 for a localised spot.
     adjusted_smoothness = (1.0 - smoothness) + 0.01 * smoothness
     differences = sigmoid(normalized_distance, adjusted_smoothness) * parameter_diff
 
@@ -262,6 +264,7 @@ def add_spots(mesh: MeshModel,
         spot_radii (Float[Array, "n_spots"]): An array of angular radii of the spots, in degrees.
         parameter_deltas (Float[Array, "n_spots"]): An array of differences in the parameter values to be applied within the spots.
         parameter_indices (Int[Array, "n_spots"]): An array of indices of the parameters in the mesh model that will be modified by the spots.
+            If None, every spot modifies parameter column **1** (not 0).
         smoothness (Float[Array, "n_spots"], optional): An array of factors controlling the smoothness of the spots' edges. Higher values result in smoother transitions. Defaults to None.
 
     Returns:

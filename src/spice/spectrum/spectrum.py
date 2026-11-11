@@ -294,10 +294,13 @@ def simulate_observed_flux(intensity_fn: Callable[[Float[Array, "n_wavelengths"]
             larger chunk, which would evaluate ``intensity_fn`` on wavelengths that are
             then discarded.
         disable_doppler_shift (bool, optional): Whether to disable Doppler shift calculations. Defaults to False.
-        ld_law (str, optional): Limb-darkening law name passed as a kwarg to ``intensity_fn``
-            (e.g. ``"linear"``, ``"quadratic"``, ``"nonlinear_4"``). Only effective when
-            ``intensity_fn`` accepts an ``ld_law`` keyword (e.g. the flux-emulator-based
-            implementations in ``spice.spectrum``). Defaults to None (use the function's own default).
+        ld_law (str, optional): Limb-darkening law name passed as the ``ld_law`` kwarg to
+            ``intensity_fn``. ``intensity_fn`` must accept ``ld_law``/``ld_coeffs``
+            keywords (e.g. the flux-emulator-based implementations in ``spice.spectrum``);
+            passing them to a function that does not, such as ``Blackbody().intensity``,
+            raises ``TypeError``. The accepted names are those of the intensity function
+            (e.g. ``"linear"``, ``"quadratic"``, ``"nonlinear_4"`` for flux emulators).
+            Defaults to None (use the function's own default).
         ld_coeffs (ArrayLike, optional): Coefficients for the chosen limb-darkening law,
             passed as the ``ld_coeffs`` kwarg to ``intensity_fn``. Defaults to None.
 

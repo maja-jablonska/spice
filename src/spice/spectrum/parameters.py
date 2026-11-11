@@ -69,6 +69,7 @@ def parameter_helper(interpolator, parameter_values: Optional[Dict[str, Any]] = 
         parameters = jnp.array(parameter_values)
     
     if not (jnp.all(parameters >= interpolator.min_stellar_parameters) and jnp.all(parameters <= interpolator.max_stellar_parameters)):
-        warnings.warn("Possible exceeding parameter bounds - extrapolating.")
+        warnings.warn("Parameters outside the source's bounds: grid interpolators clamp to the "
+                      "nearest edge node, neural emulators extrapolate beyond their training range.")
         
     return parameters

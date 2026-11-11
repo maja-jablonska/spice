@@ -426,7 +426,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
             parameters: Stellar parameters
             
         Returns:
-            Array of intensities [erg/cm2/s/angstrom] at the specified wavelengths
+            Array of intensities [erg/s/cm2/angstrom/sr] at the specified wavelengths
         """
         # Read auxiliary metadata before converting the stellar parameters.
         limb_darkening_coeffs = None

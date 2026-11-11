@@ -248,7 +248,11 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def los_z(self) -> Float[Array, "n_mesh_elements"]:
-        """Line-of-sight projected depth of each centroid [R_sun]; larger is farther along the LOS."""
+        """Line-of-sight coordinate of each centroid [R_sun], ``-dot(center, los_vector)``.
+
+        ``los_vector`` points from the observer to the star, so a larger value is
+        *closer to the observer* (this is how occlusion decides which body is in front).
+        """
         return cast_to_los(self.centers, self.los_vector)
 
     @property
