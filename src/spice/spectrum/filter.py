@@ -49,7 +49,8 @@ class Filter(ABC):
                  non_photonic: bool = False,
                  AB_zeropoint: float = -22.40788262039795,
                  ST_zeropoint: float = -21.10,
-                 Vega_zeropoint: Optional[float] = None):
+                 Vega_zeropoint: Optional[float] = None,
+                 AB_to_Vega_offset: Optional[float] = None):
         """A class representing an astronomical filter with its transmission curve and properties.
 
         The Filter class provides functionality to handle astronomical filters, including their
@@ -60,14 +61,21 @@ class Filter(ABC):
             transmission_curve (Float[Array, "2 n_samples"]): A 2xN array containing wavelengths
                 and corresponding transmission values. First row should be wavelengths in Angstroms,
                 second row should be transmission values between 0 and 1.
-            ab_zeropoint (float, optional): The AB magnitude system zero point in erg/s/cm^2/Hz.
-                Defaults to 3.631e-20 (standard AB system zero point).
             name (Optional[str], optional): Name of the filter. If None, will be derived from class name.
                 Defaults to None.
             non_photonic (bool, optional): Whether the filter is non-photonic and a different form of synthetic photometry equation is used. Defaults to False.
-            AB_zeropoint (float, optional): The zeropoint of the filter in magnitudes in the AB system. Defaults to -22.407 (-2.5 log10(3.631 * 1e-20 * c [km/s] * 1e5)).
+            AB_zeropoint (float, optional): AB zero point in magnitudes,
+                ``+2.5 log10(3631 Jy * c)`` with c in cm/s, i.e. -22.408. Keep the
+                default: anything else makes ``AB_passband_luminosity`` return
+                something other than AB magnitudes.
             ST_zeropoint (float, optional): The zeropoint of the filter in magnitudes in the ST system. Defaults to -21.10.
-            Vega_zeropoint (float, optional): The zeropoint of the filter in magnitudes in the Vega system. Defaults to None.
+            Vega_zeropoint (float, optional): Zero point for Vega magnitudes computed
+                from the mean f_lambda (``m = -2.5 log10 <f_lambda> + Vega_zeropoint``).
+                Defaults to None.
+            AB_to_Vega_offset (float, optional): For systems calibrated as an offset
+                from AB (Bessell & Murphy 2012 for Johnson-Cousins, Tycho, Hipparcos
+                and Stromgren): ``m_Vega = m_AB + AB_to_Vega_offset``. Used by
+                ``Vega_passband_luminosity`` when ``Vega_zeropoint`` is not set.
         Properties:
             transmission_curve_wavelengths: The transmission curve in wavelength space
             transmission_curve_frequencies: The transmission curve in frequency space
@@ -91,6 +99,7 @@ class Filter(ABC):
         self.__AB_zeropoint = AB_zeropoint
         self.__ST_zeropoint = ST_zeropoint
         self.__Vega_zeropoint = Vega_zeropoint
+        self.__AB_to_Vega_offset = AB_to_Vega_offset
     @property
     def transmission_curve_wavelengths(self) -> ArrayLike:
         return self.__transmission_curve
@@ -112,6 +121,10 @@ class Filter(ABC):
         return self.__Vega_zeropoint
 
     @property
+    def AB_to_Vega_offset(self) -> Optional[float]:
+        return self.__AB_to_Vega_offset
+
+    @property
     def name(self) -> str:
         return self.__name
 
@@ -119,10 +132,6 @@ class Filter(ABC):
     def non_photonic(self) -> bool:
         return self.__non_photonic
     
-    @property
-    def zeropoint(self) -> float:
-        return self.__zeropoint
-
     def __str__(self):
         return self.name
 
@@ -193,7 +202,13 @@ class Filter(ABC):
         plt.legend()
 
 
-# Filter information: Bessel & Murphy (2012)
+# Filter information: Bessel & Murphy (2012).
+# Their standard-system (Vega/Landolt-calibrated) magnitudes are AB plus a
+# per-band offset. Those offsets used to be folded into AB_zeropoint, so
+# AB_passband_luminosity returned standard magnitudes, not AB (a flat 3631 Jy
+# source gave U = -0.76, b = +0.19). They are now AB_to_Vega_offset:
+# AB_passband_luminosity is true AB, Vega_passband_luminosity gives the
+# standard-system value exactly as before.
 
 class JohnsonCousinsU(Filter):
     def __init__(self):
@@ -205,7 +220,7 @@ class JohnsonCousinsU(Filter):
              0.813, 0.885, 0.940, 0.980, 1.000, 1.000, 0.974, 0.918, 0.802,
              0.590, 0.355, 0.194, 0.107, 0.046, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins U', AB_zeropoint=-22.40788262039795-0.771+0.01, ST_zeropoint=-21.10+0.142)
+        super().__init__(transmission_curve, name='Johnson-Cousins U', AB_to_Vega_offset=-0.761)
 
 
 class JohnsonCousinsB(Filter):
@@ -218,7 +233,7 @@ class JohnsonCousinsB(Filter):
              0.802, 0.682, 0.577, 0.474, 0.369, 0.278, 0.198, 0.125, 0.078,
              0.036, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins B', AB_zeropoint=-22.40788262039795+0.138-0.008, ST_zeropoint=-21.10+0.625)
+        super().__init__(transmission_curve, name='Johnson-Cousins B', AB_to_Vega_offset=0.130)
 
 
 class JohnsonCousinsV(Filter):
@@ -233,7 +248,7 @@ class JohnsonCousinsV(Filter):
              0.041, 0.022, 0.014, 0.011, 0.008, 0.006, 0.004, 0.002, 0.001,
              0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins V', AB_zeropoint=-22.40788262039795+0.023-0.003, ST_zeropoint=-21.10+0.019)
+        super().__init__(transmission_curve, name='Johnson-Cousins V', AB_to_Vega_offset=0.020)
 
 
 class JohnsonCousinsR(Filter):
@@ -250,7 +265,7 @@ class JohnsonCousinsR(Filter):
              0.066, 0.051, 0.039, 0.030, 0.021, 0.014, 0.008, 0.006, 0.003,
              0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins R', AB_zeropoint=-22.40788262039795-0.16-0.003, ST_zeropoint=-21.10-0.538)
+        super().__init__(transmission_curve, name='Johnson-Cousins R', AB_to_Vega_offset=-0.163)
 
 
 class JohnsonCousinsI(Filter):
@@ -263,7 +278,7 @@ class JohnsonCousinsI(Filter):
              0.973, 0.970, 0.958, 0.932, 0.904, 0.860, 0.810, 0.734, 0.590,
              0.392, 0.203, 0.070, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Johnson-Cousins I', AB_zeropoint=-22.40788262039795-0.402-0.002, ST_zeropoint=-21.10-1.220)
+        super().__init__(transmission_curve, name='Johnson-Cousins I', AB_to_Vega_offset=-0.404)
 
 
 class HipparcosHp(Filter):
@@ -284,7 +299,7 @@ class HipparcosHp(Filter):
              0.068, 0.054, 0.042, 0.032, 0.024, 0.018, 0.014, 0.010, 0.006,
              0.002, 0.000]
         ])
-        super().__init__(transmission_curve, name='Hipparcos Hp', AB_zeropoint=-22.40788262039795+0.022+0.008, ST_zeropoint=-21.10+0.074)
+        super().__init__(transmission_curve, name='Hipparcos Hp', AB_to_Vega_offset=0.030)
 
 
 class TychoBT(Filter):
@@ -299,7 +314,7 @@ class TychoBT(Filter):
              0.969, 0.852, 0.674, 0.479, 0.309, 0.196, 0.131, 0.097, 0.077,
              0.056, 0.035, 0.015, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Tycho BT', AB_zeropoint=-22.40788262039795+0.09+0.01, ST_zeropoint=-21.10+0.672)
+        super().__init__(transmission_curve, name='Tycho BT', AB_to_Vega_offset=0.100)
         
 
 class TychoVT(Filter):
@@ -316,7 +331,7 @@ class TychoVT(Filter):
              0.324, 0.282, 0.245, 0.209, 0.178, 0.152, 0.129, 0.108, 0.092,
              0.078, 0.066, 0.055, 0.044, 0.036, 0.027, 0.017, 0.008, 0.000]
         ])
-        super().__init__(transmission_curve, name='Tycho VT', AB_zeropoint=-22.40788262039795+0.044-0.007, ST_zeropoint=-21.10+0.115)
+        super().__init__(transmission_curve, name='Tycho VT', AB_to_Vega_offset=0.037)
 
 
 # # J/A+A/649/A3     Gaia Early Data Release 3 photometric passbands (Riello+, 2021)
@@ -404,25 +419,29 @@ class SDSSz(Filter):
         super().__init__(sdss_z.T, name='SDSS z')
 
 
+# 2MASS Vega zero points: Cohen, Wheaton & Megeath (2003) zero-magnitude fluxes
+# (2MASS Explanatory Supplement VI.4a): J 3.129e-13, H 1.133e-13, Ks 4.283e-14
+# W cm^-2 um^-1 = 1e3 x those values in erg s^-1 cm^-2 A^-1. The previous
+# values differed by -18/+35/-14 mmag (53 mmag in J-H).
 class TWOMASSJ(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((_FILTER_DATA_DIR / '2MASSJ.dat')).T
         transmission_curve[0] *= 1e4
-        super().__init__(transmission_curve, name='2MASS J', non_photonic=True, Vega_zeropoint=-23.76248609213452 - 0.017)
+        super().__init__(transmission_curve, name='2MASS J', non_photonic=True, Vega_zeropoint=2.5 * np.log10(3.129e-10))
 
 
 class TWOMASSH(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((_FILTER_DATA_DIR / '2MASSH.dat')).T
         transmission_curve[0] *= 1e4
-        super().__init__(transmission_curve, name='2MASS H', non_photonic=True, Vega_zeropoint=-24.84542522534151 + 0.016)
+        super().__init__(transmission_curve, name='2MASS H', non_photonic=True, Vega_zeropoint=2.5 * np.log10(1.133e-10))
 
 
 class TWOMASSK(Filter):
     def __init__(self):
         transmission_curve = np.loadtxt((_FILTER_DATA_DIR / '2MASSK.dat')).T
         transmission_curve[0] *= 1e4
-        super().__init__(transmission_curve, name='2MASS Ks', non_photonic=True, Vega_zeropoint=-25.937629814008577 + 0.003)
+        super().__init__(transmission_curve, name='2MASS Ks', non_photonic=True, Vega_zeropoint=2.5 * np.log10(4.283e-11))
 
 
 # Morrissey et. al. (2004)
@@ -481,7 +500,10 @@ class LSSTy(Filter):
 
 
 # http://ipp.ifa.hawaii.edu/ps1.filters/
-# Tonry et al. (2012)
+# Tonry et al. (2012). The curves are capture cross-sections in m^2 e-/photon,
+# i.e. photon-counting responses, so they use the photon-counting equations.
+# (They were integrated as energy responses before: +18 mmag in g and +49 mmag
+# in w for a 5772 K blackbody.)
 
 panstarrs = np.loadtxt((_FILTER_DATA_DIR / 'panstarrs.dat'), ndmin=2)
 if panstarrs.shape[1] >= 8:
@@ -498,37 +520,37 @@ else:
 
 class PANSTARRS_PS1_g(Filter):
     def __init__(self):
-        super().__init__(panstarrs_g.T, name='PANSTARRS PS1 g', non_photonic=True)
+        super().__init__(panstarrs_g.T, name='PANSTARRS PS1 g')
 
 
 class PANSTARRS_PS1_i(Filter):
     def __init__(self):
-        super().__init__(panstarrs_i.T, name='PANSTARRS PS1 i', non_photonic=True)
+        super().__init__(panstarrs_i.T, name='PANSTARRS PS1 i')
 
 
 class PANSTARRS_PS1_r(Filter):
     def __init__(self):
-        super().__init__(panstarrs_r.T, name='PANSTARRS PS1 r', non_photonic=True)
+        super().__init__(panstarrs_r.T, name='PANSTARRS PS1 r')
 
 
 class PANSTARRS_PS1_w(Filter):
     def __init__(self):
-        super().__init__(panstarrs_w.T, name='PANSTARRS PS1 w', non_photonic=True)
+        super().__init__(panstarrs_w.T, name='PANSTARRS PS1 w')
 
 
 class PANSTARRS_PS1_y(Filter):
     def __init__(self):
-        super().__init__(panstarrs_y.T, name='PANSTARRS PS1 y', non_photonic=True)
+        super().__init__(panstarrs_y.T, name='PANSTARRS PS1 y')
 
 
 class PANSTARRS_PS1_z(Filter):
     def __init__(self):
-        super().__init__(panstarrs_z.T, name='PANSTARRS PS1 z', non_photonic=True)
+        super().__init__(panstarrs_z.T, name='PANSTARRS PS1 z')
 
 
 class PANSTARRS_PS1_open(Filter):
     def __init__(self):
-        super().__init__(panstarrs_open.T, name='PANSTARRS PS1 open', non_photonic=True)
+        super().__init__(panstarrs_open.T, name='PANSTARRS PS1 open')
 
 # Source: Bessel (2011)
 
@@ -538,7 +560,7 @@ class Stromgrenu(Filter):
             [3150., 3175., 3200., 3225., 3250., 3275., 3300., 3325., 3350., 3375., 3400., 3425., 3450., 3475., 3500., 3525., 3550., 3575., 3600., 3625., 3650., 3675., 3700., 3725., 3750., 3775., 3800., 3825., 3850.],
             [0.000, 0.004, 0.050, 0.122, 0.219, 0.341, 0.479, 0.604, 0.710, 0.809, 0.886, 0.939, 0.976, 1.000, 0.995, 0.981, 0.943, 0.880, 0.782, 0.659, 0.525, 0.370, 0.246, 0.151, 0.071, 0.030, 0.014, 0.000, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren u', AB_zeropoint=-22.40788262039795+0.308)
+        super().__init__(transmission_curve, name='Stromgren u', AB_to_Vega_offset=0.308)
 
 
 class Stromgrenv(Filter):
@@ -547,7 +569,7 @@ class Stromgrenv(Filter):
             [3750., 3775., 3800., 3825., 3850., 3875., 3900., 3925., 3950., 3975., 4000., 4025., 4050., 4075., 4100., 4125., 4150., 4175., 4200., 4225., 4250., 4275., 4300., 4325., 4350., 4375., 4400., 4425., 4450.],
             [0.000, 0.003, 0.006, 0.016, 0.029, 0.044, 0.060, 0.096, 0.157, 0.262, 0.404, 0.605, 0.810, 0.958, 1.000, 0.973, 0.882, 0.755, 0.571, 0.366, 0.224, 0.134, 0.079, 0.053, 0.039, 0.027, 0.014, 0.006, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren v', AB_zeropoint=-22.40788262039795+0.327)
+        super().__init__(transmission_curve, name='Stromgren v', AB_to_Vega_offset=0.327)
 
 
 class Stromgrenb(Filter):
@@ -556,7 +578,7 @@ class Stromgrenb(Filter):
             [4350., 4375., 4400., 4425., 4450., 4475., 4500., 4525., 4550., 4575., 4600., 4625., 4650., 4675., 4700., 4725., 4750., 4775., 4800., 4825., 4850., 4875., 4900., 4925., 4950., 4975., 5000., 5025., 5050.],
             [0.000, 0.010, 0.023, 0.039, 0.056, 0.086, 0.118, 0.188, 0.287, 0.457, 0.681, 0.896, 0.998, 1.000, 0.942, 0.783, 0.558, 0.342, 0.211, 0.130, 0.072, 0.045, 0.027, 0.021, 0.015, 0.011, 0.007, 0.003, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren b', AB_zeropoint=-22.40788262039795+0.187)
+        super().__init__(transmission_curve, name='Stromgren b', AB_to_Vega_offset=0.187)
 
 
 class Stromgreny(Filter):
@@ -565,7 +587,7 @@ class Stromgreny(Filter):
             [5150., 5175., 5200., 5225., 5250., 5275., 5300., 5325., 5350., 5375., 5400., 5425., 5450., 5475., 5500., 5525., 5550., 5575., 5600., 5625., 5650., 5675., 5700., 5725., 5750., 5775., 5800., 5825., 5850.],
             [0.000, 0.022, 0.053, 0.082, 0.116, 0.194, 0.274, 0.393, 0.579, 0.782, 0.928, 0.985, 0.999, 1.000, 0.997, 0.938, 0.789, 0.574, 0.388, 0.232, 0.143, 0.090, 0.054, 0.031, 0.016, 0.010, 0.009, 0.004, 0.000]
         ])
-        super().__init__(transmission_curve, name='Stromgren y', AB_zeropoint=-22.40788262039795+0.027)
+        super().__init__(transmission_curve, name='Stromgren y', AB_to_Vega_offset=0.027)
 
 
 class Bolometric(Filter):
