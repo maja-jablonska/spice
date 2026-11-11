@@ -95,7 +95,9 @@ def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
 
     Args:
         mesh (MeshModel): Properties to be cast (n, 3)
-        los_vector (Float[Array, "3"]): LOS vector (3,)
+        los_vector (Float[Array, "3"]): LOS vector (3,), observer -> star. Must be a
+            **unit** vector: it is not normalised here, and ``mus`` and
+            ``los_velocities`` scale with its length (projected areas do not).
 
     Returns:
         MeshModel: mesh with updated los_vector, mus, and los_velocities

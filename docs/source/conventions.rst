@@ -45,7 +45,12 @@ Time and periods
    Rotation and pulsation use **different time units**.
 
 - :func:`~spice.models.mesh_transform.evaluate_rotation` interprets ``t`` in
-  **seconds** (rotation velocity is km/s).
+  **seconds** (rotation velocity is km/s) and is incremental (it rotates the
+  current geometry).
+- Rotation is clockwise seen from the tip of ``rotation_axis``
+  (``v = (v_eq/R) r x a``): the angular momentum points along ``-rotation_axis``.
+- ``los_vector`` must be a unit vector; ``mus`` and ``los_velocities`` scale
+  with its length.
 - :func:`~spice.models.mesh_transform.evaluate_pulsations` and the pulsation
   ``period`` are in **days**; the pulsation-velocity conversion to km/s
   assumes solRad/day.

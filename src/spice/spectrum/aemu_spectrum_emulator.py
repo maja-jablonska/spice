@@ -227,7 +227,8 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
         parameters = np.array(parameter_values)
 
     if not (np.all(parameters >= interpolator.min_stellar_parameters) and np.all(parameters <= interpolator.max_stellar_parameters)):
-        warnings.warn("Possible exceeding parameter bounds - extrapolating.")
+        warnings.warn("Parameters outside the source's bounds: grid interpolators clamp to the "
+                      "nearest edge node, neural emulators extrapolate beyond their training range.")
 
     return parameters
 
@@ -341,7 +342,7 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
             parameters (ArrayLike): an array of predefined stellar parameters
 
         Returns:
-            ArrayLike: intensities corresponding to passed wavelengths [erg/cm2/s/angstrom]
+            ArrayLike: intensities corresponding to passed wavelengths [erg/s/cm2/angstrom/sr]
         """
         raise NotImplementedError
 

@@ -13,7 +13,7 @@ from spice.constants import C_CM_S as C_CENTIMETERS, H_ERG_S as H_CONST_ERG_S
 from spice.utils.dtypes import float_dtype as _dtype
 
 ERG_S_TO_W = 1e-7
-SPHERE_STERADIAN = 12.56
+SPHERE_STERADIAN = 4.0 * 3.141592653589793  # full sphere [sr]
 ZERO_POINT_LUM_W = 3.0128*10**(28)
 JY_TO_ERG = 1e-23
 
@@ -44,6 +44,9 @@ def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
         Resolving power (λ / Δλ_FWHM).
     window_size : float
         Number of Gaussian σ on either side of the kernel (controls truncation).
+        The kernel half-width is also capped at 2046 pixels, so on very finely
+        sampled grids a low R (e.g. R <~ 500 at 0.3 km/s per pixel) is
+        truncated and comes out narrower than requested.
 
     Returns
     -------
@@ -71,7 +74,8 @@ def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
     kernel_reshaped = kernel[:, None, None]
     flux_reshaped = flux[None, :, None]
 
-    # Reflect padding for edges
+    # Pad the edges with the global mean (not a reflection): within ~window_size
+    # sigma of either end a sloped spectrum is biased toward that mean.
     pad = max_half_width
     flux_padded = jnp.pad(flux_reshaped, ((0, 0), (pad, pad), (0, 0)), mode="mean")
 
@@ -169,6 +173,12 @@ def wavelengths_to_frequencies(wavelengths: ArrayLike) -> ArrayLike:
 
 @jax.jit
 def intensity_wavelengths_to_hz(wavelengths: ArrayLike, intensity: ArrayLike) -> Tuple[ArrayLike, ArrayLike]:
+    """Convert (wavelength [Angstrom], f_lambda) to (frequency [Hz], f_nu [Jy]).
+
+    ``intensity`` must be per **centimetre** of wavelength (erg/s/cm^2/cm), not per
+    Angstrom as elsewhere in SPICE: multiply a per-Angstrom flux by 1e8 first. The
+    constant 3.34 approximates 1e4 / c[Angstrom/s] * 1e23 (3.33564), a 0.13% error.
+    """
     vws_hz = wavelengths_to_frequencies(wavelengths)
     fv_Jy = (intensity*1e-4*3.34*wavelengths**2)
     

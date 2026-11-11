@@ -4,38 +4,35 @@ import matplotlib.pyplot as plt
 
 def fit_fourier_series(radius, phases, period=None, n_terms=4, plot=False, m_order=None, n_degree=None):
     """
-    Fit a Fourier series to radius variation data and return results compatible with add_pulsation.
-    
+    Fit a Fourier series to radius variation data and return [amplitude, phase] pairs.
+
+    The fitted model is ``a0 + sum_k a_k cos(2 pi k x) + b_k sin(2 pi k x)`` with
+    ``x`` the phase in [0, 1); each term is returned as ``A_k cos(2 pi k x - phi_k)``
+    with ``A_k = hypot(a_k, b_k)`` and ``phi_k = arctan2(b_k, a_k)``, the convention
+    used by ``add_pulsation``'s Fourier parameters.
+
     Parameters:
     -----------
     radius : array-like
-        The radius measurements
+        The radius measurements.
     phases : array-like
-        The phase values corresponding to each radius measurement
+        The phase values (in [0, 1)) corresponding to each radius measurement.
     period : float, optional
-        The pulsation period in days. If provided, will be converted to seconds for SPICE.
+        Unused; kept for backward compatibility.
     n_terms : int, optional
         Number of terms in the Fourier series (default: 4)
     plot : bool, optional
         Whether to display a plot of the original data and the fit (default: False)
-    m_order : int, optional
-        The order (m) of the spherical harmonics for pulsation
-    n_degree : int, optional
-        The degree (n) of the spherical harmonics for pulsation
-        
+    m_order, n_degree : int, optional
+        Unused; kept for backward compatibility.
+
     Returns:
     --------
-    dict
-        A dictionary containing:
-        - 'mean': mean radius (a0)
-        - 'coefficients': list of [a_i, b_i] coefficients
-        - 'amplitudes_phases': numpy array of shape (n_terms, 2) with [amplitude, phase] pairs
-        - 'fitted_function': function that can evaluate the fit at any phase
-        - 'pulsation_params': dict with parameters ready for add_pulsation:
-            - 'm_order': order of spherical harmonics (if provided)
-            - 'n_degree': degree of spherical harmonics (if provided)
-            - 'period': period in seconds (if provided)
-            - 'fourier_series_parameters': numpy array of shape (n_terms, 2)
+    numpy.ndarray
+        Array of shape (n_terms, 2) with [amplitude, phase] per harmonic. The mean
+        ``a0`` is not returned. Amplitudes are in the units of ``radius``;
+        ``add_pulsation`` expects them as a fraction of the stellar radius, so pass
+        ``radius / R`` (or divide the amplitudes by ``R``).
     """
     # Ensure arrays
     radius = np.array(radius)

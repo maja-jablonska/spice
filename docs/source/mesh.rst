@@ -99,7 +99,9 @@ You can add rotation to your model using the `add_rotation()` function:
 
 ``add_rotation`` populates the velocity field immediately; evaluating at
 ``t=0`` is unnecessary for rotational broadening. ``evaluate_rotation``
-advances the surface geometry to the requested time in seconds.
+rotates the surface by ``rotation_velocity * t / R`` from its current
+orientation (``t`` in seconds). It is incremental: apply it to the un-rotated
+mesh to get the state at an absolute time.
 
 Choosing the viewing direction
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

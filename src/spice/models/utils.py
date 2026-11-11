@@ -179,8 +179,11 @@ def horizontal_to_radial_ratio(mass: float, radius: float, pulsation_period: flo
         pulsation_period (float): Pulsation period in days.
 
     Returns:
-        float: The ratio K = xi_h / xi_r, suitable for use as `horizontal_ratio`
-            in `add_pulsation()`.
+        float: The ratio K = xi_h / xi_r of the horizontal to radial displacement
+            amplitudes. Note that ``add_pulsation``'s spheroidal and radial
+            amplitudes multiply bases that are each normalised to a peak of 1, so
+            to reproduce this physical ratio set ``a_s = K * a_r * max|Y| / max|grad_s Y|``
+            (e.g. ``a_s = K * a_r / 1.5`` for l=2, m=0), not ``a_s = K * a_r``.
     """
     G = G_SI            # m^3 kg^-1 s^-2
     M = mass * SOLAR_MASS_KG  # kg
