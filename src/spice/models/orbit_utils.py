@@ -308,6 +308,32 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
     
     return orbit
 
+def warn_if_epoch_precision_lost(P, *epochs) -> None:
+    """Warn when float32 epochs cannot resolve the orbital phase.
+
+    Without ``jax_enable_x64`` times are float32 (24-bit mantissa). A JD-like
+    epoch expressed in years (~6700 yr) is then rounded to ~4e-4 yr = 0.15 d, a
+    phase error that no internal rearrangement can recover. Called from the
+    Python-level orbit entry points, where the values are concrete.
+    """
+    import numpy as np
+    import warnings
+    if jax.config.jax_enable_x64:
+        return
+    try:
+        scale = max(float(np.max(np.abs(np.asarray(e)))) for e in epochs if e is not None)
+        period = abs(float(P))
+    except Exception:  # traced values or nothing to check
+        return
+    if period > 0 and scale * 2.0 ** -24 > 1e-4 * period:
+        warnings.warn(
+            f"Orbit times/epochs up to {scale:.4g} yr are stored in float32 (x64 disabled); "
+            f"they are rounded to ~{scale * 2.0 ** -24 * 365.25:.2g} d, i.e. "
+            f"{scale * 2.0 ** -24 / period:.1e} of the period. Pass times relative to a "
+            "reference epoch near the observations, or enable jax_enable_x64.",
+            RuntimeWarning, stacklevel=3)
+
+
 # ----------------------------------------------------------------------------
 # JAX-friendly eclipse timestamps from Keplerian elements
 # ----------------------------------------------------------------------------

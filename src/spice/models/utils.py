@@ -587,23 +587,32 @@ def calculate_axis_radii(centers: Float[Array, "n_mesh_elements 3"], axis: Float
 
 ### UTILITY FUNCTIONS FOR FOURIER SERIES
 
+# The Fourier evaluators use A cos(2 pi k t / P - phi) per [A, phi] pair.
+
 @jax.jit
 def cos_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[float, ArrayLike]:
+    """(P, [[A, phi]]) for ``A cos(2 pi t / P)``."""
     return P, jnp.array([[max_amplitude, 0.]])
 
 
 @jax.jit
 def sin_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[float, ArrayLike]:
-    return P, jnp.array([[max_amplitude, -jnp.pi / 2]])
+    """(P, [[A, phi]]) for ``A sin(2 pi t / P) = A cos(2 pi t / P - pi/2)``.
+
+    The phase used to be -pi/2, which gives ``-A sin``.
+    """
+    return P, jnp.array([[max_amplitude, jnp.pi / 2]])
 
 
-@jax.jit
 def sin2_as_fourier_coords(P: float, max_amplitude: float) -> Tuple[float, ArrayLike]:
-    return 0.5 * P, jnp.array([[0.5 * max_amplitude, 0.]])
+    """Oscillating part of ``A sin^2(2 pi t / P) = A/2 - A/2 cos(4 pi t / P)``.
 
-
-@jax.jit
-def sinh_as_fourier_coords(P: float, max_amplitude: float, n: int) -> Tuple[float, ArrayLike]:
-    return P, jnp.array(
-        [[2 * jnp.sinh(jnp.pi) / jnp.pi * jnp.power(-1, n0 + 1) * n0 / (jnp.power(n0, 2) + 1) * max_amplitude, 0.] for
-         n0 in range(1, n + 1)])
+    Deprecated: the constant ``A/2`` cannot be represented by these Fourier
+    parameters (they have no constant term), so only ``-A/2 cos(4 pi t / P)``,
+    i.e. period ``P/2``, amplitude ``A/2``, phase ``pi``, is returned. (Before
+    2026-11 the phase was 0, giving the opposite sign.)
+    """
+    import warnings
+    warnings.warn("sin2_as_fourier_coords is deprecated and drops the constant A/2 term; "
+                  "it will be removed in a future release.", DeprecationWarning, stacklevel=2)
+    return 0.5 * P, jnp.array([[0.5 * max_amplitude, jnp.pi]])

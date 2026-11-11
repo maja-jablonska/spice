@@ -146,7 +146,13 @@ def polygon_area(x: ArrayLike, y: ArrayLike) -> ArrayLike:
 
     Returns:
         ArrayLike: polygon's surface area
-    """    
+    """
+    # The shoelace sum is translation invariant; evaluating it about the
+    # polygon's own mean vertex avoids cancelling large products. On absolute
+    # sky-plane coordinates float32 lost 0.5% / 2% / 23% of a face's area for a
+    # body 10 / 30 / 300 R_sun from the origin.
+    x = x - jnp.mean(x)
+    y = y - jnp.mean(y)
     return 0.5*jnp.abs(jnp.dot(x,jnp.roll(y,1))-jnp.dot(y,jnp.roll(x,1)))
 
 
