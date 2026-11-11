@@ -152,7 +152,7 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
       orbit[5]: velocity of body 2 (km/s)
     """
     # Gravitational constant in SI units [m^3/(kg s^2)]
-    G = 6.67430e-11
+    G = G_SI
     
     time = time*c.yr
     reference_time = reference_time*c.yr
@@ -456,7 +456,7 @@ def parabola_vertex_t(t0, t1, t2, y0, y1, y2):
 # --------------------------
 @jit
 def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
-                              R1, R2, G=6.67430e-11, nscan=4096, pad=1.02,
+                              R1, R2, G=G_SI, nscan=4096, pad=1.02,
                               los_vector=None):
     """
     Estimates eclipse timestamps from Keplerian elements.
