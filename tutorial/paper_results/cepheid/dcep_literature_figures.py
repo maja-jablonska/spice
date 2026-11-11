@@ -82,16 +82,25 @@ def fig_profiles(r, out):
     teff = fourier_fit(tt[:, 0], tt[:, 1], int(a["fourier_order"]))(p)
     logg = fourier_fit(lk[:, 0], lk[:, 2], 2)(p)
     vmic = fourier_fit(lk[:, 0], lk[:, 3], 2)(p)
-    fig, ax = plt.subplots(2, 2, figsize=(14.0, 7.0), sharex=True)
-    panels = [(ax[0, 0], R - R.mean(), "Radius offset", r"Radius offset [$R_\odot$]", None),
-              (ax[0, 1], teff, "Effective Temperature", r"$T_{\rm eff}$ [K]", None),
-              (ax[1, 0], logg, "Surface Gravity", r"$\log g$", None),
-              (ax[1, 1], vmic, "Microturbulent Velocity", r"$v_{\rm mic}$ [km/s]", None)]
+    # line broadening actually used by the model: Luck's Gaussian width (1/e half-width, x1.665 -> FWHM) with his
+    # R = 60 000 instrumental FWHM (5 km/s) removed in quadrature, as a Fourier series through his 19 points
+    vb_curve = np.asarray(r["vmacro_curve"], float); vb_ph = np.linspace(0, 1, vb_curve.size)
+    vb_pts = np.c_[lk[:, 0], np.sqrt((lk[:, 4] * float(a["vmacro_curve_scale"])) ** 2
+                                     - (299792.458 / float(a["vmacro_instr_r"])) ** 2)]
+    fig = plt.figure(figsize=(9.5, 5.4)); gs = fig.add_gridspec(2, 6)   # printed at text width: text >= 6.5 pt
+    a00 = fig.add_subplot(gs[0, :3]); a01 = fig.add_subplot(gs[0, 3:], sharex=a00)
+    b0 = fig.add_subplot(gs[1, :2], sharex=a00); b1 = fig.add_subplot(gs[1, 2:4], sharex=a00); b2 = fig.add_subplot(gs[1, 4:], sharex=a00)
+    ax = np.array([[a00, a01], [b0, b1]])
+    panels = [(a00, R - R.mean(), "Radius offset", r"Radius offset [$R_\odot$]", None),
+              (a01, teff, "Effective Temperature", r"$T_{\rm eff}$ [K]", None),
+              (b0, logg, "Surface Gravity", r"$\log g$", None),
+              (b1, vmic, "Microturbulent Velocity", r"$v_{\rm mic}$ [km/s]", None),
+              (b2, np.interp(p, vb_ph, vb_curve), "Macroturbulent Broadening", r"$v_{\rm mac}$ (Gaussian FWHM) [km/s]", None)]
     for a_, y, title, ylab, pts in panels:
         a_.plot(p, y, color="k", lw=1.5)
         if pts is not None:
             a_.plot(pts[:, 0] % 1.0, pts[:, 1], "o", ms=3.5, mfc="none", mec="0.45", mew=0.8)
-        a_.set_title(title); a_.set_ylabel(ylab)
+        a_.set_title(title, fontsize=11); a_.set_ylabel(ylab, fontsize=10); a_.tick_params(labelsize=9)
         a_.spines["top"].set_visible(True); a_.spines["right"].set_visible(True)
     # all the temperature curves on the Teff panel: the adopted one (black, drawn above), Luck's Fourier series,
     # the SPIPS model of Merand et al. (2015) and the Andrievsky et al. (2005) points
@@ -104,9 +113,11 @@ def fig_profiles(r, out):
     an = r["teff_obs"]; a_ph, a_t, a_e = (np.asarray(an[k], float) for k in ("phase", "teff", "err"))
     at.errorbar(a_ph % 1.0, a_t, a_e, fmt="s", ms=3.5, color="#c0504d", ecolor="#c0504d", elinewidth=0.7, lw=0,
                 label="Andrievsky et al. 2005")
-    at.legend(fontsize=8, loc="upper center", frameon=False, ncol=2); at.set_ylim(5380, 7000)
-    for a_ in ax[1]:
-        a_.set_xlabel("Phase")
+    at.legend(fontsize=8, loc="upper center", frameon=False, ncol=1, handlelength=1.6, borderaxespad=0.3); at.set_ylim(5380, 7250)
+    for a_ in (b0, b1, b2):
+        a_.set_xlabel("Phase", fontsize=10)
+    for a_ in (a00, a01):
+        a_.tick_params(labelbottom=False)
     fig.tight_layout()
     save(fig, out, "d_cephei_profiles")
 
