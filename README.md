@@ -109,7 +109,7 @@ The grids and model outputs behind the paper are in the Hugging Face dataset [mj
 ```python
 import numpy as np
 from spice.models import IcosphereModel
-from spice.models.mesh_transform import add_rotation
+from spice.models.mesh_transform import add_rotation, evaluate_rotation
 from spice.spectrum import simulate_observed_flux, Blackbody
 
 bb = Blackbody()
@@ -123,8 +123,8 @@ star = IcosphereModel.construct(
     parameter_names=bb.parameter_names,
 )
 
-# Add solid-body rotation (equatorial velocity in km/s)
-star = add_rotation(star, rotation_velocity=2.0)
+# Add solid-body rotation (equatorial velocity in km/s) and evaluate it at t = 0 s
+star = evaluate_rotation(add_rotation(star, rotation_velocity=2.0), 0.)
 
 # Generate the disc-integrated spectrum. simulate_observed_flux expects *log10*
 # wavelengths and returns an (n_wavelengths, 2) array whose columns are the

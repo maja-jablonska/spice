@@ -89,9 +89,9 @@ familiar line broadening:
 
 .. code-block:: python
 
-    from spice.models.mesh_transform import add_rotation
+    from spice.models.mesh_transform import add_rotation, evaluate_rotation
 
-    fast = add_rotation(star, rotation_velocity=50.)
+    fast = evaluate_rotation(add_rotation(star, rotation_velocity=50.), 0.)
     flux_rot = simulate_observed_flux(bb.intensity, fast, np.log10(wavelengths))
 
 Luminosities
