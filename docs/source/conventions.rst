@@ -54,6 +54,10 @@ Time and periods
 - :func:`~spice.models.mesh_transform.evaluate_pulsations` and the pulsation
   ``period`` are in **days**; the pulsation-velocity conversion to km/s
   assumes solRad/day.
+- Without ``jax_enable_x64`` times are float32: a JD-sized epoch in years is
+  rounded to ~0.15 d. Pass orbit times relative to a reference epoch near the
+  observations (SPICE warns when the rounding exceeds 1e-4 of the period), or
+  enable x64.
 - Orbital elements in :func:`~spice.models.binary.add_orbit` (``P``, ``T``,
   ``reference_time``) are in **years**; PHOEBE-imported meshes carry PHOEBE's
   native **days**.

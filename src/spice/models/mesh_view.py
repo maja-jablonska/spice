@@ -123,9 +123,11 @@ def _visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3
     # Replace NaN values with zeros for safe calculations
     clipped_safe = jnp.where(jnp.isnan(clipped), 0.0, clipped)  # (n_clipped, 3)
     
-    # Get coordinates and handle wrap-around
-    x = clipped_safe[:, 0]  # (n_clipped,)
-    y = clipped_safe[:, 1]  # (n_clipped,)
+    # Get coordinates about the mean valid vertex (the area is translation
+    # invariant; this keeps float32 from cancelling large absolute products)
+    n_valid = jnp.maximum(jnp.sum(mask), 1)
+    x = clipped_safe[:, 0] - jnp.sum(clipped_safe[:, 0] * mask) / n_valid  # (n_clipped,)
+    y = clipped_safe[:, 1] - jnp.sum(clipped_safe[:, 1] * mask) / n_valid  # (n_clipped,)
     next_idx = jnp.roll(jnp.arange(x.shape[0]), -1)  # (n_clipped,)
     
     # Calculate contribution for each edge pair, masked by validity

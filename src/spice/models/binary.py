@@ -10,7 +10,7 @@ from jax import tree_util
 
 from spice.models.model import Model
 from spice.models.mesh_transform import transform, evaluate_body_orbit
-from spice.models.orbit_utils import get_orbit_jax
+from spice.models.orbit_utils import get_orbit_jax, warn_if_epoch_precision_lost
 from spice.models.mesh_view import resolve_occlusion
 
 import jaxkd as jk
@@ -347,6 +347,7 @@ def add_orbit(binary: Binary,
     if isinstance(binary, PhoebeBinary):
         raise ValueError("PhoebeBinary objects are read-only - the orbit information is already added.")
     else:
+        warn_if_epoch_precision_lost(P, T, reference_time)
         return _add_orbit(binary, P, ecc, T, i, omega, Omega, mean_anomaly, reference_time, vgamma, orbit_resolution_points)
 
 
@@ -483,6 +484,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
         return PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY), \
                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY)
     else:
+        warn_if_epoch_precision_lost(binary.P, time)
         return _evaluate_orbit(binary, time, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2),
                                from_occluder1=bool(binary.occlusion_from_occluder1),
                                from_occluder2=bool(binary.occlusion_from_occluder2))
@@ -515,6 +517,8 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
     """
     from spice.utils import log
     n = len(times) if hasattr(times, '__len__') else times.shape[0]
+    if not isinstance(binary, PhoebeBinary):
+        warn_if_epoch_precision_lost(binary.P, times)
     with log.timed(
         f"Evaluating binary orbit at {n} time steps",
         "Binary orbit evaluated in {elapsed:.1f} s",
