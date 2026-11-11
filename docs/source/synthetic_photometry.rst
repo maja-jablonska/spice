@@ -15,7 +15,16 @@ Magnitude systems
 - :func:`~spice.spectrum.ST_passband_luminosity` uses the ST system. Gaia
   filters are not supported and raise ``ValueError``.
 - :func:`~spice.spectrum.Vega_passband_luminosity` requires a Vega zero point
-  on the filter; built-in examples include Gaia G/BP/RP/RVS and 2MASS J/H/Ks.
+  or an AB-to-Vega offset on the filter: Gaia G/BP/RP/RVS (Riello et al. 2021),
+  2MASS J/H/Ks (Cohen et al. 2003 zero-magnitude fluxes), and the
+  standard-system Johnson-Cousins, Hipparcos/Tycho and Strömgren bands, which
+  follow Bessell & Murphy (2012) as ``m_AB + offset``.
+- In SPICE 1.9.0 and earlier, ``AB_passband_luminosity`` for Johnson-Cousins,
+  Hipparcos/Tycho and Strömgren silently included those Bessell & Murphy
+  offsets (U -0.761, B +0.130, V +0.020, R -0.163, I -0.404, Hp +0.030,
+  BT +0.100, VT +0.037, u +0.308, v +0.327, b +0.187, y +0.027 mag), i.e. it
+  returned standard-system magnitudes. Use ``Vega_passband_luminosity`` to get
+  those values now.
 
 At 10 pc, the returned magnitude is an absolute magnitude. At another
 synthesis distance it is the apparent magnitude at that distance, without
@@ -51,7 +60,9 @@ Passband magnitudes from a spectrum
 Pass the synthesis flux directly. Do not multiply or divide it by
 :math:`10^8`, and do not convert the wavelengths to centimetres. Photon
 counting and energy-response weighting are applied internally, including
-Gaia's count-rate calibration and PanSTARRS PS1 energy responses.
+Gaia's count-rate calibration. PanSTARRS PS1 curves are photon-counting
+capture cross-sections (Tonry et al. 2012) and use the photon-counting
+equations; 2MASS uses the energy (RSR) equations.
 For a fixed intrinsic spectrum, changing distance from :math:`d_1` to
 :math:`d_2` changes every magnitude by :math:`5\log_{10}(d_2/d_1)`.
 
@@ -102,10 +113,10 @@ with the package.
      - Notes
    * - Johnson-Cousins
      - ``JohnsonCousinsU/B/V/R/I``
-     -
+     - Vega = AB + Bessell & Murphy (2012) offset
    * - Hipparcos/Tycho
      - ``HipparcosHp``, ``TychoBT``, ``TychoVT``
-     -
+     - Vega = AB + Bessell & Murphy (2012) offset
    * - Gaia
      - ``GaiaG``, ``GaiaBP``, ``GaiaRP``, ``GaiaRVS``
      - photonic; no ST magnitudes; AB and Vega zero points
@@ -114,7 +125,7 @@ with the package.
      -
    * - 2MASS
      - ``TWOMASSJ/H/K``
-     - Vega zero points available
+     - energy (RSR) weighting; Vega zero points from Cohen et al. (2003)
    * - GALEX
      - ``GALEXFUV``, ``GALEXNUV``
      -
@@ -123,10 +134,10 @@ with the package.
      -
    * - PanSTARRS PS1
      - ``PANSTARRS_PS1_g/r/i/z/y/w/open``
-     - energy-response weighting
+     - photon counting (capture cross-sections)
    * - Strömgren
      - ``Stromgrenu/v/b/y``
-     -
+     - Vega = AB + Bessell & Murphy (2012) offset
    * - Bolometric
      - ``Bolometric``
      - flat response from 1 to 30000 Å; zero outside
