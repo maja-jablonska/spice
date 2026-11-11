@@ -45,13 +45,14 @@ def thermal_width(line_center_A: float, Teff: float, atomic_mass: float) -> floa
     sigma_th : float
         Thermal Doppler width [Å].
     """
-    # Convert to cgs
-    # v_th = sqrt(2 k_B T / (A m_p))     [cm s^-1]
-    v_th = jnp.sqrt(2.0 * KB_CGS * Teff / (atomic_mass * M_P))
+    # 1-D velocity dispersion sigma_v = sqrt(k_B T / m) [cm s^-1]. (The Doppler
+    # parameter b = sqrt(2 k_B T / m) = sqrt(2) sigma_v was returned before and
+    # used as sigma, making thermal lines sqrt(2) too wide.)
+    sigma_v = jnp.sqrt(KB_CGS * Teff / (atomic_mass * M_P))
 
     # Doppler shift Δλ/λ = v/c
-    # σ_λ = λ * (v_th / c)               [cm]
-    sigma_lambda_cm = (line_center_A * 1e-8) * (v_th / C_CGS)
+    # σ_λ = λ * (σ_v / c)                [cm]
+    sigma_lambda_cm = (line_center_A * 1e-8) * (sigma_v / C_CGS)
 
     # Convert back to Å
     return sigma_lambda_cm * 1e8
@@ -254,7 +255,9 @@ class PhysicalLineEmulator:
 
         # --- Effective Gaussian width (thermal + microturbulence) ---
         sigma_th = thermal_width(self.line_center, Teff, self.atomic_mass)  # [Å]
-        sigma_micro = self.v_micro * self.line_center / C_KMS              # [Å]
+        # v_micro is a Doppler parameter (b-like, as in stellar-atmosphere codes),
+        # so its 1-sigma width carries the same 1/sqrt(2) as the thermal part.
+        sigma_micro = self.v_micro * self.line_center / C_KMS / jnp.sqrt(2.0)  # [Å]
         sigma = jnp.sqrt(sigma_th**2 + sigma_micro**2)                      # [Å]
 
         # --- Lorentzian width scaling (temperature + gravity) ---
