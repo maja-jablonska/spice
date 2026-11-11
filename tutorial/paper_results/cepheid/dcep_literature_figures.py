@@ -87,7 +87,7 @@ def fig_profiles(r, out):
     vb_curve = np.asarray(r["vmacro_curve"], float); vb_ph = np.linspace(0, 1, vb_curve.size)
     vb_pts = np.c_[lk[:, 0], np.sqrt((lk[:, 4] * float(a["vmacro_curve_scale"])) ** 2
                                      - (299792.458 / float(a["vmacro_instr_r"])) ** 2)]
-    fig = plt.figure(figsize=(14.0, 7.0)); gs = fig.add_gridspec(2, 6)
+    fig = plt.figure(figsize=(9.5, 5.4)); gs = fig.add_gridspec(2, 6)   # printed at text width: text >= 6.5 pt
     a00 = fig.add_subplot(gs[0, :3]); a01 = fig.add_subplot(gs[0, 3:], sharex=a00)
     b0 = fig.add_subplot(gs[1, :2], sharex=a00); b1 = fig.add_subplot(gs[1, 2:4], sharex=a00); b2 = fig.add_subplot(gs[1, 4:], sharex=a00)
     ax = np.array([[a00, a01], [b0, b1]])
@@ -100,7 +100,7 @@ def fig_profiles(r, out):
         a_.plot(p, y, color="k", lw=1.5)
         if pts is not None:
             a_.plot(pts[:, 0] % 1.0, pts[:, 1], "o", ms=3.5, mfc="none", mec="0.45", mew=0.8)
-        a_.set_title(title); a_.set_ylabel(ylab)
+        a_.set_title(title, fontsize=11); a_.set_ylabel(ylab, fontsize=10); a_.tick_params(labelsize=9)
         a_.spines["top"].set_visible(True); a_.spines["right"].set_visible(True)
     # all the temperature curves on the Teff panel: the adopted one (black, drawn above), Luck's Fourier series,
     # the SPIPS model of Merand et al. (2015) and the Andrievsky et al. (2005) points
@@ -113,9 +113,9 @@ def fig_profiles(r, out):
     an = r["teff_obs"]; a_ph, a_t, a_e = (np.asarray(an[k], float) for k in ("phase", "teff", "err"))
     at.errorbar(a_ph % 1.0, a_t, a_e, fmt="s", ms=3.5, color="#c0504d", ecolor="#c0504d", elinewidth=0.7, lw=0,
                 label="Andrievsky et al. 2005")
-    at.legend(fontsize=8, loc="upper center", frameon=False, ncol=2); at.set_ylim(5380, 7000)
+    at.legend(fontsize=8, loc="upper center", frameon=False, ncol=1, handlelength=1.6, borderaxespad=0.3); at.set_ylim(5380, 7250)
     for a_ in (b0, b1, b2):
-        a_.set_xlabel("Phase")
+        a_.set_xlabel("Phase", fontsize=10)
     for a_ in (a00, a01):
         a_.tick_params(labelbottom=False)
     fig.tight_layout()

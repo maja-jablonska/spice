@@ -28,8 +28,8 @@ from dcep_ts_pfactor import analyse  # noqa: E402
 
 LINE = "Fe I 5018.027"
 SOURCES = [("$\\mu$=1, no LD", "synth_paper_lin0.npz", "broad CCF", "#151515", "-"),
-           ("Turbospectrum", "synth_paper_atm.npz", "CCF", "#2a78d6", "-"),
-           ("Transformer", "synth_paper_tpayne.npz", "CCF", "#c2255c", ":")]
+           ("TURBOSPECTRUM", "synth_paper_atm.npz", "CCF", "#2a78d6", "-"),
+           ("Emulator", "synth_paper_tpayne.npz", "CCF", "#c2255c", ":")]
 TRUTH_COLOUR = "#eb6834"
 
 
@@ -38,21 +38,21 @@ def main():
     ap.add_argument("--dir", type=Path, default=HERE / "out")
     ap.add_argument("--out", type=Path, default=HERE.parents[1] / "paper_plots" / "cepheid" / "cepheid_p_factor.pdf")
     a = ap.parse_args()
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(4.4, 3.3))   # printed at column width: keep text >= 6.5 pt
     truth_drawn = False
     for label, fname, method, colour, ls in SOURCES:
         rows = [r for r in analyse(a.dir / fname) if r["window"] == LINE and r["mode"] == "phase0" and r["method"] == method]
         assert len(rows) == 1, (fname, len(rows))
         r = rows[0]; o = np.argsort(r["phase"])
         if not truth_drawn:
-            ax.plot(r["phase"][o], r["truth"][o], color=TRUTH_COLOUR, lw=3.0, solid_capstyle="round",
+            ax.plot(r["phase"][o], r["truth"][o], color=TRUTH_COLOUR, lw=2.4, solid_capstyle="round",
                     label=r"$V_{\rm puls} - V_{\rm puls}(\varphi{=}0)$ truth")
             truth_drawn = True
-        ax.plot(r["phase"][o], r["rv"][o], color=colour, ls=ls, lw=2.2 if ls != "-" else 1.6,
+        ax.plot(r["phase"][o], r["rv"][o], color=colour, ls=ls, lw=1.8 if ls != "-" else 1.2,
                 label=f"{label} — {method}: $p$ = {r['p']:.3f}")
         print(f"{label:16s} {method:9s} p = {r['p']:.3f} (rms {r['rms_kms']:.2f} km/s, {r['n']} phases)")
-    ax.set_xlabel("phase", fontsize=12); ax.set_ylabel("velocity relative to phase 0 [km/s]", fontsize=12)
-    ax.set_xlim(-0.04, 1.04); ax.legend(loc="upper left", fontsize=11); ax.tick_params(labelsize=11)
+    ax.set_xlabel("phase", fontsize=10); ax.set_ylabel(r"velocity relative to phase 0 [km$\,$s$^{-1}$]", fontsize=10)
+    ax.set_xlim(-0.04, 1.04); ax.legend(loc="upper left", fontsize=8.5, frameon=False); ax.tick_params(labelsize=9)
     fig.tight_layout(); fig.savefig(a.out)
     print("wrote", a.out)
 
