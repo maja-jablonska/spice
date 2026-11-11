@@ -95,7 +95,7 @@ def fig_profiles(r, out):
               (a01, teff, "Effective Temperature", r"$T_{\rm eff}$ [K]", None),
               (b0, logg, "Surface Gravity", r"$\log g$", None),
               (b1, vmic, "Microturbulent Velocity", r"$v_{\rm mic}$ [km/s]", None),
-              (b2, np.interp(p, vb_ph, vb_curve), "Line Broadening", r"Gaussian FWHM [km/s]", vb_pts)]
+              (b2, np.interp(p, vb_ph, vb_curve), "Macroturbulent Broadening", r"$v_{\rm mac}$ (Gaussian FWHM) [km/s]", None)]
     for a_, y, title, ylab, pts in panels:
         a_.plot(p, y, color="k", lw=1.5)
         if pts is not None:
