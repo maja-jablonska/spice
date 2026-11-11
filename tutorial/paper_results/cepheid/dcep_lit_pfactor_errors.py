@@ -30,8 +30,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 P0 = (1.35, 1.34)                         # Mg b window CCF p0: phase-0 template, rest-frame template
 P0_EMU_TS = 0.001                         # emulator - Turbospectrum p0 difference (Table 6)
-ADOPTED = "dcep_v12V13_own_trahin_p3"
-VARIANTS = ("dcep_v12V13_own_luck_p3", "dcep_v12V13_all_trahin_p3", "dcep_v12V13_all_luck_p3")
+ADOPTED = "dcep_v12x150_own_trahin_p3"
+VARIANTS = ("dcep_v12x150_own_luck_p3", "dcep_v12x150_all_trahin_p3", "dcep_v12x150_all_luck_p3")
 
 
 def p_of(s, p0):

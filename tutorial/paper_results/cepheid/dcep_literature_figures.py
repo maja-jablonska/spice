@@ -155,6 +155,9 @@ def fig_spectra(r, out, harpsn):
     H = np.load(harpsn, allow_pickle=True)
     wins = [tuple(w) for w in H["windows"]]; wi = next(i for i, w in enumerate(wins) if abs(w[0] - SPEC_WINDOW[0]) < 1)
     wl = 10.0 ** np.asarray(H[f"logwl_{wi}"]); obs = np.asarray(H[f"obs_{wi}"], float)
+    if obs.shape[0] != len(r["times_spec"]):     # the run excluded spectra (--exclude-spectra): keep the epochs it used
+        t_all = np.asarray(H["times"], float); t_run = np.asarray(r["times_spec"], float)
+        keep = np.array([np.min(np.abs(t_run - t_)) < 1e-6 for t_ in t_all]); obs = obs[keep]
     key = next(k for k in r["exact_all"]["spectra"] if abs(float(k[0]) - SPEC_WINDOW[0]) < 1)
     mod = np.asarray(r["exact_all"]["spectra"][key]["model"], float)
     assert mod.shape == obs.shape, (mod.shape, obs.shape)
@@ -238,7 +241,7 @@ def save(fig, out, stem):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--result", default=str(HERE / "dcep_out" / "dcep_v12V13_own_trahin_p3.pkl"))
+    ap.add_argument("--result", default=str(HERE / "dcep_out" / "dcep_v12x150_own_trahin_p3.pkl"))
     ap.add_argument("--harpsn", default=str(HERE / "harpsn_windows_log.npz"))
     ap.add_argument("--out", default=str(HERE.parent / "paper_plots" / "cepheid"))
     a = ap.parse_args(); out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
