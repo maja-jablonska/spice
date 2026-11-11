@@ -1,6 +1,6 @@
 from functools import partial
 from importlib import import_module
-from typing import List, Union
+from typing import List, Optional, Union
 import warnings
 
 import jax
@@ -24,6 +24,7 @@ from .utils import (ModelList, rotation_matrix, rotation_matrix_prim,
                     spherical_harmonic_with_tilt,
                     spherical_harmonic_gradient_with_tilt,
                     spherical_harmonic_toroidal_with_tilt,
+                    vector_spherical_harmonic_bases_complex,
                     MAX_SPHERICAL_HARMONIC_DEGREE)
 
 from jaxtyping import Array, Float
@@ -485,9 +486,34 @@ def _validate_modes(m_orders, l_degrees) -> None:
             "spherical-harmonic evaluator.")
 
 
+_TRAVELLING_SENSE = {None: 0., "standing": 0., "prograde": -1., "retrograde": 1.}
+
+
+def _travelling_sense(travelling, m_order) -> float:
+    """Map 'prograde'/'retrograde'/None to the azimuthal sense used internally.
+
+    SPICE stars spin clockwise about ``rotation_axis`` (angular momentum along
+    -axis), i.e. toward decreasing longitude, so a prograde pattern moves toward
+    decreasing longitude (-1) and a retrograde one toward increasing (+1).
+    """
+    if travelling not in _TRAVELLING_SENSE:
+        raise ValueError(f"travelling must be None, 'standing', 'prograde' or 'retrograde'; got {travelling!r}")
+    sense = _TRAVELLING_SENSE[travelling]
+    if sense != 0. and float(np.asarray(m_order)) == 0.:
+        raise ValueError("An m = 0 mode is axisymmetric and cannot travel in azimuth.")
+    return sense
+
+
+def _set_travelling(m: MeshModel, harmonic_indices, senses) -> MeshModel:
+    current = _pulsation_travelling(m)
+    return m._replace(pulsation_travelling=current.at[jnp.asarray(harmonic_indices)].set(
+        jnp.asarray(senses, dtype=current.dtype)))
+
+
 def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
                   period: Float, fourier_series_parameters: Float[Array, "3 n_terms 2"],
-                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None) -> MeshModel:
+                  pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None,
+                  travelling: Optional[str] = None) -> MeshModel:
     """
     Adds pulsation effects to a mesh model using vector spherical harmonics.
 
@@ -515,11 +541,16 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
             pulsations are evaluated), tilted by ``pulsation_angles`` degrees about
             this axis. Defaults to the rotation axis, i.e. no tilt.
         pulsation_angles (Float): Tilt angle in degrees. Defaults to zero.
+        travelling (str, optional): ``None`` (default) for a standing mode,
+            ``"prograde"`` or ``"retrograde"`` for a mode travelling in azimuth with
+            or against the star's rotation. A travelling mode is
+            ``Re[Y_l^m e^{-i s w t}]`` per Fourier harmonic: its pattern keeps a
+            constant shape and amplitude (the peak displacement) and moves at
+            ``w / m`` in longitude about the (tilted) mode axis. Requires ``m > 0``.
 
     Note:
-        Modes are real spherical harmonics, so m != 0 modes are standing waves
-        (fixed nodal lines); travelling prograde/retrograde modes are not
-        represented. ``m`` must satisfy ``0 <= m <= l <= 10``.
+        ``m`` must satisfy ``0 <= m <= l <= 10``. Standing m != 0 modes have fixed
+        nodal lines (real harmonics); use ``travelling`` for moving ones.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -553,11 +584,14 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
                       "been initialized with a maximum pulsation mode of {}".format(m.max_pulsation_mode) +
                       "This pulsation will have no effect.")
 
+    sense = _travelling_sense(travelling, m_order)
+
     # n_terms is along axis 1 of the (3, n_terms, 2) array
     total_pad_len = int(m.max_fourier_order - fourier_series_parameters.shape[1])
-    return _add_pulsation(m, jnp.array([m_order, l_degree]), period, fourier_series_parameters,
-                          total_pad_len,
-                          pulsation_axes, pulsation_angles)
+    m = _add_pulsation(m, jnp.array([m_order, l_degree]), period, fourier_series_parameters,
+                       total_pad_len,
+                       pulsation_axes, pulsation_angles)
+    return _set_travelling(m, harmonic_ind, sense)
 
 
 @partial(jax.jit, static_argnums=(4,))
@@ -598,7 +632,8 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
                    periods: Float[Array, "n_pulsations"],
                    fourier_series_parameters: Float[Array, "n_pulsations 3 n_terms 2"],
                    pulsation_axes: Float[Array, "n_pulsations 3"] = None,
-                   pulsation_angles: Float[Array, "n_pulsations"] = None) -> MeshModel:
+                   pulsation_angles: Float[Array, "n_pulsations"] = None,
+                   travelling=None) -> MeshModel:
     """
     Adds multiple pulsation effects to a mesh model using vector spherical harmonics.
 
@@ -620,6 +655,9 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
             symmetry axis is the mesh's rotation axis tilted about its tilt axis by
             its angle (see :func:`add_pulsation`). Defaults to the rotation axis (no tilt).
         pulsation_angles (Float[Array, "n_pulsations"]): Tilt angles in degrees. Defaults to zero.
+        travelling: ``None`` (all standing), one of ``"prograde"`` / ``"retrograde"``
+            for all modes, or a sequence with one entry (or ``None``) per mode. See
+            :func:`add_pulsation`.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -657,9 +695,16 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
     total_pad_len = int(m.max_fourier_order -
                         fourier_series_parameters.shape[2])
 
-    return _add_pulsations(m, periods,
-                           fourier_series_parameters, harmonic_indices, total_pad_len,
-                           pulsation_axes, pulsation_angles)
+    if travelling is None or isinstance(travelling, str):
+        travelling = [travelling] * len(m_orders)
+    if len(travelling) != len(m_orders):
+        raise ValueError("travelling must have one entry per pulsation.")
+    senses = [_travelling_sense(tr, mo) for tr, mo in zip(travelling, np.asarray(m_orders))]
+
+    m = _add_pulsations(m, periods,
+                        fourier_series_parameters, harmonic_indices, total_pad_len,
+                        pulsation_axes, pulsation_angles)
+    return _set_travelling(m, harmonic_indices.astype(int), senses)
 
 
 @jax.jit
@@ -676,6 +721,7 @@ def _reset_pulsations(m: MeshModel) -> MeshModel:
         pulsation_axes=_default_rotation_axis().reshape(
             (1, 3)).repeat(m.pulsation_periods.shape[0], axis=0),
         pulsation_angles=jnp.zeros_like(m.pulsation_periods),
+        pulsation_travelling=jnp.zeros_like(m.pulsation_periods),
     )
     return _refresh_computed_log_g(reset)
 
@@ -708,7 +754,10 @@ def reset_pulsations(m: MeshModel) -> MeshModel:
 def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
                          magnitudes: Float[Array, "3"],
                          magnitudes_prim: Float[Array, "3"],
-                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike):
+                         radius: float, pulsation_axis: ArrayLike, pulsation_angle: ArrayLike,
+                         quadrature: Float[Array, "3"] = None,
+                         quadrature_prim: Float[Array, "3"] = None,
+                         travelling: ArrayLike = 0.):
     """Calculate pulsation displacement using vector spherical harmonics.
 
     The displacement is decomposed as:
@@ -716,6 +765,14 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
 
     where R_lm = Y_l^m * r_hat, S_lm = nabla_tangential(Y_l^m),
     T_lm = r_hat x nabla_tangential(Y_l^m).
+
+    A standing mode (``travelling = 0``) uses the real part of each basis. A
+    travelling mode (``travelling = +-1``) is ``Re[B e^{-i s w t}]`` per Fourier
+    harmonic, i.e. ``a(t) Re(B) + s b(t) Im(B)`` with ``b`` the quadrature
+    series (every phase shifted by pi/2): the pattern ``cos(m phi - s w t)``
+    keeps its shape and moves in azimuth (``s = +1`` toward increasing phi about
+    the rotation axis). Travelling bases are normalised by the peak of
+    ``|B|`` so the amplitude is the constant peak displacement.
 
     Args:
         m: Mesh model.
@@ -725,6 +782,9 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
         radius: Stellar radius.
         pulsation_axis: Tilt axis.
         pulsation_angle: Tilt angle in degrees.
+        quadrature, quadrature_prim: (3,) quadrature amplitudes and their time
+            derivatives (only used for travelling modes).
+        travelling: 0 (standing), +1 or -1 (sense of azimuthal motion).
 
     The untilted mode is symmetric about ``m.rotation_axis``; it used to be
     symmetric about +z regardless of the rotation axis, so on a default
@@ -735,6 +795,12 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
         pulsation_angle.reshape(()),
         pulsation_angle
     )
+    if quadrature is None:
+        quadrature = jnp.zeros_like(magnitudes)
+    if quadrature_prim is None:
+        quadrature_prim = jnp.zeros_like(magnitudes_prim)
+    sense = jnp.asarray(travelling).reshape(())
+    is_travelling = sense != 0.
 
     m_ord = harmonic_parameters[0]
     l_deg = harmonic_parameters[1]
@@ -746,62 +812,44 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
     # normalizing so `a_r`, `a_s`, `a_t` map to the peak surface displacement.
     surface_vertex = jnp.linalg.norm(m.d_vertices, axis=1) > 0.5 * radius
 
-    # --- Radial basis: R_lm = Y_l^m * r_hat ---
-    vertex_harmonic = spherical_harmonic_with_tilt(
+    vY, vS, vT = vector_spherical_harmonic_bases_complex(
         m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle,
-        frame_axis=m.rotation_axis)[:, jnp.newaxis]
-    center_harmonic = spherical_harmonic_with_tilt(
+        frame_axis=m.rotation_axis)
+    cY, cS, cT = vector_spherical_harmonic_bases_complex(
         m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle,
-        frame_axis=m.rotation_axis)[:, jnp.newaxis]
+        frame_axis=m.rotation_axis)
 
-    # Normalize harmonics to (-1, 1) preserving sign
-    vertex_harmonic = vertex_harmonic / (
-        jnp.max(jnp.where(surface_vertex[:, None], jnp.abs(vertex_harmonic), 0.0)) + 1e-8
-    )
-    center_harmonic = center_harmonic / (jnp.max(jnp.abs(center_harmonic)) + 1e-8)
+    def peak(values, mask=None):
+        values = jnp.where(mask, values, 0.0) if mask is not None else values
+        return jnp.max(values) + 1e-8
+
+    def scalar_norm(z, mask=None):
+        return jnp.where(is_travelling, peak(jnp.abs(z), mask), peak(jnp.abs(z.real), mask))
+
+    def vector_norm(z, mask=None):
+        full = jnp.sqrt(jnp.sum(jnp.abs(z) ** 2, axis=1))
+        real = jnp.linalg.norm(z.real, axis=1)
+        return jnp.where(is_travelling, peak(full, mask), peak(real, mask))
 
     vertex_norms = jnp.linalg.norm(m.d_vertices, axis=1, keepdims=True)
     vertex_r_hat = m.d_vertices / jnp.where(vertex_norms > 0., vertex_norms, 1.)
     center_r_hat = m.d_centers / jnp.linalg.norm(m.d_centers, axis=1, keepdims=True)
 
-    vertex_R = vertex_harmonic * vertex_r_hat
-    center_R = center_harmonic * center_r_hat
+    # Bases normalised to a peak of 1 (radial: Y r_hat; spheroidal; toroidal)
+    vR = (vY / scalar_norm(vY, surface_vertex))[:, None] * vertex_r_hat
+    cR = (cY / scalar_norm(cY))[:, None] * center_r_hat
+    vS = vS / vector_norm(vS, surface_vertex)
+    cS = cS / vector_norm(cS)
+    vT = vT / vector_norm(vT, surface_vertex)
+    cT = cT / vector_norm(cT)
 
-    # --- Spheroidal basis: S_lm = nabla_tangential(Y_l^m) ---
-    vertex_S = spherical_harmonic_gradient_with_tilt(
-        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle,
-        frame_axis=m.rotation_axis)
-    center_S = spherical_harmonic_gradient_with_tilt(
-        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle,
-        frame_axis=m.rotation_axis)
+    def combine(R, S, T, a, b):
+        standing = a[0] * R.real + a[1] * S.real + a[2] * T.real
+        moving = b[0] * R.imag + b[1] * S.imag + b[2] * T.imag
+        return standing + sense * moving
 
-    vertex_S_norms = jnp.linalg.norm(vertex_S, axis=1)
-    vertex_S = vertex_S / (
-        jnp.max(jnp.where(surface_vertex, vertex_S_norms, 0.0)) + 1e-8
-    )
-    center_S = center_S / (jnp.max(jnp.linalg.norm(center_S, axis=1)) + 1e-8)
-
-    # --- Toroidal basis: T_lm = r_hat x nabla_tangential(Y_l^m) ---
-    vertex_T = spherical_harmonic_toroidal_with_tilt(
-        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle,
-        frame_axis=m.rotation_axis)
-    center_T = spherical_harmonic_toroidal_with_tilt(
-        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle,
-        frame_axis=m.rotation_axis)
-
-    vertex_T_norms = jnp.linalg.norm(vertex_T, axis=1)
-    vertex_T = vertex_T / (
-        jnp.max(jnp.where(surface_vertex, vertex_T_norms, 0.0)) + 1e-8
-    )
-    center_T = center_T / (jnp.max(jnp.linalg.norm(center_T, axis=1)) + 1e-8)
-
-    # --- Total displacement: sum of three VSH components ---
-    a_r, a_s, a_t = magnitudes[0], magnitudes[1], magnitudes[2]
-    new_vertices = radius * (a_r * vertex_R + a_s * vertex_S + a_t * vertex_T)
-
-    # --- Pulsation velocity: same decomposition with time derivatives ---
-    da_r, da_s, da_t = magnitudes_prim[0], magnitudes_prim[1], magnitudes_prim[2]
-    total_pulsation_velocity = radius * (da_r * center_R + da_s * center_S + da_t * center_T)
+    new_vertices = radius * combine(vR, vS, vT, magnitudes, quadrature)
+    total_pulsation_velocity = radius * combine(cR, cS, cT, magnitudes_prim, quadrature_prim)
 
     return jnp.nan_to_num(new_vertices), jnp.nan_to_num(total_pulsation_velocity)
 
@@ -838,6 +886,19 @@ def calculate_pulsations(m: MeshModel, harmonic_parameters: ArrayLike,
         radius, pulsation_axis, pulsation_angle)
     areas, centers = _pulsation_geometry_offsets(m, vertices)
     return vertices, areas, centers, velocities
+
+
+def _pulsation_travelling(m: MeshModel) -> ArrayLike:
+    """Per-mode travelling sense (0 standing, +-1 travelling); None means all standing."""
+    sense = getattr(m, "pulsation_travelling", None)
+    if sense is None:
+        return jnp.zeros(m.pulsation_periods.shape[0], dtype=m.pulsation_periods.dtype)
+    return jnp.asarray(sense, dtype=m.pulsation_periods.dtype)
+
+
+def _quadrature_parameters(fourier_params: ArrayLike) -> ArrayLike:
+    """Same series with every phase shifted by pi/2: A cos(k w t - phi - pi/2) = A sin(k w t - phi)."""
+    return fourier_params.at[..., 1].add(jnp.pi / 2)
 
 
 def calculate_numerical_pulsation_velocity(m: MeshModel, t: float, dt: float = 1e-6):
@@ -904,9 +965,13 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
         f"Evaluating pulsations at t={t}",
         "Pulsations evaluated in {elapsed:.1f} s",
     ):
+        quadrature_model = m._replace(
+            fourier_series_parameters=_quadrature_parameters(m.fourier_series_parameters))
         if use_numerical_derivative:
             # Numerical derivative: returns (n_modes, 3) directly
             pulsation_magnitudes, pulsation_velocity_magnitudes = calculate_numerical_pulsation_velocity(m, t, dt)
+            quadrature_magnitudes, quadrature_velocity_magnitudes = calculate_numerical_pulsation_velocity(
+                quadrature_model, t, dt)
         else:
             # Analytical Fourier evaluation for all 3 VSH components per mode
             t = jnp.nan_to_num(t)
@@ -927,18 +992,28 @@ def evaluate_pulsations(m: MeshModel, t: float, use_numerical_derivative: bool =
             pulsation_magnitudes = flat_magnitudes.reshape(n_modes, 3)
             pulsation_velocity_magnitudes = flat_velocity_magnitudes.reshape(n_modes, 3)
 
+            # Quadrature series for travelling modes (unused by standing ones)
+            flat_quad = _quadrature_parameters(flat_params)
+            quadrature_magnitudes = evaluate_many_fouriers_for_value(
+                flat_periods, flat_quad[:, :, 0], flat_quad[:, :, 1], t).reshape(n_modes, 3)
+            quadrature_velocity_magnitudes = evaluate_many_fouriers_prim_for_value(
+                flat_periods, flat_quad[:, :, 0], flat_quad[:, :, 1], t).reshape(n_modes, 3)
+
         harmonic_params = m.spherical_harmonics_parameters
 
         # vmap over modes; magnitudes and magnitudes_prim are now (n_modes, 3)
         vert_offsets, pulsation_velocities = jax.vmap(
             _pulsation_displacements,
-            in_axes=(None, 0, 0, 0, None, 0, 0)
+            in_axes=(None, 0, 0, 0, None, 0, 0, 0, 0, 0)
         )(m, harmonic_params,
           pulsation_magnitudes,
           pulsation_velocity_magnitudes,
           m.radius,
           m.pulsation_axes,
-          m.pulsation_angles)
+          m.pulsation_angles,
+          quadrature_magnitudes,
+          quadrature_velocity_magnitudes,
+          _pulsation_travelling(m))
 
         combined_vertices = jnp.nan_to_num(jnp.sum(vert_offsets, axis=0))
         area_offsets, center_offsets = _pulsation_geometry_offsets(m, combined_vertices)

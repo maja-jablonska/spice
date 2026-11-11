@@ -126,7 +126,8 @@ Spots and pulsations
   (``inclination_to_los_axis(i, mesh.rotation_axis)``).
 - Spherical-harmonic spots and pulsation modes are indexed by order ``m`` and
   degree ``l`` with :math:`0 \le m \le l \le 10`. They are real harmonics, so
-  ``m != 0`` pulsation modes are standing waves.
+  ``m != 0`` pulsation modes are standing waves unless ``add_pulsation`` is given
+  ``travelling="prograde"`` (moving with the spin) or ``"retrograde"``.
 - ``evaluate_rotation`` turns the pulsation displacements and velocities with
   the surface, so ``evaluate_rotation(evaluate_pulsations(m, t), t)`` keeps the
   mode attached to the star (``t`` is in days for pulsations, seconds for

@@ -97,8 +97,9 @@ MeshModelNamedTuple = namedtuple("MeshModel",
                                   "occluded_areas", "los_vector",
                                   "max_pulsation_mode", "max_fourier_order", "spherical_harmonics_parameters",
                                   "pulsation_periods", "fourier_series_parameters",
-                                  "pulsation_axes", "pulsation_angles", "override_log_g"],
-                                 defaults=(False,))
+                                  "pulsation_axes", "pulsation_angles", "override_log_g",
+                                  "pulsation_travelling"],
+                                 defaults=(False, None))
 
 
 class MeshModel(Model, MeshModelNamedTuple):
@@ -186,6 +187,9 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     pulsation_axes: Float[Array, "n_puls_orders 3"]
     pulsation_angles: Float[Array, "n_puls_orders"]
+    # Per mode: 0 standing, -1 prograde, +1 retrograde (sense of azimuthal motion
+    # about rotation_axis; SPICE stars spin clockwise about it). None = all standing.
+    pulsation_travelling: Optional[Float[Array, "n_puls_orders"]]
 
     @property
     def areas(self) -> Float[Array, "n_mesh_elements"]:
@@ -417,5 +421,6 @@ class IcosphereModel(MeshModel):
                                      fourier_series_parameters=jnp.nan * jnp.ones(
                                          (harmonics_params.shape[0], 3, max_fourier_order, 2), dtype=_float_dtype()),
                                      pulsation_axes=_default_rotation_axis().reshape((1, 3)).repeat(harmonics_params.shape[0], axis=0),
-                                     pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=_float_dtype()))
+                                     pulsation_angles=jnp.zeros((harmonics_params.shape[0], 1), dtype=_float_dtype()),
+                                     pulsation_travelling=jnp.zeros(harmonics_params.shape[0], dtype=_float_dtype()))
         return model

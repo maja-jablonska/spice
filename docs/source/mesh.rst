@@ -228,6 +228,35 @@ This example pulsation will look like this:
 Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.
 
 
+Travelling (prograde and retrograde) modes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default a mode with :math:`m \neq 0` is a *standing* wave: the real part of
+:math:`Y_l^m` with fixed nodal lines, whose amplitude oscillates in time. Real
+non-radial modes travel in longitude, which is what produces moving bumps in
+line profiles. Pass ``travelling="prograde"`` (in the direction the star spins)
+or ``"retrograde"``:
+
+.. code-block:: python
+
+    from spice.models.mesh_transform import add_rotation, add_pulsation, evaluate_pulsations
+
+    m = add_rotation(m, 60.)            # add rotation first: modes use its axis
+    m = add_pulsation(
+        m, 4, 4, 0.2,                   # m = 4, l = 4, period 0.2 d
+        jnp.array([[[0.01, 0.]], [[0.01, 0.]], [[0., 0.]]]),
+        travelling="prograde",
+    )
+    snapshot = evaluate_pulsations(m, 0.05)
+
+A travelling mode is :math:`\mathrm{Re}[Y_l^m e^{\mp i\omega t}]` for each
+Fourier harmonic: the pattern keeps its shape and its peak displacement
+(the amplitude) and moves at :math:`\omega/m` in longitude about the mode axis.
+The frequency is in the frame of the stellar surface: evaluating pulsations
+before ``evaluate_rotation`` adds the rotation on top. Travelling modes need
+:math:`m > 0`. For an equator-on star, prograde bumps cross the line profile
+from blue to red and retrograde bumps from red to blue.
+
 Tilted Pulsation Axis
 ^^^^^^^^^^^^^^^^^^^^^
 
