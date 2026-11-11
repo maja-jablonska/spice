@@ -8,7 +8,7 @@ import os
 import warnings
 
 from spice.spectrum.flux_limb_darkening import apply_flux_limb_darkening
-from spice.spectrum.solar_parameters import SOLAR_PARAMETERS
+from spice.spectrum.solar_parameters import SOLAR_PARAMETERS, solar_value
 from spice.spectrum.spectrum_emulator import SpectrumEmulator
 
 
@@ -219,7 +219,7 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
             from .marcs_nodes import resolve_marcs_fe_h
             mode = getattr(interpolator, "marcs_fe_h_mode", "feh")
             parameter_values["marcs_fe_h"] = resolve_marcs_fe_h(parameter_values["feh"], mode)
-        parameters = np.array([parameter_values.get(name, SOLAR_PARAMETERS.get(name, 0.0)) for name in names])
+        parameters = np.array([parameter_values.get(name, solar_value(name)) for name in names])
         for i, name in enumerate(names):
             if name in parameter_values:
                 parameters[i] = parameter_values[name]

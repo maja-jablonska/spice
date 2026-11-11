@@ -29,7 +29,8 @@ def _import_h5py():
 
 # Parameter naming conventions to support flexible input formats
 METALLICITY_NAMES = ["m/h", "default_metals_h", "metals/h", "me/h",
-                     "[metals/h]", "[me/h]", "metallicity", "metals_h", "me_h"]
+                     "[metals/h]", "[me/h]", "metallicity", "metals_h", "me_h",
+                     "[m/h]", "m_h", "mh", "feh", "fe/h", "[fe/h]", "fe_h"]
 
 LOG_G_NAMES: List[str] = ['logg', 'log_g', 'log g',
                           'surface gravity',
@@ -111,6 +112,70 @@ def _interpolate_spectrum(log10_wavelengths, continuum_wavelengths, intensities,
 # Vectorize the interpolation function for multiple wavelengths
 interpolate_spectrum = jax.vmap(_interpolate_spectrum, in_axes=(None, None, None, None, None, None, 0))
 
+# Above this many cells the rows are treated as scattered rather than a
+# (possibly incomplete) rectilinear grid.
+_MAX_DENSE_GRID_CELLS = 20_000_000
+
+
+def _rectilinear_index(parameters: np.ndarray):
+    """Axes and a dense row lookup for grid rows lying on a rectilinear grid.
+
+    Returns ``(axes, lookup)`` with ``lookup[i0, i1, ...]`` the row index at
+    those axis nodes, or -1 where the grid has no model. Returns ``None`` when
+    the rows are too scattered for a dense lookup to be reasonable.
+    """
+    axes = [np.unique(parameters[:, j]) for j in range(parameters.shape[1])]
+    shape = tuple(len(a) for a in axes)
+    if int(np.prod(shape, dtype=np.float64)) > _MAX_DENSE_GRID_CELLS:
+        return None
+    lookup = -np.ones(shape, dtype=np.int32)
+    idx = tuple(np.searchsorted(axes[j], parameters[:, j]) for j in range(parameters.shape[1]))
+    lookup[idx] = np.arange(parameters.shape[0], dtype=np.int32)
+    return tuple(jnp.asarray(a) for a in axes), jnp.asarray(lookup)
+
+
+def _bracket(axis, value):
+    """Lower node index and fraction along one axis; clamps outside the axis."""
+    n = axis.shape[0]
+    if n == 1:
+        return jnp.int32(0), jnp.int32(0), jnp.zeros((), dtype=axis.dtype)
+    lo = jnp.clip(jnp.searchsorted(axis, value, side="right") - 1, 0, n - 2)
+    t = jnp.clip((value - axis[lo]) / (axis[lo + 1] - axis[lo]), 0.0, 1.0)
+    return lo, lo + 1, t
+
+
+def _multilinear_spectrum(axes, lookup, log10_wavelengths, continuum_wavelengths,
+                          intensities, continuum_intensities, parameters, log10_wavelength):
+    """Multilinear interpolation over the grid axes, linear in log10 wavelength.
+
+    Exact on grid nodes and for functions linear in each parameter. Corners
+    missing from an incomplete grid are dropped and the weights renormalised
+    (as in the zarr interpolators); outside the grid the edge node is used.
+    """
+    d = len(axes)
+    los, his, ts = zip(*[_bracket(axes[j], parameters[j]) for j in range(d)])
+    lo, hi, t = jnp.stack(los), jnp.stack(his), jnp.stack(ts)
+    corners = jnp.array(np.array(np.meshgrid(*[[0, 1]] * d, indexing="ij")).reshape(d, -1).T)
+    indices = jnp.where(corners == 0, lo, hi)                       # (2^d, d)
+    weights = jnp.prod(jnp.where(corners == 0, 1.0 - t, t), axis=1)  # (2^d,)
+    rows = lookup[tuple(indices.T)]
+    weights = jnp.where(rows >= 0, weights, 0.0)
+    weights = weights / jnp.where(jnp.sum(weights) > 0, jnp.sum(weights), 1.0)
+    rows = jnp.maximum(rows, 0)
+
+    def along_wavelength(grid_wl, spectra):
+        i = jnp.clip(jnp.searchsorted(grid_wl, log10_wavelength, side="right") - 1, 0, grid_wl.shape[0] - 2)
+        f = jnp.clip((log10_wavelength - grid_wl[i]) / (grid_wl[i + 1] - grid_wl[i]), 0.0, 1.0)
+        values = spectra[rows, i] * (1.0 - f) + spectra[rows, i + 1] * f
+        return jnp.sum(weights * values)
+
+    return jnp.array([along_wavelength(log10_wavelengths, intensities),
+                      along_wavelength(continuum_wavelengths, continuum_intensities)])
+
+
+multilinear_spectrum = jax.jit(jax.vmap(_multilinear_spectrum,
+                                        in_axes=(None, None, None, None, None, None, None, 0)))
+
 
 class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
     """
@@ -173,6 +238,16 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
                 raise ValueError(f"Unsupported file format: {grid_path}. Use .h5 or .pkl/.pickle")
         except Exception as e:
             raise RuntimeError(f"Failed to load grid from {grid_path}: {e}")
+
+        index = _rectilinear_index(np.asarray(self.parameters))
+        if index is None:
+            warnings.warn(
+                "Grid rows do not form a rectilinear grid; falling back to inverse-distance "
+                "weighting over all rows, which is NOT linear interpolation (off-node values are "
+                "biased toward the grid mean).")
+            self._axes, self._lookup = None, None
+        else:
+            self._axes, self._lookup = index
     
     def _load_h5_grid(self, grid_path: str):
         """Load grid data from an HDF5 file."""
@@ -233,6 +308,19 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
             self.continuum_intensities = self.intensities
             self.continuum_wavelengths = self.log10_wavelengths
     
+    def _interpolate(self, query: ArrayLike, log_wavelengths: ArrayLike) -> ArrayLike:
+        query = jnp.asarray(query)
+        if query.shape[-1] != self.parameters.shape[1]:
+            raise ValueError("Query parameters must match the grid parameter columns "
+                             "(including mu only when present)")
+        if self._axes is None:
+            return interpolate_spectrum(self.log10_wavelengths, self.continuum_wavelengths,
+                                        self.intensities, self.continuum_intensities,
+                                        self.parameters, query, log_wavelengths)
+        return multilinear_spectrum(self._axes, self._lookup, self.log10_wavelengths,
+                                    self.continuum_wavelengths, self.intensities,
+                                    self.continuum_intensities, query, jnp.asarray(log_wavelengths))
+
     @property
     def parameter_names(self) -> List[str]:
         """Get names of all parameters."""
@@ -285,47 +373,29 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
                     f"{list(self._parameter_names)} (temperature, gravity and metallicity also accept "
                     "the usual aliases, e.g. teff/Teff, logg, m/h; limb-darkening coefficients as ld)")
             parameters = normalised
-            # Extract Teff from various possible keys
-            teff = None
-            for key in TEFF_NAMES:
-                if key in parameters:
-                    teff = parameters[key]
-                    break
-            if teff is None:
-                teff = 5777.0  # Default solar Teff
-            
-            logg = None
-            for key in LOG_G_NAMES:
-                if key in parameters:
-                    logg = parameters[key]
-                    break
-            if logg is None:
-                logg = 4.44  # Default solar logg
-            
-            mh = None
-            for key in METALLICITY_NAMES:
-                if key in parameters:
-                    mh = parameters[key]
-                    break
-            if mh is None:
-                mh = 0.0  # Default solar metallicity
-            
-            # Support custom parameter sets beyond the standard teff, logg, [M/H]
-            if len(self._parameter_names) > 3:
-                custom_params = []
-                for param_name in self._parameter_names[3:]:
-                    if param_name in parameters:
-                        custom_params.append(parameters[param_name])
-                    else:
-                        # Use the midpoint of the grid range for missing parameters
-                        param_values = self.parameters[:, 3 + len(custom_params)]
-                        midpoint = (jnp.min(param_values) + jnp.max(param_values)) / 2
-                        custom_params.append(midpoint)
-                        warnings.warn(f"Parameter {param_name} not provided, using midpoint value: {midpoint}")
-                
-                return jnp.array([teff, logg, mh] + custom_params)
-            else:
-                return jnp.array([teff, logg, mh])
+
+            # Fill the grid's own columns, in the grid's own order. Temperature,
+            # gravity and metallicity columns also accept their aliases (so a
+            # 'feh' column takes 'm/h' and vice versa). Previously the result was
+            # always [teff, logg, m/h, ...] whatever the grid's order, and a grid
+            # column named e.g. 'feh' was never read.
+            categories = ((TEFF_NAMES, 5777.0), (LOG_G_NAMES, 4.44), (METALLICITY_NAMES, 0.0))
+            values = []
+            for column, name in enumerate(self._parameter_names):
+                lowered = name.lower() if isinstance(name, str) else name
+                if name in parameters:
+                    values.append(parameters[name])
+                    continue
+                category = next((c for c in categories if lowered in c[0]), None)
+                if category is not None:
+                    found = next((parameters[a] for a in category[0] if a in parameters), None)
+                    values.append(category[1] if found is None else found)
+                    continue
+                grid_values = self.parameters[:, column]
+                midpoint = (jnp.min(grid_values) + jnp.max(grid_values)) / 2
+                warnings.warn(f"Parameter {name} not provided, using midpoint value: {midpoint}")
+                values.append(midpoint)
+            return jnp.array(values)
         else:
             raise ValueError(
                 f"Parameters must be an array, list, or dictionary, got {type(parameters)}")
@@ -372,16 +442,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
             # Add mu to parameters for interpolation
             params_with_mu = jnp.hstack([parameters, jnp.atleast_1d(mu)])
             
-            # Perform interpolation
-            return interpolate_spectrum(
-                self.log10_wavelengths, 
-                self.continuum_wavelengths, 
-                self.intensities, 
-                self.continuum_intensities, 
-                self.parameters,
-                params_with_mu, 
-                log_wavelengths
-            )
+            return self._interpolate(params_with_mu, log_wavelengths)
         else:
             # Grid doesn't include mu - use limb darkening
             if limb_darkening_coeffs is None:
@@ -400,15 +461,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
             # Appending mu here would displace the wavelength in the query.
             
             # Perform disk center interpolation
-            disk_center_intensities = interpolate_spectrum(
-                self.log10_wavelengths, 
-                self.continuum_wavelengths, 
-                self.intensities, 
-                self.continuum_intensities, 
-                self.parameters,
-                parameters,
-                log_wavelengths
-            )
+            disk_center_intensities = self._interpolate(parameters, log_wavelengths)
             
             # Apply limb darkening to both line and continuum intensities
             ld_factor = self._limb_darkening_func(mu, limb_darkening_coeffs)
