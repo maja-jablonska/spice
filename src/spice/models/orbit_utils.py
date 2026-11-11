@@ -320,8 +320,10 @@ def solve_kepler_E(M, e, maxit=30, tol=1e-12):
     """Solve Kepler's equation M = E - e sin E (JAX, vectorized)."""
     # Wrap M near 0 for stability
     Mwrap = (M + jnp.pi) % (2*jnp.pi) - jnp.pi
-    # Good initial guess (Danby-ish)
-    E0 = Mwrap + e*jnp.sin(Mwrap)/(1.0 - jnp.sin(Mwrap + e) + jnp.sin(Mwrap))
+    # Danby (1988) starter, from which Newton converges for every e < 1. The
+    # previous rational starter landed far from the root near M ~ -1 rad for
+    # e >~ 0.92 and Newton then diverged (|E - e sin E - M| up to 1e12).
+    E0 = Mwrap + 0.85 * e * jnp.sign(jnp.sin(Mwrap))
 
     def body_fun(k, E):
         f  = E - e*jnp.sin(E) - Mwrap
@@ -433,11 +435,15 @@ def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
     """
     Estimates eclipse timestamps from Keplerian elements.
 
-    Inputs are in SI units, except for:
+    Units:
+     - m1, m2: masses in solar masses; R1, R2: radii in solar radii
      - P: period in years
      - Tperi: time of periastron passage in years
      - angles (inc, omega, Omega) are in radians
-     - los_vector: line-of-sight vector (defaults to [0,0,1])
+     - G: gravitational constant in SI
+     - los_vector: observer -> star line of sight (defaults to [0,0,-1], the
+       convention shared with MeshModel, Binary and get_orbit_jax; the old
+       [0,0,1] default swapped primary and secondary eclipses)
 
     Returns:
       t_mid_primary, t1_p, t2_p, t3_p, t4_p,
@@ -446,7 +452,7 @@ def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
     Any missing event is NaN.
     """
     if los_vector is None:
-        los_vector = jnp.array([0.0, 0.0, 1.0])
+        los_vector = jnp.array([0.0, 0.0, -1.0])
     los_vector = los_vector / jnp.linalg.norm(los_vector)
 
     m1 = m1 * SOLAR_MASS_KG
@@ -472,13 +478,13 @@ def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
 
     zsign = jnp.sign(r_rel_dot_los)  # <0: secondary in front (primary eclipse)
 
-    # Identify local minima (exclude endpoints)
-    # A point k is a minimum if rho[k] <= rho[k-1] and rho[k] <= rho[k+1]
+    # Identify local minima. The scan covers exactly one period with
+    # endpoint=False, so the first and last samples are neighbours and the
+    # rolled comparison is correct at the ends too. (Excluding the ends used to
+    # drop any eclipse within one sample of periastron, e.g. omega = 90 deg.)
     rho_prev = jnp.roll(rho, 1)
     rho_next = jnp.roll(rho, -1)
     is_min = (rho <= rho_prev) & (rho <= rho_next)
-    # avoid rolled comparisons at the edges
-    is_min = is_min.at[0].set(False).at[-1].set(False)
 
     # Split candidates by front/back
     is_front = (zsign < 0) & is_min
@@ -497,10 +503,12 @@ def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
     has_back  = jnp.isfinite(jnp.where(i_back  < nscan, rho_back[i_back],  big)) & (rho_back[i_back]  < big)
 
     # Parabolic refinement (rho^2) around the chosen minima
+    dt = P_sec / nscan
+
     def refine(i):
-        i0 = jnp.clip(i, 1, nscan-2)
-        t0, t1, t2 = ts[i0-1], ts[i0], ts[i0+1]
-        y0, y1, y2 = rho[i0-1]**2, rho[i0]**2, rho[i0+1]**2
+        # Periodic neighbours, so a minimum at either end is refined correctly.
+        t0, t1, t2 = ts[i] - dt, ts[i], ts[i] + dt
+        y0, y1, y2 = rho[(i - 1) % nscan]**2, rho[i]**2, rho[(i + 1) % nscan]**2
         t_mid = parabola_vertex_t(t0, t1, t2, y0, y1, y2)
         # Evaluate r,v at refined time
         r_m, v_m = relative_pos_vel_at(t_mid, params)

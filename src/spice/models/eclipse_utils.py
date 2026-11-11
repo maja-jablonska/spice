@@ -299,7 +299,8 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
             Keplerian ``Binary`` only; ignored if ``times`` is given. Defaults to 100.
         times (array_like, optional): Explicit scan window in **years** (the
             ``add_orbit`` clock), strictly increasing. Keplerian ``Binary`` only;
-            defaults to one full period ``[0, P]``.
+            defaults to one full period: every eclipse whose mid time lies in ``[0, P)``,
+            including one that straddles ``t = 0``.
         los_vector (array_like, optional): Line-of-sight vector defining the sky
             plane. Keplerian ``Binary`` only; defaults to ``binary.body1.los_vector``
             — the same vector used by ``add_orbit`` and the occlusion resolution,
@@ -341,8 +342,13 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
         return find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
                              tol=tol, sample_factor=sample_factor, want_total=want_total)
 
-    if times is None:
-        times = np.linspace(0.0, float(binary.P), int(n_points))
+    default_window = times is None
+    if default_window:
+        # Pad the period by a quarter on each side so an eclipse straddling
+        # t = 0 (or t = P) is bracketed by its ingress; only eclipses whose mid
+        # time falls in [0, P) are returned below, so each is reported once.
+        P = float(binary.P)
+        times = np.linspace(-0.25 * P, 1.25 * P, int(1.5 * n_points))
     else:
         times = np.asarray(times, dtype=float)
 
@@ -366,5 +372,11 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
     pos2 = np.asarray(orbit[4]) / SOLAR_RAD_M @ basis
     vel2 = np.asarray(orbit[5]) * kms_to_solrad_per_year @ basis
 
-    return find_eclipses(times, pos1, vel1, pos2, vel2, R1, R2,
-                         tol=tol, sample_factor=sample_factor, want_total=want_total)
+    eclipses = find_eclipses(times, pos1, vel1, pos2, vel2, R1, R2,
+                             tol=tol, sample_factor=sample_factor, want_total=want_total)
+    if default_window:
+        # The same eclipse can be found at both ends (mid ~ 0 and ~ P); keep the
+        # copy inside [0, P) with a round-off tolerance.
+        eps = 1e-6 * P
+        eclipses = [ecl for ecl in eclipses if -eps <= ecl["mid"] < P - eps]
+    return eclipses
