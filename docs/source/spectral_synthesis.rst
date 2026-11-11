@@ -157,6 +157,66 @@ segments track changes in resolving power more closely. Both functions
 truncate Gaussian support at four sigma, capped at 2046 pixels per side
 (the single-resolution function also accepts ``window_size``).
 
+
+.. _nonradial-lpv:
+
+Line-profile variations of non-radial pulsations
+------------------------------------------------
+
+A travelling non-radial mode (see
+:ref:`travelling-modes`) moves bumps across a
+rotationally broadened line. Synthesising the line through one pulsation period
+and subtracting the mean profile shows them as diagonal stripes: prograde bumps
+cross the profile from blue to red, retrograde ones from red to blue. This is
+the standard spectroscopic signature of the mode's azimuthal order and sense.
+
+.. code-block:: python
+
+    import numpy as np
+    import jax.numpy as jnp
+    from spice.models import IcosphereModel
+    from spice.models.mesh_transform import add_rotation, add_pulsation, evaluate_pulsations
+    from spice.spectrum import GaussianLineEmulator
+    from spice.spectrum.spectrum import simulate_observed_flux
+
+    emu = GaussianLineEmulator(line_centers=[5500.], line_widths=[0.05], line_depths=[0.6])
+    star = IcosphereModel.construct(8000, 2.0, 1.5, emu.to_parameters(), emu.parameter_names)
+    star = add_rotation(star, 60.)               # equator-on by default
+
+    period = 0.2                                 # days
+    wavelengths = jnp.linspace(5498.6, 5501.4, 600)
+    mode = jnp.array([[[0.01, 0.]], [[0.01, 0.]], [[0., 0.]]])   # radial + horizontal
+    phases = np.linspace(0., 1., 40, endpoint=False)
+
+    def residual_spectra(travelling):
+        model = add_pulsation(star, 4, 4, period, mode, travelling=travelling)
+        profiles = []
+        for phase in phases:
+            flux = simulate_observed_flux(emu.intensity,
+                                          evaluate_pulsations(model, phase * period),
+                                          jnp.log10(wavelengths))
+            profiles.append(np.asarray(flux[:, 0] / flux[:, 1]))
+        profiles = np.array(profiles)
+        return profiles - profiles.mean(axis=0)
+
+    prograde = residual_spectra("prograde")
+    retrograde = residual_spectra("retrograde")
+
+.. image:: ../img/travelling_mode_lpv.png
+   :width: 750
+   :alt: Line-profile residuals of prograde and retrograde l=m=4 modes
+   :class: only-light
+
+.. image:: ../img/travelling_mode_lpv_dark.png
+   :width: 750
+   :alt: Line-profile residuals of prograde and retrograde l=m=4 modes
+   :class: only-dark
+
+The dashed lines mark :math:`\pm v \sin i`. The mode frequency is the one in
+the frame of the stellar surface; to model an observed frequency in the
+inertial frame, add the rotational term :math:`m\Omega` yourself (Coriolis
+effects on the mode shape are not included).
+
 Performance notes
 -----------------
 

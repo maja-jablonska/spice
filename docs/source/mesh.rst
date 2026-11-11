@@ -228,6 +228,93 @@ This example pulsation will look like this:
 Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the effect of pulsation on the mesh.
 
 
+
+.. _travelling-modes:
+
+Travelling (prograde and retrograde) modes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default a mode with :math:`m \neq 0` is a *standing* wave: the real part of
+:math:`Y_l^m` with fixed nodal lines, whose amplitude oscillates in time. Real
+non-radial modes travel in longitude, which is what produces moving bumps in
+line profiles. Pass ``travelling="prograde"`` (in the direction the star spins)
+or ``"retrograde"``:
+
+.. code-block:: python
+
+    import jax.numpy as jnp
+    from spice.models import IcosphereModel
+    from spice.models.mesh_transform import add_rotation, add_pulsation, evaluate_pulsations
+
+    star = IcosphereModel.construct(5000, 2.0, 1.5, jnp.array([7500., 4.]), ["teff", "logg"])
+    star = add_rotation(star, 60.)       # add rotation first: modes are built about its axis
+
+    period = 0.2                         # days
+    radial = jnp.array([[[0.02, 0.]], [[0., 0.]], [[0., 0.]]])   # 2% radial amplitude
+
+    standing = add_pulsation(star, 4, 4, period, radial)
+    prograde = add_pulsation(star, 4, 4, period, radial, travelling="prograde")
+
+    snapshot = evaluate_pulsations(prograde, 0.05)   # t in days
+
+A travelling mode is :math:`\mathrm{Re}[Y_l^m e^{\mp i\omega t}]` for each
+Fourier harmonic: the pattern keeps its shape and its peak displacement
+(the amplitude) and moves at :math:`\omega/m` in longitude about the mode axis.
+The frequency is in the frame of the stellar surface: evaluating pulsations
+before ``evaluate_rotation`` adds the rotation on top. Travelling modes need
+:math:`m > 0`.
+
+The radial displacement of the two models above, mapped in longitude and
+latitude about the rotation axis, at four times one sixteenth of a period
+apart. The standing mode fades in place; the prograde mode keeps its amplitude
+and drifts toward decreasing longitude, which is the direction SPICE stars spin
+(clockwise about ``rotation_axis``):
+
+.. code-block:: python
+
+    import numpy as np
+    from spice.models.utils import rotation_axis_frame
+
+    # longitude/latitude of each face about the rotation axis
+    xyz = np.asarray(star.d_centers) @ np.asarray(rotation_axis_frame(star.rotation_axis))
+    lon = np.degrees(np.arctan2(xyz[:, 1], xyz[:, 0]))
+    lat = np.degrees(np.arcsin(xyz[:, 2] / np.linalg.norm(xyz, axis=1)))
+    r_hat = np.asarray(star.d_centers) / np.linalg.norm(np.asarray(star.d_centers), axis=1, keepdims=True)
+
+    def radial_displacement(model, t):
+        offsets = np.asarray(evaluate_pulsations(model, t).center_pulsation_offsets)
+        return np.einsum("ij,ij->i", offsets, r_hat) / float(star.radius)
+
+.. image:: ../img/travelling_mode_snapshots.png
+   :width: 800
+   :alt: Standing vs prograde l=m=4 mode in longitude and latitude
+   :class: only-light
+
+.. image:: ../img/travelling_mode_snapshots_dark.png
+   :width: 800
+   :alt: Standing vs prograde l=m=4 mode in longitude and latitude
+   :class: only-dark
+
+Several modes can be added at once with
+:func:`~spice.models.mesh_transform.add_pulsations`; ``travelling`` takes one
+entry per mode (``None`` keeps that mode standing):
+
+.. code-block:: python
+
+    from spice.models.mesh_transform import add_pulsations
+
+    modes = add_pulsations(
+        star,
+        m_orders=jnp.array([2, 3, 0]),
+        l_degrees=jnp.array([2, 3, 2]),
+        periods=jnp.array([0.21, 0.17, 0.25]),
+        fourier_series_parameters=jnp.stack([radial, 0.5 * radial, 0.5 * radial]),
+        travelling=["prograde", "retrograde", None],   # the m = 0 mode must stay standing
+    )
+
+For line-profile variations produced by these modes, see
+:ref:`nonradial-lpv`.
+
 Tilted Pulsation Axis
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -338,7 +425,7 @@ Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and 
         4, # l degree
         param_delta=9300, # difference in the parameter value between the spot and the background
         param_index=0, # index of the parameter in the parameters array
-        tilt_axis=jnp.array([0., 1., 0.]),
+        tilt_axis=jnp.array([1., 0., 0.]),  # perpendicular to the default +y rotation axis
         tilt_angle=45.  # tilt angle in degrees
     )
 
@@ -357,11 +444,12 @@ or add it as a circular spot:
 .. code-block:: python
 
     from spice.models.spots import add_spot
+    from spice.models.utils import lat_to_theta, lon_to_phi
 
     m_spot = add_spot(
         mesh=m, # Model instance
-        spot_center_theta=0.5, # spot center in spherical coordinates, in radians
-        spot_center_phi=0.5, # spot center in spherical coordinates, in radians
+        spot_center_theta=lat_to_theta(30.), # colatitude from the rotation axis, in radians
+        spot_center_phi=lon_to_phi(-90.), # longitude about the rotation axis, in radians (-90 deg faces the default observer)
         spot_radius=50., # spot radius in degrees
         parameter_delta=1000, # difference in the parameter value between the spot and the background
         parameter_index=0, # index of the parameter in the parameters array
@@ -428,18 +516,19 @@ or by adding two circular spots:
 .. code-block:: python
 
     from spice.models.spots import add_spots
+    from spice.models.utils import lat_to_theta, lon_to_phi
 
     m_spots = add_spots(
         mesh=m, # Model instance
-        spot_center_thetas=jnp.array([0.5, 1.5]), # spot center in spherical coordinates, in radians
-        spot_center_phis=jnp.array([0.5, 0.]), # spot center in spherical coordinates, in radians
+        spot_center_thetas=lat_to_theta(jnp.array([35., -20.])), # colatitudes from the rotation axis, in radians
+        spot_center_phis=lon_to_phi(jnp.array([-60., -120.])), # longitudes about the rotation axis, in radians
         spot_radii=jnp.array([20., 20.]), # spot radius in degrees
         parameter_deltas=jnp.array([1000., 1000.]), # difference in the parameter value between the spot and the background
         parameter_indices=jnp.array([0, 0]), # index of the parameter in the parameters array
         smoothness=jnp.array([0.5, 0.5]) # smoothness of the spot edges
     )
 
-This example adds two spots to the mesh. The spots are defined by their center in spherical coordinates, their radius, and a differential parameter that quantifies the change induced by the spot.
+This example adds two spots to the mesh. The spots are defined by their center (colatitude and longitude measured about the star's rotation axis), their radius, and a differential parameter that quantifies the change induced by the spot.
 
 .. image:: ../img/temp_two_spots.png
    :width: 600

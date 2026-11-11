@@ -407,6 +407,60 @@ def spherical_harmonic_toroidal_with_tilt(m, n, coordinates,
     return jnp.matmul(rotated_toroidal, r_matrix.T)
 
 
+# --- Complex spherical-harmonic bases (travelling pulsation modes) -----------
+# The real bases above use Re(Y_l^m) ~ P_l^m cos(m phi). A travelling mode also
+# needs Im(Y_l^m) ~ P_l^m sin(m phi): Re[Y e^{-i s w t}] = Re(Y) cos wt + s Im(Y) sin wt.
+# One complex evaluation gives both, and its real part is computed with exactly
+# the same operations as the real functions.
+
+@jax.jit
+def spherical_harmonic_complex(m, n, coordinates):
+    """Complex Y_l^m (orthonormal; theta = colatitude about +z)."""
+    polar_coordinates = mesh_polar_vertices(coordinates)
+    m_array = (m * jnp.ones_like(polar_coordinates[:, 0])).astype(int)
+    n_array = (n * jnp.ones_like(polar_coordinates[:, 1])).astype(int)
+    return jax.scipy.special.sph_harm_y(n_array, m_array,
+                                        polar_coordinates[:, 0], polar_coordinates[:, 1],
+                                        n_max=MAX_SPHERICAL_HARMONIC_DEGREE)
+
+
+@jax.jit
+def spherical_harmonic_tangential_gradient_complex(m, n, coordinates):
+    """Complex counterpart of :func:`spherical_harmonic_tangential_gradient`."""
+    eps = 1e-4
+    dx = jnp.array([eps, 0.0, 0.0])
+    dy = jnp.array([0.0, eps, 0.0])
+    dz = jnp.array([0.0, 0.0, eps])
+    dYdx = (spherical_harmonic_complex(m, n, coordinates + dx) -
+            spherical_harmonic_complex(m, n, coordinates - dx)) / (2.0 * eps)
+    dYdy = (spherical_harmonic_complex(m, n, coordinates + dy) -
+            spherical_harmonic_complex(m, n, coordinates - dy)) / (2.0 * eps)
+    dYdz = (spherical_harmonic_complex(m, n, coordinates + dz) -
+            spherical_harmonic_complex(m, n, coordinates - dz)) / (2.0 * eps)
+    grad_cart = jnp.stack([dYdx, dYdy, dYdz], axis=-1)
+    r_hat = coordinates / (jnp.linalg.norm(coordinates, axis=1, keepdims=True) + 1e-10)
+    radial_component = jnp.sum(grad_cart * r_hat, axis=1, keepdims=True) * r_hat
+    return grad_cart - radial_component
+
+
+def vector_spherical_harmonic_bases_complex(m, n, coordinates, tilt_axis=None,
+                                            tilt_angle=0., frame_axis=None):
+    """Complex (Y, grad_s Y, r_hat x grad_s Y) in the (tilted) pattern frame.
+
+    Returns ``(Y, S, T)`` with shapes ``(n,)``, ``(n, 3)``, ``(n, 3)``; vectors are
+    rotated back to mesh coordinates. Real parts equal
+    :func:`spherical_harmonic_with_tilt`, :func:`spherical_harmonic_gradient_with_tilt`
+    and :func:`spherical_harmonic_toroidal_with_tilt`.
+    """
+    r_matrix = _tilted_frame(tilt_axis, tilt_angle, frame_axis)
+    rotated = jnp.matmul(coordinates, r_matrix)
+    Y = spherical_harmonic_complex(m, n, rotated)
+    S_rot = spherical_harmonic_tangential_gradient_complex(m, n, rotated)
+    r_hat = rotated / (jnp.linalg.norm(rotated, axis=1, keepdims=True) + 1e-10)
+    T_rot = jnp.cross(r_hat, S_rot)
+    return Y, jnp.matmul(S_rot, r_matrix.T), jnp.matmul(T_rot, r_matrix.T)
+
+
 @jax.jit
 def evaluate_fourier_for_value(P: float, d: Float[Array, "1 n_orders"], phi: Float[Array, "1 n_orders"], timestamp: float, d0: float = 0.0) -> float:
     """
