@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import h5py
 import pickle
 import warnings
 from typing import List, Optional, Dict, Union, Tuple
@@ -11,6 +10,22 @@ from spice.spectrum.spectrum_emulator import SpectrumEmulator
 from spice.spectrum.utils import linear_multivariate_interpolation
 from spice.utils import log as _log
 from overrides import override
+
+
+def _import_h5py():
+    """Import h5py only when an HDF5 grid is read or written.
+
+    Keeps ``import spice.spectrum.user_spectrum_interpolator`` (and pickle
+    grids) working when h5py is missing or built against another NumPy.
+    """
+    try:
+        import h5py
+    except Exception as e:
+        raise ImportError(
+            "h5py is required to read or write .h5 spectrum grids "
+            f"(import failed: {e}). Install or rebuild it with `pip install h5py`."
+        ) from e
+    return h5py
 
 # Parameter naming conventions to support flexible input formats
 METALLICITY_NAMES = ["m/h", "default_metals_h", "metals/h", "me/h",
@@ -161,6 +176,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
     
     def _load_h5_grid(self, grid_path: str):
         """Load grid data from an HDF5 file."""
+        h5py = _import_h5py()
         with h5py.File(grid_path, 'r') as f:
             # Required fields
             required_keys = ['parameters', 'sp_intensity', 'log10_sp_wave']
@@ -445,6 +461,7 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
             continuum_intensities_array = intensities_array
         
         # Save to HDF5 file
+        h5py = _import_h5py()
         with h5py.File(output_path, 'w') as f:
             f.create_dataset('parameters', data=parameters_array)
             f.create_dataset('sp_intensity', data=intensities_array)

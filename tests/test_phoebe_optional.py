@@ -1,6 +1,8 @@
 """Smoke tests must fail on broken core imports and skip absent extras."""
 import pytest
 
+from tests.phoebe_helpers import import_phoebe_or_skip
+
 
 def test_spectrum_functionality():
     from spice.spectrum import Blackbody, SpectrumEmulator, simulate_observed_flux
@@ -29,10 +31,41 @@ def test_basic_functionality():
 
 
 def test_phoebe_functionality():
-    phoebe = pytest.importorskip("phoebe", reason="PHOEBE is an optional extra")
+    phoebe = import_phoebe_or_skip()
     from spice.models.phoebe_utils import PHOEBE_AVAILABLE
 
     assert PHOEBE_AVAILABLE
     bundle = phoebe.default_binary()
     assert "primary" in bundle.components
     assert "secondary" in bundle.components
+
+
+def test_broken_phoebe_install_is_treated_as_unavailable(monkeypatch):
+    """A PHOEBE that is installed but fails on import with a non-ImportError
+    (e.g. astropy too old for NumPy: AttributeError on np.in1d) must not break
+    spice.models.phoebe_utils / phoebe_model."""
+    import importlib
+    import importlib.abc
+    import sys
+
+    class _BrokenPhoebeFinder(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name == "phoebe" or name.startswith("phoebe."):
+                raise AttributeError("module 'numpy' has no attribute 'in1d'")
+            return None
+
+    saved = {name: sys.modules[name] for name in
+             ("phoebe", "spice.models.phoebe_utils", "spice.models.phoebe_model")
+             if name in sys.modules}
+    for name in ("phoebe", "spice.models.phoebe_utils", "spice.models.phoebe_model"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_BrokenPhoebeFinder(), *sys.meta_path])
+    try:
+        phoebe_utils = importlib.import_module("spice.models.phoebe_utils")
+        assert phoebe_utils.PHOEBE_AVAILABLE is False
+        assert phoebe_utils.phoebe is None
+        importlib.import_module("spice.models.phoebe_model")
+    finally:
+        for name in ("spice.models.phoebe_utils", "spice.models.phoebe_model"):
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)

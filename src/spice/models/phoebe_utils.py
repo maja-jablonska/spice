@@ -11,7 +11,11 @@ try:
     PHOEBE_AVAILABLE = True
     # Re-apply: phoebe configures logging during import and may reset the level.
     _logging.getLogger("PASSBANDS").setLevel(_logging.ERROR)
-except ImportError:
+except Exception:
+    # Broad on purpose, matching binary.py and mesh_transform.py: a PHOEBE
+    # install that is present but broken (e.g. an astropy too old for the
+    # installed NumPy raises AttributeError on import) must not take down
+    # spice.models.
     PHOEBE_AVAILABLE = False
     phoebe = None
 
