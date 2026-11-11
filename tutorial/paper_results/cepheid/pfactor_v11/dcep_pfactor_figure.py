@@ -52,8 +52,9 @@ def main():
                 label=f"{label} — {method}: $p$ = {r['p']:.3f}")
         print(f"{label:16s} {method:9s} p = {r['p']:.3f} (rms {r['rms_kms']:.2f} km/s, {r['n']} phases)")
     ax.set_xlabel("phase", fontsize=10); ax.set_ylabel(r"velocity relative to phase 0 [km$\,$s$^{-1}$]", fontsize=10)
-    ax.set_xlim(-0.04, 1.04); ax.set_ylim(top=1.65 * ax.get_ylim()[1])   # headroom so the legend sits above the curves
-    ax.legend(loc="upper left", fontsize=8.5, frameon=False); ax.tick_params(labelsize=9)
+    ax.set_xlim(-0.04, 1.04)
+    ax.legend(loc="upper left", fontsize=6.5, frameon=False, handlelength=1.5, labelspacing=0.25, borderaxespad=0.2)
+    ax.tick_params(labelsize=9)
     fig.tight_layout(); fig.savefig(a.out)
     print("wrote", a.out)
 
