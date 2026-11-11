@@ -1,12 +1,12 @@
 """Download the data behind the SPICE paper from Hugging Face to the paths the paper scripts expect.
 
-The files live in the public dataset https://huggingface.co/datasets/mjablonska/spice-paper-data (revision v1.0):
+The files live in the public dataset https://huggingface.co/datasets/mjablonska/spice-paper-data (revision v1.1):
 
     kochukhov2017_fe_lte/   LTE Fe grid of the spotted-star test (Sect. 3.1) and its synthesised profiles
     dcep/                   delta Cep literature-model runs and the synthetic p-factor spectra (Sect. 3.2)
     hbeta/                  Turbospectrum and emulator spectra over H-beta (Appendix F, Figs. F1-F2)
 
-    python tutorial/paper_results/fetch_paper_data.py [--only kochukhov dcep hbeta] [--revision v1.0]
+    python tutorial/paper_results/fetch_paper_data.py [--only kochukhov dcep hbeta] [--revision v1.1]
 
 Needs huggingface_hub (pip install "stellar-spice[huggingface]"). Files already present are skipped.
 """
@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 
 REPO_ID = "mjablonska/spice-paper-data"
-REVISION = "v1.0"
+REVISION = "v1.1"
 ROOT = Path(__file__).resolve().parents[2]          # repository root
 PR = ROOT / "tutorial" / "paper_results"
 
@@ -27,8 +27,9 @@ FILES = {
         "kochukhov2017_fe_lte/kochukhov2017_fe_lte_spectra.pkl": PR / "spots" / "kochukhov2017_fe_lte_spectra.pkl",
     },
     "dcep": {
-        **{f"dcep/literature_models/dcep_v12V13_{a}_{b}_p3.pkl": PR / "cepheid" / "dcep_out" / f"dcep_v12V13_{a}_{b}_p3.pkl"
+        **{f"dcep/literature_models/dcep_v12x150_{a}_{b}_p3.pkl": PR / "cepheid" / "dcep_out" / f"dcep_v12x150_{a}_{b}_p3.pkl"
            for a in ("own", "all") for b in ("trahin", "luck")},
+        "dcep/literature_models/dcep_v12x150_own_trahin_p3_vmacpc.pkl": PR / "cepheid" / "dcep_out" / "dcep_v12x150_own_trahin_p3_vmacpc.pkl",
         # synth_paper_atm / lin0 are reached through the symlinks in pfactor_v11/out_v120_m009/
         "dcep/pfactor_synthesis/synth_paper_atm.npz": PR / "cepheid" / "pfactor_v11" / "out_m009" / "synth_paper_atm.npz",
         "dcep/pfactor_synthesis/synth_paper_lin0.npz": PR / "cepheid" / "pfactor_v11" / "out_m009" / "synth_paper_lin0.npz",
