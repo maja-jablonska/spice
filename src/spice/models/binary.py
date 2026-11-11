@@ -1,3 +1,4 @@
+import warnings
 import jax.numpy as jnp
 from functools import partial
 import jax
@@ -42,12 +43,49 @@ DEFAULT_N_NEIGHBOURS = 32
 # TZ For geometry, k=8 loses 2.6% of the blocked flux at 5120 faces and 3.1% at
 # 20480, while k>=20 is accurate to 0.04%. See tests/test_occlusion_accuracy.py.
 MIN_N_NEIGHBOURS = 24
-# Upper bound on the automatic estimate. The old code capped at 64 inline; the
-# cap never engaged because the estimate was collapsing rather than growing.
+# Upper bound on the automatic estimate (memory: the clip work is n_faces * k).
+# When the target-side estimate exceeds it -- a small, finely meshed occluder in
+# front of coarse faces, e.g. a transit -- the search runs from the occluder side
+# instead (see _choose_occlusion_search), where k stays small. Capping the
+# target-side search used to drop most occluder faces: an Rp/R = 0.1 transit
+# (5120-face planet, 320-face star) came out 62% too shallow.
 MAX_N_NEIGHBOURS = 256
 
 def zero_tree(points_shape: Tuple[int, int]) -> ArrayLike:
     return jk.build_tree(jnp.zeros(points_shape))
+
+
+def _raw_n_neighbours(occluded: Model, occluder: Model, safety: float = 2.0) -> float:
+    """Unclipped neighbour estimate for a search from ``occluded``'s faces."""
+    visible = occluder.mus > 0
+    n_visible = jnp.sum(visible)
+    projected_area = jnp.sum(jnp.where(visible, occluder.cast_areas, 0.0))
+    r_occluded = jnp.max(occluded.cast_vertex_bounding_circle_radii)
+    k = float(safety * jnp.pi * jnp.square(r_occluded) * n_visible / projected_area)
+    return k if np.isfinite(k) else float(DEFAULT_N_NEIGHBOURS)
+
+
+def _choose_occlusion_search(occluded: Model, occluder: Model) -> Tuple[int, bool]:
+    """Pick the search direction with less clipping work.
+
+    Returns ``(k, from_occluder)``. Searching from the occluded faces costs
+    ``n_occluded * k_target``; from the occluder faces ``n_occluder * k_occluder``.
+    Both find the same overlapping pairs, so the cheaper one is used; it is also
+    the one whose ``k`` stays under :data:`MAX_N_NEIGHBOURS`.
+    """
+    k_target = _raw_n_neighbours(occluded, occluder)
+    k_occluder = _raw_n_neighbours(occluder, occluded)
+    n_occluded = occluded.faces.shape[0]
+    n_occluder = occluder.faces.shape[0]
+    from_occluder = (k_target > MAX_N_NEIGHBOURS
+                     and n_occluder * k_occluder < n_occluded * k_target)
+    k = k_occluder if from_occluder else k_target
+    if k > MAX_N_NEIGHBOURS:
+        warnings.warn(
+            f"Occlusion needs ~{k:.0f} neighbours per face but is capped at "
+            f"{MAX_N_NEIGHBOURS}; eclipses may be too shallow. Use more similar "
+            "mesh resolutions for the two bodies.", RuntimeWarning, stacklevel=3)
+    return int(np.clip(np.ceil(k), MIN_N_NEIGHBOURS, MAX_N_NEIGHBOURS)), bool(from_occluder)
 
 
 def _estimate_n_neighbours(occluded: Model, occluder: Model,
@@ -88,12 +126,7 @@ def _estimate_n_neighbours(occluded: Model, occluder: Model,
     # is the unit-sphere area (it sums to 4*pi for any radius), so pairing it
     # with the physically-scaled radius inflates the estimate by R^2 -- 777
     # instead of 51 for the 8.28 R_sun component.
-    visible = occluder.mus > 0
-    n_visible = jnp.sum(visible)
-    projected_area = jnp.sum(jnp.where(visible, occluder.cast_areas, 0.0))
-    r_occluded = jnp.max(occluded.cast_vertex_bounding_circle_radii)
-    k = safety * jnp.pi * jnp.square(r_occluded) * n_visible / projected_area
-    k = float(k) if np.isfinite(float(k)) else float(DEFAULT_N_NEIGHBOURS)
+    k = _raw_n_neighbours(occluded, occluder, safety)
     return int(np.clip(np.ceil(k), MIN_N_NEIGHBOURS, MAX_N_NEIGHBOURS))
 
 
@@ -130,6 +163,10 @@ class Binary(NamedTuple):
     
     n_neighbours1: int
     n_neighbours2: int
+    # Search occlusion from the occluder's faces (see _choose_occlusion_search).
+    # ``occlusion_from_occluder1`` goes with ``n_neighbours1`` (body1 occluding body2).
+    occlusion_from_occluder1: bool = False
+    occlusion_from_occluder2: bool = False
 
     @classmethod
     def from_bodies(cls, body1: Model, body2: Model, n_neighbours1: Optional[int] = None, n_neighbours2: Optional[int] = None) -> "Binary":
@@ -146,15 +183,18 @@ class Binary(NamedTuple):
         # ``n_neighbours1`` is used when body2 is the occluded body (see
         # _evaluate_orbit), so it is sized from body2's face size against body1's
         # face density -- and vice versa.
+        # An explicit count keeps the classic (occluded-side) search.
+        from_occluder1 = from_occluder2 = False
         if n_neighbours1 is None:
-            n_neighbours1 = _estimate_n_neighbours(body2, body1)
+            n_neighbours1, from_occluder1 = _choose_occlusion_search(body2, body1)
         if n_neighbours2 is None:
-            n_neighbours2 = _estimate_n_neighbours(body1, body2)
+            n_neighbours2, from_occluder2 = _choose_occlusion_search(body1, body2)
 
         return cls(body1, body2, 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                    jnp.zeros_like(body1.centers), jnp.zeros_like(body2.centers),
                    jnp.zeros_like(body1.velocities), jnp.zeros_like(body2.velocities),
-                   int(n_neighbours1), int(n_neighbours2))
+                   int(n_neighbours1), int(n_neighbours2),
+                   bool(from_occluder1), bool(from_occluder2))
 
 
 @tree_util.register_pytree_node_class
@@ -349,8 +389,9 @@ def _interpolate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
 
 
 
-@partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2"))
-def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[Model, Model]:
+@partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2", "from_occluder1", "from_occluder2"))
+def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighbors2: int,
+                    from_occluder1: bool = False, from_occluder2: bool = False) -> Tuple[Model, Model]:
     """Evaluate the orbit at a specific time.
 
     Args:
@@ -363,13 +404,14 @@ def _evaluate_orbit(binary: Binary, time: ArrayLike, n_neighbors1: int, n_neighb
     body1, body2 = _interpolate_orbit(binary, time)
 
     # Resolve occlusion using KD-trees
-    body1 = resolve_occlusion(body1, body2, n_neighbors=n_neighbors2)
-    body2 = resolve_occlusion(body2, body1, n_neighbors=n_neighbors1)
+    body1 = resolve_occlusion(body1, body2, n_neighbors=n_neighbors2, from_occluder=from_occluder2)
+    body2 = resolve_occlusion(body2, body1, n_neighbors=n_neighbors1, from_occluder=from_occluder1)
     
     return body1, body2
 
-@partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2"))
-def v_evaluate_orbit_stacked(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[Model, Model]:
+@partial(jax.jit, static_argnames=("n_neighbors1", "n_neighbors2", "from_occluder1", "from_occluder2"))
+def v_evaluate_orbit_stacked(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int,
+                             from_occluder1: bool = False, from_occluder2: bool = False) -> Tuple[Model, Model]:
     """Evaluate the orbit at multiple times, returning stacked-pytree models.
 
     Each leaf of the returned models has a leading dimension of ``len(times)``.
@@ -377,11 +419,13 @@ def v_evaluate_orbit_stacked(binary: Binary, times: ArrayLike, n_neighbors1: int
     for further vmapping (e.g. batching ``simulate_observed_flux`` over time).
     """
     return jax.vmap(
-        lambda t: _evaluate_orbit(binary, t, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2)
+        lambda t: _evaluate_orbit(binary, t, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2,
+                                  from_occluder1=from_occluder1, from_occluder2=from_occluder2)
     )(times)
 
 
-def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int) -> Tuple[List[Model], List[Model]]:
+def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neighbors2: int,
+                     from_occluder1: bool = False, from_occluder2: bool = False) -> Tuple[List[Model], List[Model]]:
     """Evaluate the orbit at multiple times.
 
     Args:
@@ -392,7 +436,8 @@ def v_evaluate_orbit(binary: Binary, times: ArrayLike, n_neighbors1: int, n_neig
         Tuple[List[Model], List[Model]]: Lists of updated primary and secondary models at the specified times,
             where each element corresponds to a model at a specific time
     """
-    result_body1, result_body2 = v_evaluate_orbit_stacked(binary, times, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2)
+    result_body1, result_body2 = v_evaluate_orbit_stacked(binary, times, n_neighbors1=n_neighbors1, n_neighbors2=n_neighbors2,
+                                                          from_occluder1=from_occluder1, from_occluder2=from_occluder2)
 
     # Convert the results to lists for each component
     body1_list = jax.tree_util.tree_map(lambda x: list(x), result_body1)
@@ -438,7 +483,9 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
         return PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.PRIMARY), \
                PhoebeModel.construct(binary.phoebe_config, time, binary.parameter_labels, binary.parameter_values, Component.SECONDARY)
     else:
-        return _evaluate_orbit(binary, time, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
+        return _evaluate_orbit(binary, time, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2),
+                               from_occluder1=bool(binary.occlusion_from_occluder1),
+                               from_occluder2=bool(binary.occlusion_from_occluder2))
 
 
 def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Model], List[Model]]:
@@ -476,7 +523,9 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
             result = [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.PRIMARY) for t in times], \
                      [PhoebeModel.construct(binary.phoebe_config, t, binary.parameter_labels, binary.parameter_values, Component.SECONDARY) for t in times]
         else:
-            result = v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2))
+            result = v_evaluate_orbit(binary, times, n_neighbors1=int(binary.n_neighbours1), n_neighbors2=int(binary.n_neighbours2),
+                                      from_occluder1=bool(binary.occlusion_from_occluder1),
+                                      from_occluder2=bool(binary.occlusion_from_occluder2))
     return result
 
 
@@ -509,4 +558,6 @@ def evaluate_orbit_at_times_stacked(binary: Binary, times: ArrayLike) -> Tuple[M
             binary, times,
             n_neighbors1=int(binary.n_neighbours1),
             n_neighbors2=int(binary.n_neighbours2),
+            from_occluder1=bool(binary.occlusion_from_occluder1),
+            from_occluder2=bool(binary.occlusion_from_occluder2),
         )

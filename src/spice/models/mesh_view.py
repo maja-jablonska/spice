@@ -215,21 +215,83 @@ def _resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors
                      jnp.clip(total_occlusion, 0., m_occluded.cast_areas), 0.)
 
 
-@partial(jax.jit, static_argnames=("n_neighbors",))
-def resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors: int) -> MeshModel:
+@partial(jax.jit, static_argnums=(2,))
+def _resolve_occlusion_from_occluder(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors: int):
+    """Same result as :func:`_resolve_occlusion`, searched from the occluder side.
+
+    For every front-facing occluder face, query the ``n_neighbors`` nearest
+    visible occluded faces, clip each pair, and scatter-add the overlap onto the
+    occluded face. Polygon overlap is symmetric, so this sums exactly the same
+    pairs; it is the right direction when occluder faces are much smaller than
+    occluded faces (a finely meshed small body transiting a coarse star), where
+    one occluded face can overlap thousands of occluder faces but one occluder
+    face overlaps only a handful of occluded faces.
+    """
+    occluded_visible_mask = m_occluded.mus > 0
+    occluder_front = m_occluder.mus > 0
+
+    n_occluded = m_occluded.faces.shape[0]
+    m_occluded_centers = m_occluded.cast_centers
+    m_occluded_faces = m_occluded.faces.astype(int)
+    m_occluder_centers = m_occluder.cast_centers
+    m_occluder_faces = m_occluder.faces.astype(int)
+
+    # Back-facing occluded faces cannot be hidden; push them out of the query.
+    far_away = jnp.max(jnp.abs(m_occluded_centers)) * 1e3 + 1e3
+    m_occluded_query_centers = jnp.where(
+        occluded_visible_mask[:, None], m_occluded_centers, far_away
+    )
+    neighbours, _ = jk.build_and_query(
+        m_occluded_query_centers, m_occluder_centers,
+        k=min(n_neighbors, n_occluded),
+    )  # (n_occluder, k) indices of occluded faces
+    valid_indices = (neighbours >= 0) & (neighbours < n_occluded)
+    neighbours = jnp.clip(neighbours, 0, n_occluded - 1)
+
+    distances = jnp.linalg.norm(
+        m_occluder_centers[:, None, :] - m_occluded_centers[neighbours], axis=-1)
+    occluder_radii = m_occluder.cast_vertex_bounding_circle_radii[:, None]
+    target_radii = m_occluded.cast_vertex_bounding_circle_radii[neighbours]
+    pair_mask = (valid_indices & occluder_front[:, None]
+                 & occluded_visible_mask[neighbours]
+                 & (distances <= target_radii + occluder_radii))
+
+    occluder_vertices = m_occluder.cast_vertices[m_occluder_faces]              # (n_occluder, 3, 3)
+    occluded_vertices = m_occluded.cast_vertices[m_occluded_faces[neighbours]]  # (n_occluder, k, 3, 3)
+    overlaps = v_total_visible_area(occluder_vertices, occluded_vertices)       # (n_occluder, k)
+    overlaps = jnp.where(pair_mask, overlaps, 0.0)
+
+    total_occlusion = jnp.zeros(n_occluded, dtype=overlaps.dtype).at[neighbours.ravel()].add(
+        overlaps.ravel())
+    return jnp.where(occluded_visible_mask,
+                     jnp.clip(total_occlusion, 0., m_occluded.cast_areas), 0.)
+
+
+@partial(jax.jit, static_argnames=("n_neighbors", "from_occluder"))
+def resolve_occlusion(m_occluded: MeshModel, m_occluder: MeshModel, n_neighbors: int,
+                      from_occluder: bool = False) -> MeshModel:
     """Calculate the occlusion of m_occluded by m_occluder
 
     Args:
         m_occluded (MeshModel): occluded mesh model
         m_occluder (MeshModel): occluding mesh model
+        n_neighbors (int): neighbours searched per face. With
+            ``from_occluder=False`` (default) this is the number of occluder faces
+            considered for each occluded face; with ``from_occluder=True`` it is
+            the number of occluded faces considered for each occluder face.
+        from_occluder (bool): search from the occluder side. Use it when the
+            occluder's faces are much smaller than the occluded body's (e.g.
+            transits); :meth:`spice.models.binary.Binary.from_bodies` picks the
+            cheaper direction automatically.
 
     Returns:
         MeshModel: m1 with updated visible areas
     """
     m_occluder_center_z = cast_to_los(m_occluder.center, m_occluder.los_vector)
     m_occluded_center_z = cast_to_los(m_occluded.center, m_occluded.los_vector)
+    resolve = _resolve_occlusion_from_occluder if from_occluder else _resolve_occlusion
     o = jax.lax.cond(jnp.all(m_occluder_center_z>m_occluded_center_z),
-                     lambda: _resolve_occlusion(m_occluded, m_occluder, n_neighbors),
+                     lambda: resolve(m_occluded, m_occluder, n_neighbors),
                      lambda: jnp.zeros_like(m_occluded.occluded_areas, dtype=_float_dtype()))
     return m_occluded._replace(
         occluded_areas=o

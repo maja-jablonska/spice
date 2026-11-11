@@ -23,7 +23,8 @@ from .utils import (ModelList, rotation_matrix, rotation_matrix_prim,
                     evaluate_many_fouriers_prim_for_value,
                     spherical_harmonic_with_tilt,
                     spherical_harmonic_gradient_with_tilt,
-                    spherical_harmonic_toroidal_with_tilt)
+                    spherical_harmonic_toroidal_with_tilt,
+                    MAX_SPHERICAL_HARMONIC_DEGREE)
 
 from jaxtyping import Array, Float
 
@@ -350,8 +351,18 @@ def _evaluate_rotation(mesh: MeshModel, t: ArrayLike) -> MeshModel:
     averaged_face_velocities = (jnp.sum(rotated_vertices_vel[face_indices], axis=1) + rotated_centers_vel) / 4.0
 
     new_axis_radii = calculate_axis_radii(rotated_centers, mesh.rotation_axis)
+    # Pulsation displacements and velocities are vectors attached to the
+    # surface: turn them with it. Leaving them in the old directions made
+    # evaluate_rotation(evaluate_pulsations(m, t), t) push vertices sideways
+    # (a 90 deg turn left the pulsation RV at 0.01 instead of 0.72 km/s).
     rotated = mesh._replace(d_vertices=rotated_vertices,
                             d_centers=rotated_centers,
+                            vertices_pulsation_offsets=jnp.matmul(
+                                mesh.vertices_pulsation_offsets, t_rotation_matrix),
+                            center_pulsation_offsets=jnp.matmul(
+                                mesh.center_pulsation_offsets, t_rotation_matrix),
+                            pulsation_velocities=jnp.matmul(
+                                mesh.pulsation_velocities, t_rotation_matrix),
                             rotation_velocities=averaged_face_velocities,
                             axis_radii=new_axis_radii)
     return _refresh_computed_log_g(rotated)
@@ -435,6 +446,32 @@ def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
     )
 
 
+def _validate_modes(m_orders, l_degrees) -> None:
+    """Reject (m, l) pairs the real-harmonic basis cannot represent.
+
+    Negative m used to land in another mode's slot (``m + max_mode * l``) and
+    silently do nothing; l above MAX_SPHERICAL_HARMONIC_DEGREE is evaluated
+    incorrectly by the fixed-``n_max`` harmonic routine.
+    """
+    try:
+        ms = np.atleast_1d(np.asarray(m_orders, dtype=float))
+        ls = np.atleast_1d(np.asarray(l_degrees, dtype=float))
+    except Exception:  # traced values: cannot check here
+        return
+    if np.any(ms < 0):
+        raise ValueError(
+            "Negative azimuthal order m is not supported: modes use real spherical "
+            "harmonics (standing waves), so m and -m give the same pattern up to an "
+            "azimuthal rotation. Use m >= 0 (and pulsation_angles about the rotation "
+            "axis to change its azimuth).")
+    if np.any(ms > ls):
+        raise ValueError("Azimuthal order m must satisfy m <= l.")
+    if np.any(ls > MAX_SPHERICAL_HARMONIC_DEGREE):
+        raise ValueError(
+            f"Degree l > {MAX_SPHERICAL_HARMONIC_DEGREE} is not supported by the "
+            "spherical-harmonic evaluator.")
+
+
 def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
                   period: Float, fourier_series_parameters: Float[Array, "3 n_terms 2"],
                   pulsation_axes: Float[Array, "3"] = None, pulsation_angles: Float = None) -> MeshModel:
@@ -460,8 +497,16 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
             [radial, spheroidal, toroidal] and each (N, 2) block contains
             [amplitude, phase] pairs. For a purely radial mode, set the spheroidal
             and toroidal rows to zeros.
-        pulsation_axes (Float[Array, "3"]): Axes of the pulsation. Defaults to the rotation axis of the mesh model.
-        pulsation_angles (Float): Angles of the pulsation. Defaults to zero.
+        pulsation_axes (Float[Array, "3"]): Axis to tilt the mode about. The
+            mode's symmetry axis is the mesh's ``rotation_axis`` (read when the
+            pulsations are evaluated), tilted by ``pulsation_angles`` degrees about
+            this axis. Defaults to the rotation axis, i.e. no tilt.
+        pulsation_angles (Float): Tilt angle in degrees. Defaults to zero.
+
+    Note:
+        Modes are real spherical harmonics, so m != 0 modes are standing waves
+        (fixed nodal lines); travelling prograde/retrograde modes are not
+        represented. ``m`` must satisfy ``0 <= m <= l <= 10``.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -488,6 +533,7 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
     if pulsation_angles is None:
         pulsation_angles = 0.
 
+    _validate_modes(m_order, l_degree)
     harmonic_ind = m_order + m.max_pulsation_mode * l_degree
     if harmonic_ind >= len(m.pulsation_periods):
         warnings.warn("Pulsation mode is too high for the mesh model - the mesh model has" +
@@ -557,8 +603,10 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
             for each pulsation and VSH component. Shape (K, 3, N, 2) where K is the number of
             pulsations, 3 indexes [radial, spheroidal, toroidal], N is the number of Fourier
             terms, and each innermost pair is [amplitude, phase].
-        pulsation_axes (Float[Array, "n_pulsations 3"]): Array of pulsation axes. Defaults to the rotation axis.
-        pulsation_angles (Float[Array, "n_pulsations"]): Array of pulsation angles. Defaults to zero.
+        pulsation_axes (Float[Array, "n_pulsations 3"]): Tilt axes; each mode's
+            symmetry axis is the mesh's rotation axis tilted about its tilt axis by
+            its angle (see :func:`add_pulsation`). Defaults to the rotation axis (no tilt).
+        pulsation_angles (Float[Array, "n_pulsations"]): Tilt angles in degrees. Defaults to zero.
 
     Returns:
         MeshModel: The mesh model with updated pulsation parameters.
@@ -589,6 +637,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
     if pulsation_angles is None:
         pulsation_angles = jnp.zeros_like(m_orders)
 
+    _validate_modes(m_orders, l_degrees)
     harmonic_indices = m_orders + m.max_pulsation_mode * l_degrees
 
     # n_terms is along axis 2 of the (n_pulsations, 3, n_terms, 2) array
@@ -663,6 +712,10 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
         radius: Stellar radius.
         pulsation_axis: Tilt axis.
         pulsation_angle: Tilt angle in degrees.
+
+    The untilted mode is symmetric about ``m.rotation_axis``; it used to be
+    symmetric about +z regardless of the rotation axis, so on a default
+    (+y axis) star non-radial modes were perpendicular to the spin.
     """
     scalar_pulsation_angle = jnp.where(
         jnp.size(pulsation_angle) == 1,
@@ -682,9 +735,11 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
 
     # --- Radial basis: R_lm = Y_l^m * r_hat ---
     vertex_harmonic = spherical_harmonic_with_tilt(
-        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)[:, jnp.newaxis]
+        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle,
+        frame_axis=m.rotation_axis)[:, jnp.newaxis]
     center_harmonic = spherical_harmonic_with_tilt(
-        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)[:, jnp.newaxis]
+        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle,
+        frame_axis=m.rotation_axis)[:, jnp.newaxis]
 
     # Normalize harmonics to (-1, 1) preserving sign
     vertex_harmonic = vertex_harmonic / (
@@ -701,9 +756,11 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
 
     # --- Spheroidal basis: S_lm = nabla_tangential(Y_l^m) ---
     vertex_S = spherical_harmonic_gradient_with_tilt(
-        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)
+        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle,
+        frame_axis=m.rotation_axis)
     center_S = spherical_harmonic_gradient_with_tilt(
-        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)
+        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle,
+        frame_axis=m.rotation_axis)
 
     vertex_S_norms = jnp.linalg.norm(vertex_S, axis=1)
     vertex_S = vertex_S / (
@@ -713,9 +770,11 @@ def _pulsation_displacements(m: MeshModel, harmonic_parameters: ArrayLike,
 
     # --- Toroidal basis: T_lm = r_hat x nabla_tangential(Y_l^m) ---
     vertex_T = spherical_harmonic_toroidal_with_tilt(
-        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle)
+        m_ord, l_deg, m.d_vertices, pulsation_axis, scalar_pulsation_angle,
+        frame_axis=m.rotation_axis)
     center_T = spherical_harmonic_toroidal_with_tilt(
-        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle)
+        m_ord, l_deg, m.d_centers, pulsation_axis, scalar_pulsation_angle,
+        frame_axis=m.rotation_axis)
 
     vertex_T_norms = jnp.linalg.norm(vertex_T, axis=1)
     vertex_T = vertex_T / (

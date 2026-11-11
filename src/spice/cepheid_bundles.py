@@ -26,6 +26,7 @@ import jax.numpy as jnp
 import numpy as np
 from tqdm import tqdm
 
+from spice.constants import DAY_TO_S
 from spice.models import IcosphereModel
 from spice.models.mesh_transform import (
     add_pulsation,
@@ -89,9 +90,9 @@ def build_bundle(
     """Construct an icosphere mesh, attach pulsation+rotation, evaluate it across `timeseries`.
 
     `period` and `timeseries` are in days (the unit `evaluate_pulsations`
-    expects). Note `evaluate_rotation` interprets the same `t` as seconds, so a
-    nonzero `rotation_velocity` would rotate ~86400x slower than the day-valued
-    timeseries implies; keep the default of 0.0 unless that mismatch is resolved.
+    expects); they are converted to seconds for `evaluate_rotation`. Rotation is
+    applied after the pulsations, and carries the pulsation displacements and
+    velocities with the surface.
     """
     param_names = getattr(emulator, param_names_attr, None) or emulator.parameter_names
     base = IcosphereModel.construct(
@@ -106,7 +107,7 @@ def build_bundle(
         rotation_velocity,
     )
     snapshots = [
-        evaluate_rotation(evaluate_pulsations(pulsating, t), t)
+        evaluate_rotation(evaluate_pulsations(pulsating, t), t * DAY_TO_S)
         for t in tqdm(timeseries, desc=desc, leave=False)
     ]
     template = evaluate_rotation(pulsating, 0)

@@ -108,8 +108,20 @@ Spots and pulsations
   cover the whole surface. ``add_spots`` defaults to the same zero smoothness
   as ``add_spot``. Harmonic spot patterns use the reference surface relative
   to the star, so translating a mesh does not change its pattern.
+- Spot colatitudes/longitudes, spherical-harmonic spot patterns and pulsation
+  modes are all measured in the **rotation-axis frame**: the pole is the
+  mesh's ``rotation_axis`` (:func:`~spice.models.utils.rotation_axis_frame`),
+  read when the spot is added or the pulsations are evaluated, so add rotation
+  first. For an explicit ``[0., 0., 1.]`` axis this frame is the identity.
+  :func:`~spice.models.utils.inclination_to_los_axis` takes the same axis
+  (``inclination_to_los_axis(i, mesh.rotation_axis)``).
 - Spherical-harmonic spots and pulsation modes are indexed by order ``m`` and
-  degree ``l`` with :math:`m \le l`.
+  degree ``l`` with :math:`0 \le m \le l \le 10`. They are real harmonics, so
+  ``m != 0`` pulsation modes are standing waves.
+- ``evaluate_rotation`` turns the pulsation displacements and velocities with
+  the surface, so ``evaluate_rotation(evaluate_pulsations(m, t), t)`` keeps the
+  mode attached to the star (``t`` is in days for pulsations, seconds for
+  rotation).
 - Pulsation Fourier parameters have shape ``(3, N, 2)`` per mode — the first
   axis indexes the vector-spherical-harmonic components
   ``[radial, spheroidal, toroidal]``, and each innermost pair is
