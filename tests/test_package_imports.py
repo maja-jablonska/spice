@@ -3,8 +3,26 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
+
+
+@pytest.fixture(autouse=True)
+def _restore_spice_modules():
+    """Put the original spice modules back after each test.
+
+    These tests purge ``spice.*`` from ``sys.modules`` to observe lazy imports.
+    Without restoring, later tests see fresh class objects (e.g. a second
+    ``PhoebeModel``) that no longer match instances built from the originals,
+    so ``isinstance`` checks fail depending on test order.
+    """
+    saved = {name: mod for name, mod in sys.modules.items()
+             if name == "spice" or name.startswith("spice.")}
+    yield
+    _clear_spice_modules()
+    sys.modules.update(saved)
 
 
 def _clear_spice_modules():

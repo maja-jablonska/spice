@@ -5,6 +5,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from tests.phoebe_helpers import import_phoebe_or_skip
+
 from spice.constants import G_SI, SOLAR_MASS_KG, SOLAR_RAD_M
 from spice.models.binary import (
     Binary,
@@ -156,7 +158,7 @@ def test_evaluate_orbit_at_times_matches_scalar(orbit, stacked):
 def phoebe_binary():
     # Build a small real bundle instead of loading a missing/version-sensitive
     # pickle. Only these integration tests need the optional PHOEBE extra.
-    phoebe = pytest.importorskip("phoebe", reason="PHOEBE is an optional extra")
+    phoebe = import_phoebe_or_skip()
     from spice.models.phoebe_utils import PhoebeConfig
 
     phoebe.logger(clevel="ERROR")

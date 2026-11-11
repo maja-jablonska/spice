@@ -22,7 +22,9 @@ reach the synthesis either.
 import numpy as np
 import pytest
 
-phoebe = pytest.importorskip("phoebe", reason="PHOEBE is an optional extra")
+from tests.phoebe_helpers import import_phoebe_or_skip
+
+phoebe = import_phoebe_or_skip()
 
 from spice.models import PhoebeModel
 from spice.models.phoebe_utils import Component, PhoebeConfig
