@@ -6,7 +6,7 @@ import sys as _sys
 import warnings
 
 from spice.spectrum.parameters import parameter_helper
-from spice.spectrum.solar_parameters import SOLAR_PARAMETERS
+from spice.spectrum.solar_parameters import SOLAR_PARAMETERS, solar_value
 
 _jax_already_loaded = "jax" in _sys.modules
 _t0 = _time.perf_counter()
@@ -131,21 +131,68 @@ def make_corners(d):
     return jnp.array(_make_corners_np(d))
 
 
-@jax.jit
+# Largest index space one int32 key may encode. Keys are split into several
+# int32 columns rather than one int64 key, because without jax_enable_x64 JAX
+# silently narrows int64 to int32: on a grid of more than 2**31 cells the
+# encoded keys wrapped around, stopped being sorted, and searchsorted missed
+# rows (75% of the nodes of an 8**11 grid came back as zero intensity).
+_KEY_LIMIT = 2 ** 31 - 1
+
+
+def _lex_less(a, b):
+    """``a < b`` lexicographically for 1-D int arrays of equal length."""
+    differ = a != b
+    first = jnp.argmax(differ)
+    return jnp.any(differ) & (a[first] < b[first])
+
+
 def _sparse_lookup_single(keys, values, query_key):
-    """Lookup a single key in the sorted keys array. Returns row index or -1."""
-    pos = jnp.searchsorted(keys, query_key)
-    pos = jnp.clip(pos, 0, keys.shape[0] - 1)
-    found = keys[pos] == query_key
+    """Row index of ``query_key`` in the lexicographically sorted ``keys``, or -1.
+
+    ``keys`` is (S, G) int32 and ``query_key`` is (G,). A fixed number of
+    binary-search steps keeps this jit- and vmap-friendly.
+    """
+    n = keys.shape[0]
+    if keys.shape[1] == 1:
+        # Grids whose index space fits one int32 column (most of them): the
+        # built-in search is ~2x faster than the lexicographic loop below.
+        pos = jnp.clip(jnp.searchsorted(keys[:, 0], query_key[0]), 0, n - 1)
+        return jnp.where(keys[pos, 0] == query_key[0], values[pos], jnp.int32(-1))
+    n_steps = int(np.ceil(np.log2(n + 1))) + 1
+
+    def step(_, bounds):
+        lo, hi = bounds
+        active = lo < hi
+        mid = (lo + hi) // 2
+        less = _lex_less(keys[jnp.clip(mid, 0, n - 1)], query_key)
+        lo = jnp.where(active & less, mid + 1, lo)
+        hi = jnp.where(active & ~less, mid, hi)
+        return lo, hi
+
+    lo, _ = jax.lax.fori_loop(0, n_steps, step, (jnp.int32(0), jnp.int32(n)))
+    pos = jnp.clip(lo, 0, n - 1)
+    found = jnp.all(keys[pos] == query_key)
     return jnp.where(found, values[pos], jnp.int32(-1))
+
+
+def _as_key_columns(keys, strides):
+    """Accept the legacy 1-D key / (d,) stride layout as a single key column."""
+    keys = jnp.asarray(keys)
+    strides = jnp.asarray(strides)
+    if keys.ndim == 1:
+        keys = keys[:, None]
+    if strides.ndim == 1:
+        strides = strides[None, :]
+    return keys, strides
 
 
 @partial(jax.jit, static_argnums=(4,))
 def sparse_weighted_rows_from_brackets(keys, values, strides, brackets, corners_dimension):
     """
-    keys: (S,) int64, sorted encoded multi-dim indices
+    keys: (S, G) int32, lexicographically sorted multi-column keys
     values: (S,) int32, row indices
-    strides: (d,) int64, mixed-radix strides
+    strides: (G, d) int32, mixed-radix strides of each key column (0 for
+        axes outside that column's block)
     brackets: (d, 3) array -> [lo, hi, t] per axis
     corners_dimension: int
 
@@ -163,8 +210,10 @@ def sparse_weighted_rows_from_brackets(keys, values, strides, brackets, corners_
     # grid indices for each corner
     indices = jnp.where(corners == 0, lo, hi)  # (2^d, d)
 
-    # encode each corner to a flat key
-    corner_keys = jnp.dot(indices.astype(jnp.int64), strides)  # (2^d,)
+    # encode each corner to its key columns; each column's index space is
+    # below 2**31 by construction, so int32 arithmetic cannot overflow
+    keys, strides = _as_key_columns(keys, strides)
+    corner_keys = jnp.dot(indices.astype(jnp.int32), strides.astype(jnp.int32).T)  # (2^d, G)
 
     # lookup each corner
     rows = jax.vmap(lambda k: _sparse_lookup_single(keys, values, k))(corner_keys)  # (2^d,)
@@ -229,18 +278,29 @@ class SparseGridIndex:
 
         axes = [np.unique(df[c].to_numpy()) for c in columns]
 
-        # compute mixed-radix strides
+        # Split the axes into contiguous blocks whose index space fits one
+        # int32 key column, then use mixed-radix strides within each block.
+        # Lexicographic order over the columns equals the order of the full
+        # mixed-radix key, so the index stays sorted.
         axis_lengths = [len(ax) for ax in axes]
-        strides = np.ones(len(columns), dtype=np.int64)
-        for i in range(len(columns) - 2, -1, -1):
-            strides[i] = strides[i + 1] * axis_lengths[i + 1]
+        if any(n > _KEY_LIMIT for n in axis_lengths):
+            raise ValueError(f"Grid axis too long for the sparse index: {axis_lengths}")
+        blocks, current, size = [], [], 1
+        for i in range(len(columns) - 1, -1, -1):
+            if current and size * axis_lengths[i] > _KEY_LIMIT:
+                blocks.insert(0, current)
+                current, size = [], 1
+            current.insert(0, i)
+            size *= axis_lengths[i]
+        blocks.insert(0, current)
 
-        # check for int64 overflow
-        total_size = int(strides[0]) * axis_lengths[0] if axis_lengths else 0
-        assert total_size >= 0, (
-            f"Grid too large for int64 encoding: strides would overflow. "
-            f"Axis lengths: {axis_lengths}"
-        )
+        strides = np.zeros((len(blocks), len(columns)), dtype=np.int64)
+        for g, block in enumerate(blocks):
+            stride = 1
+            for i in reversed(block):
+                strides[g, i] = stride
+                stride *= axis_lengths[i]
+        strides = strides.astype(np.int32)
 
         # compute multi-dim indices for each row
         indices = np.stack([
@@ -248,12 +308,12 @@ class SparseGridIndex:
             for i in range(len(columns))
         ], axis=1)  # (S, d)
 
-        # encode to flat keys
-        keys = indices.astype(np.int64) @ strides  # (S,)
+        # encode to key columns
+        keys = (indices.astype(np.int64) @ strides.T.astype(np.int64)).astype(np.int32)  # (S, G)
         row_idx = df.row_idx.to_numpy(dtype=np.int32, copy=False)
 
-        # sort by key
-        order = np.argsort(keys)
+        # sort lexicographically, first column most significant
+        order = np.lexsort(keys.T[::-1])
         keys = keys[order]
         row_idx = row_idx[order]
 
@@ -648,7 +708,7 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
     @property
     def solar_parameters(self):
         return jnp.array(
-            [SOLAR_PARAMETERS.get(n, 0.0) for n in self._stellar_parameter_names],
+            [solar_value(n) for n in self._stellar_parameter_names],
             dtype=_float_dtype(),
         )
 

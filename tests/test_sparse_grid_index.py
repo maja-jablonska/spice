@@ -68,6 +68,7 @@ def _load_module():
 
         solar_pkg = types.ModuleType("spice.spectrum.solar_parameters")
         solar_pkg.SOLAR_PARAMETERS = {"teff": 5777.0, "logg": 4.44, "v_micro": 2.0}
+        solar_pkg.solar_value = lambda name, default=0.0: solar_pkg.SOLAR_PARAMETERS.get(name, default)
         sys.modules["spice.spectrum.solar_parameters"] = solar_pkg
 
         params_pkg = types.ModuleType("spice.spectrum.parameters")
