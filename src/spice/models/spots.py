@@ -11,7 +11,7 @@ except Exception:
         """Placeholder when PHOEBE is not installed or broken."""
         pass
 from .mesh_model import MeshModel
-from .utils import spherical_harmonic, spherical_harmonic_with_tilt
+from .utils import spherical_harmonic_with_tilt, rotation_axis_frame
 
 from jaxtyping import Array, Int, Float
 
@@ -46,7 +46,8 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
                             spot_center_phi: float,
                             spot_radius: float,
                             parameter_diff: float,
-                            smoothness: float = 1.0) -> Float[Array, "n_mesh_elements 3"]:
+                            smoothness: float = 1.0,
+                            frame_axis: Optional[Float[Array, "3"]] = None) -> Float[Array, "n_mesh_elements 3"]:
     """
     Generate a differential parameter array based on the location of points on a sphere relative to a specified
     spherical spot.
@@ -64,6 +65,8 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
         spot_radius (float): Angular radius of the spot.
         parameter_diff (float): The differential parameter value to be applied within the spot.
         smoothness (float, optional): Factor controlling the smoothness of the spot's edge. Defaults to 1.0.
+        frame_axis (Float[Array, "3"], optional): Pole that theta/phi are measured
+            from (the star's rotation axis). Defaults to +z.
 
     Returns: ArrayLike: An array of differential parameter values for each point, interpolated based on spot
     membership and edge smoothness.
@@ -73,6 +76,11 @@ def generate_spherical_spot(d_centers: Float[Array, "n_mesh_elements 3"],
 
     spot_center_x, spot_center_y, spot_center_z = __spherical_to_cartesian(spot_center_theta, spot_center_phi,
                                                                            mesh_radius)
+    if frame_axis is not None:
+        # theta/phi are colatitude/longitude about the rotation axis; map the
+        # frame-local centre back to mesh coordinates.
+        spot_center_x, spot_center_y, spot_center_z = rotation_axis_frame(frame_axis) @ jnp.array(
+            [spot_center_x, spot_center_y, spot_center_z])
 
     # Calculate distance from the spot center
     distances = v_cartesian_distance(d_centers[:, 0], d_centers[:, 1], d_centers[:, 2],
@@ -109,7 +117,8 @@ def _add_spherical_harmonic_spot(mesh: MeshModel,
                                  m_order: int, l_degree: int,
                                  param_delta: float,
                                  param_index: int) -> MeshModel:
-    spot_parameters = spherical_harmonic(m_order, l_degree, mesh.d_centers) * param_delta
+    spot_parameters = spherical_harmonic_with_tilt(
+        m_order, l_degree, mesh.d_centers, frame_axis=mesh.rotation_axis) * param_delta
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
     
@@ -121,7 +130,8 @@ def _add_spherical_harmonic_spot_with_tilt(mesh: MeshModel,
                                  param_index: int,
                                  tilt_axis: ArrayLike = jnp.array([0., 0., 1.]),
                                  tilt_angle: float = 0.) -> MeshModel:
-    spot_parameters = spherical_harmonic_with_tilt(m_order, l_degree, mesh.d_centers, tilt_axis, tilt_angle) * param_delta
+    spot_parameters = spherical_harmonic_with_tilt(m_order, l_degree, mesh.d_centers, tilt_axis, tilt_angle,
+                                                   frame_axis=mesh.rotation_axis) * param_delta
     return mesh._replace(parameters=mesh.parameters.at[:, param_index].set(
         mesh.parameters[:, param_index] + spot_parameters))
 
@@ -186,7 +196,7 @@ def _add_spot(mesh: MeshModel,
               smoothness: float = 1.0) -> MeshModel:
     spot_parameters = generate_spherical_spot(mesh.d_centers, mesh.radius,
                                               spot_center_theta, spot_center_phi, spot_radius, parameter_diff,
-                                              smoothness)
+                                              smoothness, frame_axis=mesh.rotation_axis)
     return mesh._replace(parameters=mesh.parameters.at[:, parameter_index].set(
         mesh.parameters[:, parameter_index] + spot_parameters)
     )
@@ -208,8 +218,10 @@ def add_spot(mesh: MeshModel,
 
     Args:
         mesh (MeshModel): The mesh model to which the spot will be added. Must not be a PHOEBE model, as they are read-only.
-        spot_center_theta (float): The theta (inclination) coordinate of the spot's center, in radians.
-        spot_center_phi (float): The phi (azimuthal) coordinate of the spot's center, in radians.
+        spot_center_theta (float): Colatitude of the spot's center from the mesh's
+            ``rotation_axis``, in radians (see :func:`spice.models.utils.lat_to_theta`).
+            Add rotation (or set the axis) *before* the spot: the axis is read now.
+        spot_center_phi (float): Longitude of the spot's center about the rotation axis, in radians.
         spot_radius (float): The angular radius of the spot, in degrees.
         parameter_delta (float): The difference in the parameter value to be applied within the spot.
         parameter_index (int): The index of the parameter in the mesh model that will be modified by the spot.
@@ -244,8 +256,9 @@ def add_spots(mesh: MeshModel,
 
     Args:
         mesh (MeshModel): The mesh model to which the spots will be added. Must not be a PHOEBE model, as they are read-only.
-        spot_center_thetas (Float[Array, "n_spots"]): An array of theta (inclination) coordinates of the spots' centers, in radians.
-        spot_center_phis (Float[Array, "n_spots"]): An array of phi (azimuthal) coordinates of the spots' centers, in radians. 
+        spot_center_thetas (Float[Array, "n_spots"]): Colatitudes of the spots' centers from the mesh's
+            ``rotation_axis``, in radians. Add rotation before the spots: the axis is read now.
+        spot_center_phis (Float[Array, "n_spots"]): Longitudes of the spots' centers about the rotation axis, in radians.
         spot_radii (Float[Array, "n_spots"]): An array of angular radii of the spots, in degrees.
         parameter_deltas (Float[Array, "n_spots"]): An array of differences in the parameter values to be applied within the spots.
         parameter_indices (Int[Array, "n_spots"]): An array of indices of the parameters in the mesh model that will be modified by the spots.

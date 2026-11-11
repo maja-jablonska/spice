@@ -46,15 +46,70 @@ jax.tree_util.register_pytree_node(
 
 def vertex_to_polar(v: Float[Array, "3"]) -> Float[Array, "2"]:
     """Cartesian (x, y, z) -> (theta, phi) with theta = colatitude in [0, pi]
-    and phi = azimuth in [-pi, pi]."""
-    v += 1e-5
-    xy = jnp.sqrt(v[0] ** 2 + v[1] ** 2) + 1e-5
-    return jnp.nan_to_num(
-        jnp.array([
-            jnp.arctan2(xy, v[2]),
-            jnp.arctan2(v[1], v[0])
-        ])
-    )
+    and phi = azimuth in [-pi, pi].
+
+    Exact everywhere, including on the poles (where phi is set to 0), and
+    gradient-safe there: the double-``where`` keeps ``sqrt`` and ``arctan2``
+    away from their singular point in the backward pass. An earlier version
+    shifted every point by 1e-5 instead, which at a pole vertex was 10% of the
+    1e-4 finite-difference step of the tangential gradient and inflated the
+    m != 0 horizontal pulsation basis by ~10%.
+    """
+    xy2 = v[0] ** 2 + v[1] ** 2
+    off_axis = xy2 > 0.
+    xy = jnp.where(off_axis, jnp.sqrt(jnp.where(off_axis, xy2, 1.)), 0.)
+    phi = jnp.where(off_axis,
+                    jnp.arctan2(v[1], jnp.where(off_axis, v[0], 1.)),
+                    0.)
+    return jnp.nan_to_num(jnp.array([jnp.arctan2(xy, v[2]), phi]))
+
+
+# Highest spherical-harmonic degree `spherical_harmonic` evaluates correctly
+# (`jax.scipy.special.sph_harm_y` is called with this static n_max).
+MAX_SPHERICAL_HARMONIC_DEGREE = 10
+
+
+@jax.jit
+def rotation_axis_frame(axis: Float[Array, "3"]) -> Float[Array, "3 3"]:
+    """Orthonormal frame whose third column is ``axis``.
+
+    Returns the matrix ``B = [e1 | e2 | a]`` of the minimal rotation taking +z
+    onto the unit vector ``a``, so ``coords @ B`` expresses Cartesian points in
+    a frame where the rotation axis is the pole. Latitudes, longitudes and
+    spherical harmonics are measured in this frame. For ``axis = +z`` it is
+    exactly the identity, so results for stars with an explicit z rotation
+    axis are unchanged; for ``-z`` it is ``diag(1, -1, -1)``.
+    """
+    a = axis / jnp.linalg.norm(axis)
+    z = jnp.array([0., 0., 1.], dtype=a.dtype)
+    k = jnp.cross(z, a)
+    s2 = jnp.dot(k, k)
+    c = jnp.dot(z, a)
+    K = jnp.array([[0., -k[2], k[1]],
+                   [k[2], 0., -k[0]],
+                   [-k[1], k[0], 0.]], dtype=a.dtype)
+    general = jnp.eye(3, dtype=a.dtype) + K + (K @ K) * ((1. - c) / jnp.where(s2 > 0., s2, 1.))
+    aligned = jnp.where(c > 0., jnp.eye(3, dtype=a.dtype),
+                        jnp.diag(jnp.array([1., -1., -1.], dtype=a.dtype)))
+    return jnp.where(s2 > 1e-24, general, aligned)
+
+
+def _tilted_frame(tilt_axis, tilt_angle, frame_axis):
+    """Matrix M with ``coords @ M`` = coordinates in the (tilted) pattern frame.
+
+    The pattern's pole is ``frame_axis`` (default +z, i.e. no change), tilted by
+    ``tilt_angle`` degrees about ``tilt_axis``.
+    """
+    if tilt_axis is None:
+        tilt_axis = jnp.array([0., 0., 1.])
+    norm = jnp.linalg.norm(tilt_axis)
+    # Add epsilon to prevent division by zero
+    norm = jnp.where(norm > 1e-10, norm, 1e-10)
+    tilt_axis = tilt_axis / norm
+    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    if frame_axis is not None:
+        r_matrix = jnp.matmul(r_matrix, rotation_axis_frame(frame_axis))
+    return r_matrix
 
 
 def lat_to_theta(lat_deg: float) -> float:
@@ -168,28 +223,39 @@ def period_to_velocity(period: float, radius: float) -> float:
     return velocity
 
 
-def inclination_to_los_axis(inclination: float) -> Float[Array, "3"]:
+def inclination_to_los_axis(inclination: float,
+                            rotation_axis: Float[Array, "3"] = None) -> Float[Array, "3"]:
     """
-    Line-of-sight vector (observer -> star) for a star whose rotation axis is +z.
+    Line-of-sight vector (observer -> star) at inclination ``i`` to ``rotation_axis``.
 
-    The returned vector ``(0, sin i, -cos i)`` makes the angle ``i`` with the
-    **z axis only**. It presupposes ``rotation_axis = [0, 0, 1]``, which is also
-    the axis that :func:`lat_to_theta` / :func:`lon_to_phi` measure spot
-    positions about. The default rotation axis chosen by ``add_rotation`` is
-    *not* z (it is derived from the mesh's line of sight), so pass
-    ``rotation_axis=jnp.array([0., 0., 1.])`` explicitly when using this helper;
-    otherwise the effective inclination differs silently from ``inclination``
-    (e.g. 30 deg instead of 60 deg with the default y axis).
+    In the rotation-axis frame (:func:`rotation_axis_frame`, the same frame
+    spot latitudes/longitudes and pulsation modes are measured in) the vector is
+    ``(0, sin i, -cos i)``, so the angle between the LOS and the rotation axis
+    is exactly ``i`` for any axis. Pass the mesh's axis, e.g.
+    ``inclination_to_los_axis(60., mesh.rotation_axis)``.
 
     Args:
-        inclination (float): Inclination angle in degrees (0 to 90), the angle
-            between the z rotation axis and the line of sight.
+        inclination (float): Inclination in degrees (0 = pole-on, 90 = equator-on).
+        rotation_axis (Float[Array, "3"], optional): The star's rotation axis.
+            If omitted, ``[0, 0, 1]`` is assumed and a warning is emitted, because
+            the default axis of ``add_rotation`` is not z: using the z-based
+            vector on a default-axis star silently gives the wrong inclination
+            (30 deg instead of 60 deg).
 
     Returns:
         Float[Array, "3"]: LOS vector pointing from the observer towards the star.
     """
+    if rotation_axis is None:
+        import warnings
+        warnings.warn(
+            "inclination_to_los_axis() without rotation_axis assumes a +z rotation "
+            "axis; the default add_rotation axis is +y. Pass rotation_axis="
+            "mesh.rotation_axis (or the axis you give add_rotation).",
+            UserWarning, stacklevel=2)
+        rotation_axis = jnp.array([0., 0., 1.])
     incl_rad = jnp.deg2rad(inclination)
-    return jnp.array([0., jnp.sin(incl_rad), -jnp.cos(incl_rad)])
+    los_frame = jnp.array([0., jnp.sin(incl_rad), -jnp.cos(incl_rad)])
+    return rotation_axis_frame(jnp.asarray(rotation_axis, dtype=los_frame.dtype)) @ los_frame
 
 
 
@@ -206,20 +272,14 @@ def spherical_harmonic(m, n, coordinates):
                                         m_array,
                                         polar_coordinates[:, 0],  # theta (colatitude)
                                         polar_coordinates[:, 1],  # phi (azimuth)
-                                        n_max=10).real
+                                        n_max=MAX_SPHERICAL_HARMONIC_DEGREE).real
 
 
 @jax.jit
-def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=None, tilt_angle=0.):
-    if tilt_axis is None:
-        tilt_axis = jnp.array([0., 0., 1.])
-    # Normalize tilt axis
-    norm = jnp.linalg.norm(tilt_axis)
-    # Add epsilon to prevent division by zero
-    norm = jnp.where(norm > 1e-10, norm, 1e-10)
-    tilt_axis = tilt_axis / norm
-
-    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+def spherical_harmonic_with_tilt(m, n, coordinates, tilt_axis=None, tilt_angle=0., frame_axis=None):
+    """Y_l^m with its pole on ``frame_axis`` (default +z), tilted by
+    ``tilt_angle`` degrees about ``tilt_axis``."""
+    r_matrix = _tilted_frame(tilt_axis, tilt_angle, frame_axis)
     rotated_coords = jnp.matmul(coordinates, r_matrix)
 
     return spherical_harmonic(m, n, rotated_coords)
@@ -269,9 +329,8 @@ def spherical_harmonic_tangential_gradient(m, n, coordinates):
 @jax.jit
 def spherical_harmonic_gradient_with_tilt(m, n, coordinates,
                                           tilt_axis=None,
-                                          tilt_angle=0.):
-    if tilt_axis is None:
-        tilt_axis = jnp.array([0., 0., 1.])
+                                          tilt_angle=0.,
+                                          frame_axis=None):
     """Compute the tangential gradient of Y_l^m with a tilted pulsation axis.
 
     Rotates coordinates into the tilted frame, computes the tangential gradient
@@ -283,15 +342,12 @@ def spherical_harmonic_gradient_with_tilt(m, n, coordinates,
         coordinates: (n_vertices, 3) Cartesian coordinates.
         tilt_axis: Rotation axis for the tilt.
         tilt_angle: Tilt angle in degrees.
+        frame_axis: Pole of the harmonic before the tilt (default +z).
 
     Returns:
         (n_vertices, 3) tangential gradient vectors in the original frame.
     """
-    norm = jnp.linalg.norm(tilt_axis)
-    norm = jnp.where(norm > 1e-10, norm, 1e-10)
-    tilt_axis = tilt_axis / norm
-
-    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    r_matrix = _tilted_frame(tilt_axis, tilt_angle, frame_axis)
     rotated_coords = jnp.matmul(coordinates, r_matrix)
 
     rotated_grad = spherical_harmonic_tangential_gradient(m, n, rotated_coords)
@@ -323,7 +379,8 @@ def spherical_harmonic_toroidal(m, n, coordinates):
 @jax.jit
 def spherical_harmonic_toroidal_with_tilt(m, n, coordinates,
                                           tilt_axis=None,
-                                          tilt_angle=0.):
+                                          tilt_angle=0.,
+                                          frame_axis=None):
     """Compute the toroidal VSH T_l^m with a tilted pulsation axis.
 
     Rotates coordinates into the tilted frame, computes the toroidal component
@@ -339,13 +396,7 @@ def spherical_harmonic_toroidal_with_tilt(m, n, coordinates,
     Returns:
         (n_vertices, 3) toroidal vectors in the original frame.
     """
-    if tilt_axis is None:
-        tilt_axis = jnp.array([0., 0., 1.])
-    norm = jnp.linalg.norm(tilt_axis)
-    norm = jnp.where(norm > 1e-10, norm, 1e-10)
-    tilt_axis = tilt_axis / norm
-
-    r_matrix = evaluate_rotation_matrix(rotation_matrix(tilt_axis), jnp.deg2rad(tilt_angle))
+    r_matrix = _tilted_frame(tilt_axis, tilt_angle, frame_axis)
     rotated_coords = jnp.matmul(coordinates, r_matrix)
 
     rotated_toroidal = spherical_harmonic_toroidal(m, n, rotated_coords)

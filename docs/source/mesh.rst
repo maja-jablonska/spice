@@ -229,7 +229,7 @@ Of course, this is a highly unrealistic, exaggarated pulsation, but it shows the
 Tilted Pulsation Axis
 ^^^^^^^^^^^^^^^^^^^^^
 
-You can also define pulsations with an axis different from the rotation axis. This is done by specifying the `pulsation_axes` and `pulsation_angles` parameters in the `add_pulsation()` function:
+Pulsation modes are symmetric about the star's rotation axis by default. You can also define pulsations with an axis different from the rotation axis. This is done by specifying the `pulsation_axes` and `pulsation_angles` parameters in the `add_pulsation()` function:
 
 .. code-block:: python
 
@@ -245,7 +245,7 @@ You can also define pulsations with an axis different from the rotation axis. Th
         1,  # l degree
         2.,  # pulsation period
         jnp.array([[1e-1, 0.]]),  # Fourier series parameters
-        pulsation_axes=jnp.array([0., 1., 0.]),  # Tilt axis (y-axis in this case)
+        pulsation_axes=jnp.array([1., 0., 0.]),  # Tilt axis, perpendicular to the default +y rotation axis
         pulsation_angles=jnp.array([45.])  # Tilt angle in degrees
     )
 
@@ -253,7 +253,7 @@ You can also define pulsations with an axis different from the rotation axis. Th
     t = 0.5  # time in the same unit as the pulsation period
     tilted_pulsated_m = evaluate_pulsations(tilted_m, t)
 
-This will create a pulsation with its axis tilted 45 degrees around the y-axis. You can visualize the difference between an untilted and tilted pulsation:
+This will create a pulsation whose symmetry axis is the rotation axis tilted by 45 degrees around the x-axis. You can visualize the difference between an untilted and tilted pulsation:
 
 .. code-block:: python
 
@@ -264,7 +264,7 @@ This will create a pulsation with its axis tilted 45 degrees around the y-axis. 
     m = IcosphereModel.construct(1000, 1., 1.,
                                 bb.to_parameters(), bb.parameter_names)
     untilted_m = add_pulsation(m, 0, 1, 2., jnp.array([[1e-1, 0.]]))
-    tilted_m = add_pulsation(m, 0, 1, 2., jnp.array([[1e-1, 0.]]), pulsation_axes=jnp.array([0., 1., 0.]), pulsation_angles=jnp.array([45.]))
+    tilted_m = add_pulsation(m, 0, 1, 2., jnp.array([[1e-1, 0.]]), pulsation_axes=jnp.array([1., 0., 0.]), pulsation_angles=jnp.array([45.]))
 
     untilted_pulsated_m = evaluate_pulsations(untilted_m, 0.5)
     tilted_pulsated_m = evaluate_pulsations(tilted_m, 0.5)

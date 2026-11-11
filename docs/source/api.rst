@@ -131,12 +131,13 @@ MeshModel
    .. py:attribute:: pulsation_axes
       :type: Float[Array, "n_puls_orders 3"]
 
-      Axes of pulsation modes.
+      Tilt axes of pulsation modes. Each mode is symmetric about the mesh's
+      ``rotation_axis`` tilted by ``pulsation_angles`` about this axis.
 
    .. py:attribute:: pulsation_angles
       :type: Float[Array, "n_puls_orders"]
 
-      Angles of pulsation modes.
+      Tilt angles of pulsation modes, in degrees.
 
 IcosphereModel
 ~~~~~~~~~~~~~~
