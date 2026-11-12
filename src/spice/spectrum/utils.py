@@ -29,8 +29,59 @@ def _log2():
 def _ln10():
     return jnp.log(10.0)
 
-@jax.jit
-def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
+# Default static kernel half-width (pixels). Public wrappers widen it to the
+# next power-of-two step when concrete inputs need more, so low-R/finely
+# sampled spectra are no longer silently truncated.
+DEFAULT_MAX_HALF_WIDTH = 2046
+
+
+def _is_concrete(*values):
+    return not any(isinstance(v, jax.core.Tracer) for v in values)
+
+
+def _kernel_half_width(log_wavelength, R_min, window_size):
+    """Pixels needed for ``window_size`` sigma at resolving power ``R_min`` (concrete inputs)."""
+    import numpy as np
+    log_wavelength = np.asarray(log_wavelength, dtype=float)
+    delta_log = (log_wavelength[-1] - log_wavelength[0]) / (log_wavelength.shape[0] - 1)
+    sigma_log = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)) * float(R_min) * np.log(10.0))
+    return int(np.floor(window_size * sigma_log / delta_log))
+
+
+def _static_cap(needed):
+    """Smallest cap >= max(needed, default) on a 2**k - 2 ladder (few recompiles)."""
+    if needed <= DEFAULT_MAX_HALF_WIDTH:
+        return DEFAULT_MAX_HALF_WIDTH
+    return (1 << (int(needed) + 2 - 1).bit_length()) - 2
+
+
+def _resolve_cap(max_half_width, log_wavelength, R_min, window_size):
+    if max_half_width is not None:
+        if not isinstance(max_half_width, int) or max_half_width <= 0:
+            raise ValueError("max_half_width must be a positive static integer")
+        return max_half_width
+    if _is_concrete(log_wavelength, R_min):
+        return _static_cap(_kernel_half_width(log_wavelength, R_min, window_size))
+    return DEFAULT_MAX_HALF_WIDTH
+
+
+def _warn_truncated(needed, cap):
+    import warnings
+    needed = int(needed)
+    if needed > cap:
+        warnings.warn(
+            f"Spectral-resolution kernel needs {needed} pixels per side but is capped at {cap}; "
+            "the broadening will be too narrow. Pass a larger static max_half_width "
+            "(or call outside jax.jit so the cap is chosen automatically).",
+            RuntimeWarning, stacklevel=2)
+
+
+def _check_truncation(needed, cap):
+    # Works both eagerly and under jit (callback runs when the value is known).
+    jax.debug.callback(_warn_truncated, needed, cap)
+
+
+def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0, max_half_width=None):
     """
     Apply a single Gaussian spectral resolution to one spectrum (JIT-compatible).
 
@@ -44,24 +95,32 @@ def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
         Resolving power (λ / Δλ_FWHM).
     window_size : float
         Number of Gaussian σ on either side of the kernel (controls truncation).
-        The kernel half-width is also capped at 2046 pixels, so on very finely
-        sampled grids a low R (e.g. R <~ 500 at 0.3 km/s per pixel) is
-        truncated and comes out narrower than requested.
+    max_half_width : int, optional
+        Static kernel half-width in pixels. By default it is 2046, widened
+        automatically when ``log_wavelength`` and ``R`` are concrete and the
+        kernel needs more. Under an outer ``jax.jit`` with traced ``R`` the
+        default is used; a ``RuntimeWarning`` is raised if that truncates the
+        kernel, in which case pass a larger value explicitly.
 
     Returns
     -------
     flux_lowres : (N,)
         Spectrum convolved to the target resolving power.
     """
+    cap = _resolve_cap(max_half_width, log_wavelength, R, window_size)
+    return _apply_spectral_resolution(log_wavelength, flux, R, window_size, cap)
+
+
+@partial(jax.jit, static_argnames=("max_half_width",))
+def _apply_spectral_resolution(log_wavelength, flux, R, window_size, max_half_width):
     N = flux.shape[0]
     delta_log = (log_wavelength[-1] - log_wavelength[0]) / (N - 1)
 
     # Gaussian sigma in log10(λ) space
     sigma_log = 1.0 / (2.0 * jnp.sqrt(2.0 * _log2()) * R * _ln10())
 
-    # Define kernel width (static cap for JIT safety)
-    max_half_width = 2046
     est_half_width = jnp.floor(window_size * sigma_log / delta_log).astype(int)
+    _check_truncation(est_half_width, max_half_width)
     half_width = jnp.minimum(est_half_width, max_half_width)
 
     grid = jnp.arange(-max_half_width, max_half_width + 1)
@@ -88,34 +147,44 @@ def apply_spectral_resolution(log_wavelength, flux, R, window_size=4.0):
         dimension_numbers=("NWC", "WIO", "NWC"),
         precision=jax.lax.Precision.HIGHEST
     )
-    
+
     return flux_conv[0, :, 0]
 
 
-@partial(jax.jit, static_argnames=("segment_size",))
 def apply_variable_resolution(
     log_wavelength: jnp.ndarray,
     flux: jnp.ndarray,
     R_array: jnp.ndarray,
     segment_size: int = 512,
+    max_half_width: int = None,
 ):
     """Convolve a uniform log10 wavelength grid with segment-mean resolving power.
 
     All inputs have shape (N,), with N >= 2. ``segment_size`` is a positive
     static integer. Each segment includes neighbouring spectrum samples out
-    to the Gaussian kernel's 2046-pixel cap; only the spectrum's outer edges
+    to the Gaussian kernel's half-width; only the spectrum's outer edges
     are padded with the global mean, matching :func:`apply_spectral_resolution`.
     The final, shorter segment uses only its real R samples in the mean.
+    ``max_half_width`` behaves as in :func:`apply_spectral_resolution`
+    (chosen from the lowest R when inputs are concrete, else 2046 with a
+    warning on truncation).
     """
     if (flux.ndim != 1 or log_wavelength.shape != flux.shape
             or R_array.shape != flux.shape or flux.shape[0] < 2):
         raise ValueError("wavelength, flux, and R_array must have matching 1-D shapes with at least two samples")
     if not isinstance(segment_size, int) or segment_size <= 0:
         raise ValueError("segment_size must be a positive static integer")
+    R_min = jnp.min(R_array) if _is_concrete(R_array) else R_array
+    cap = _resolve_cap(max_half_width, log_wavelength, R_min, 4.0)
+    return _apply_variable_resolution(log_wavelength, flux, R_array, segment_size, cap)
+
+
+@partial(jax.jit, static_argnames=("segment_size", "max_half_width"))
+def _apply_variable_resolution(log_wavelength, flux, R_array, segment_size, max_half_width):
     n = flux.shape[0]
     n_segments = (n + segment_size - 1) // segment_size
     tail = n_segments * segment_size - n
-    pad = 2046
+    pad = max_half_width
     delta_log = (log_wavelength[-1] - log_wavelength[0]) / (n - 1)
     padded_flux = jnp.pad(flux, (pad, pad + tail), mode="mean")
     padded_R = jnp.pad(R_array, (0, tail))
@@ -127,7 +196,8 @@ def apply_variable_resolution(
         r_values = jax.lax.dynamic_slice_in_dim(padded_R, start, segment_size)
         r_mean = jnp.sum(r_values) / jnp.minimum(segment_size, n - start)
         sigma_log = 1.0 / (2.0 * jnp.sqrt(2.0 * _log2()) * r_mean * _ln10())
-        half_width = jnp.minimum(jnp.floor(4.0 * sigma_log / delta_log).astype(int), pad)
+        needed = jnp.floor(4.0 * sigma_log / delta_log).astype(int)
+        half_width = jnp.minimum(needed, pad)
         weights = jnp.exp(-0.5 * (grid * delta_log / sigma_log)**2)
         weights = jnp.where(jnp.abs(grid) <= half_width, weights, 0.0)
         weights = (weights / jnp.sum(weights)).astype(flux.dtype)
@@ -136,9 +206,10 @@ def apply_variable_resolution(
             dimension_numbers=("NWC", "WIO", "NWC"),
             precision=jax.lax.Precision.HIGHEST,
         )
-        return None, result[0, :, 0]
+        return None, (result[0, :, 0], needed)
 
-    _, segments = jax.lax.scan(process_segment, None, jnp.arange(n_segments))
+    _, (segments, needed) = jax.lax.scan(process_segment, None, jnp.arange(n_segments))
+    _check_truncation(jnp.max(needed), max_half_width)
     return segments.reshape(-1)[:n]
 
 

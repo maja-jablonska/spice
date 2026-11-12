@@ -23,7 +23,7 @@ K_B_ERG_K = 1.380649e-16     # erg / K
 M_P_G = 1.6726219e-24        # g
 
 # -- Newtonian gravitational constant --------------------------------------
-G_SI = 6.674e-11             # m^3 kg^-1 s^-2
+G_SI = 6.67430e-11           # m^3 kg^-1 s^-2 (CODATA 2018; G*M_sun = IAU 2015 nominal 1.3271244e20)
 
 # -- Solar mass -------------------------------------------------------------
 SOLAR_MASS_KG = 1.988409870698051e30   # kg

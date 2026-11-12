@@ -57,3 +57,52 @@ def test_invalid_segment_size_is_rejected(size):
     x, y = spectrum()
     with pytest.raises(ValueError, match='positive static integer'):
         apply_variable_resolution(x, y, jnp.ones_like(y), size)
+
+
+def _low_r_case():
+    # 0.3 km/s pixels; R = 300 needs ~1800 sigma-pixels -> ~7200 per side at 4 sigma
+    n = 20001
+    dlog = 0.3 / 299792.458 / np.log(10)
+    x = 3.7 + dlog * jnp.arange(n)
+    y = 1 - 0.8 * jnp.exp(-((jnp.arange(n) - n // 2) / 3.0)**2)
+    return x, y
+
+
+def _numpy_reference(x, y, R):
+    dx = float(x[1] - x[0])
+    sigma = 1. / (2 * np.sqrt(2 * np.log(2)) * R * np.log(10))
+    width = int(np.floor(4 * sigma / dx))
+    offset = np.arange(-width, width + 1)
+    kernel = np.exp(-0.5 * (offset * dx / sigma)**2)
+    kernel /= kernel.sum()
+    padded = np.pad(np.asarray(y), (width, width), constant_values=float(y.mean()))
+    return np.convolve(padded, kernel, mode='valid'), width
+
+
+@pytest.mark.parametrize('variable', [False, True])
+def test_low_resolution_kernel_is_not_truncated(variable):
+    x, y = _low_r_case()
+    R = 300.
+    expected, width = _numpy_reference(x, y, R)
+    assert width > 2046  # the old static cap would have truncated this kernel
+    if variable:
+        out = apply_variable_resolution(x, y, jnp.full_like(y, R), segment_size=4096)
+    else:
+        out = apply_spectral_resolution(x, y, R)
+    np.testing.assert_allclose(np.asarray(out), expected, rtol=1e-9, atol=1e-11)
+
+
+def test_traced_truncation_warns_and_explicit_cap_fixes_it():
+    x, y = _low_r_case()
+    fn = jax.jit(lambda R: apply_spectral_resolution(x, y, R))
+    with pytest.warns(RuntimeWarning, match="capped at 2046"):
+        jax.block_until_ready(fn(300.))
+        jax.effects_barrier()
+    wide = jax.jit(lambda R: apply_spectral_resolution(x, y, R, max_half_width=8190))
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        out = jax.block_until_ready(wide(300.))
+        jax.effects_barrier()
+    np.testing.assert_allclose(np.asarray(out), np.asarray(apply_spectral_resolution(x, y, 300.)),
+                               rtol=1e-10, atol=1e-12)

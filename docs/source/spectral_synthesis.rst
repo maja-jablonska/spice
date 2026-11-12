@@ -154,8 +154,12 @@ shorter final segment. Adjacent segments share input spectrum samples for
 convolution; only the spectrum's outer edges are padded with its global
 mean. ``segment_size`` is a positive static integer under JIT. Smaller
 segments track changes in resolving power more closely. Both functions
-truncate Gaussian support at four sigma, capped at 2046 pixels per side
-(the single-resolution function also accepts ``window_size``).
+truncate Gaussian support at four sigma (the single-resolution function
+also accepts ``window_size``). The kernel buffer is static under JIT: it
+defaults to 2046 pixels per side and is widened automatically when the
+wavelengths and resolving power are concrete. Inside your own ``jax.jit``
+with a traced resolving power, a kernel wider than the buffer raises a
+``RuntimeWarning``; pass a larger static ``max_half_width`` in that case.
 
 
 .. _nonradial-lpv:
