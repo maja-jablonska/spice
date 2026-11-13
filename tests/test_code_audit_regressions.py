@@ -211,3 +211,58 @@ def test_phoebe_eclipse_finder_warns_for_a_window_shorter_than_a_period():
     with pytest.warns(RuntimeWarning, match="less than one period"):
         mids = [e["mid"] for e in find_binary_eclipses(b)]
     np.testing.assert_allclose(mids, [0.5], atol=1e-6)
+
+
+# --- Eclipse kind names follow the component in front --------------------------
+
+def test_keplerian_eclipse_kind_follows_the_front_component():
+    import jax.numpy as jnp
+    from spice.models import IcosphereModel, Binary, find_binary_eclipses
+    from spice.models.binary import add_orbit
+    from spice.models.mesh_view import get_mesh_view
+
+    los = jnp.array([0.0, 0.0, -1.0])
+    names, params = ["teff"], jnp.array([5777.0])
+    big = get_mesh_view(IcosphereModel.construct(100, 1.0, 1.0, params, names), los)
+    small = get_mesh_view(IcosphereModel.construct(100, 0.8, 0.8, params, names), los)
+    b = add_orbit(Binary.from_bodies(big, small), P=0.01, ecc=0.0, T=0.0, i=np.pi / 2,
+                  omega=0.0, Omega=0.0, mean_anomaly=0.0, reference_time=0.0, vgamma=0.0,
+                  orbit_resolution_points=20)
+    got = sorted((round(e["mid"] / 0.01, 2), e["front"], e["kind"]) for e in find_binary_eclipses(b))
+    # phase 0.25: the smaller secondary crosses the primary; 0.75: the primary hides it
+    assert got == [(0.25, 2, "annular"), (0.75, 1, "total")]
+
+
+def test_phoebe_eclipse_kind_follows_the_front_component():
+    from spice.models import find_binary_eclipses
+    # PHOEBE's w points toward the observer; in the fake orbit body2 has w > 0 at t = 0.
+    b = _fake_phoebe_binary(np.linspace(0.0, 1.0, 101))
+    got = sorted((round(e["mid"], 3), e["front"], e["kind"]) for e in find_binary_eclipses(b))
+    assert got == [(0.0, 2, "annular"), (0.5, 1, "total")]
+
+
+def test_find_eclipses_without_depths_keeps_radius_naming():
+    from spice.models import find_eclipses
+    t = np.linspace(-0.25, 0.25, 51)          # one eclipse, at t = 0
+    w = 2 * np.pi
+    pos1 = np.zeros((t.size, 2)); vel1 = np.zeros((t.size, 2))
+    pos2 = np.stack([5 * np.sin(w * t), np.zeros_like(t)], axis=1)
+    vel2 = np.stack([5 * w * np.cos(w * t), np.zeros_like(t)], axis=1)
+    (e,) = find_eclipses(t, pos1, vel1, pos2, vel2, 1.0, 0.5)
+    assert e["front"] is None and e["kind"] == "total"
+    (e,) = find_eclipses(t, pos1, vel1, pos2, vel2, 1.0, 0.5,
+                         depth1=np.ones_like(t), depth2=np.zeros_like(t))
+    assert e["front"] == 2 and e["kind"] == "annular"
+
+
+def test_full_overlap_found_when_the_eclipse_spans_many_samples():
+    # 30 orbit samples across the eclipse: the old finder looked for the minimum
+    # separation only ~10 samples past ingress and called this eclipse 'partial'.
+    from spice.models import find_eclipses
+    t = np.linspace(-0.3, 0.3, 61)
+    z = np.zeros((t.size, 2))
+    pos2 = np.stack([10 * t, np.full_like(t, 0.1)], axis=1)      # impact parameter 0.1
+    vel2 = np.stack([np.full_like(t, 10.0), np.zeros_like(t)], axis=1)
+    (e,) = find_eclipses(t, z, z, pos2, vel2, 1.0, 0.5)
+    assert e["kind"] == "total"
+    np.testing.assert_allclose([e["T2"], e["T3"]], [-np.sqrt(0.24) / 10, np.sqrt(0.24) / 10], atol=1e-6)

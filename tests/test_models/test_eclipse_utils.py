@@ -22,12 +22,15 @@ def _binary(i, ecc=0.0, omega=0.0, T=0.0):
 
 
 class TestFindBinaryEclipses:
-    def test_edge_on_circular_two_total_eclipses(self):
+    def test_edge_on_circular_annular_and_total_eclipses(self):
         binary = _binary(i=np.pi / 2)
         eclipses = find_binary_eclipses(binary, los_vector=LOS)
 
         assert len(eclipses) == 2
-        assert all(e['kind'] == 'total' for e in eclipses)
+        # Phase 0.25: the smaller secondary in front (transit, 'annular');
+        # phase 0.75: the larger primary in front hides it ('total').
+        by_mid = sorted(eclipses, key=lambda e: e['mid'])
+        assert [(e['front'], e['kind']) for e in by_mid] == [(2, 'annular'), (1, 'total')]
         # Conjunctions at quarter phases for this convention
         mids = sorted(e['mid'] for e in eclipses)
         assert np.isclose(mids[0], 0.25 * binary.P, rtol=1e-3)
