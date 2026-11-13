@@ -163,3 +163,51 @@ def test_spherical_harmonic_spots_reject_half_specified_tilt(kwargs):
     with pytest.raises(ValueError, match="tilt_axes and tilt_angles"):
         add_spherical_harmonic_spots(m, jnp.array([0]), jnp.array([1]), jnp.array([100.]),
                                      jnp.array([0]), **kwargs)
+
+
+# --- PhoebeBinary eclipse finder: periodic padding of the computed window -------
+
+def _fake_phoebe_binary(times_days, period_days=1.0, a=5.0, r1=1.0, r2=0.8):
+    """Edge-on circular orbit sampled like PHOEBE's uvw orb dataset.
+
+    The relative sky separation is u = a sin(2 pi t / P), so the eclipses are at
+    t = 0 and t = P/2 (mod P).
+    """
+    from types import SimpleNamespace
+    from spice.constants import SOLAR_RAD_M
+    from spice.models.binary import PhoebeBinary, DAY_TO_YEAR
+
+    t = np.asarray(times_days, dtype=float)
+    w = 2 * np.pi / period_days
+    rel = np.stack([a * np.sin(w * t), np.zeros_like(t), a * np.cos(w * t)], axis=1)
+    rel_v = np.stack([a * w * np.cos(w * t), np.zeros_like(t), -a * w * np.sin(w * t)], axis=1)
+    to_kms = SOLAR_RAD_M / 86400.0e3          # solRad/day -> km/s
+    fields = {f: None for f in PhoebeBinary._fields}
+    fields.update(body1=SimpleNamespace(radius=r1), body2=SimpleNamespace(radius=r2),
+                  P=period_days * DAY_TO_YEAR, evaluated_times=t,
+                  body1_centers=-0.5 * rel, body2_centers=0.5 * rel,
+                  body1_velocities=-0.5 * rel_v * to_kms, body2_velocities=0.5 * rel_v * to_kms)
+    return PhoebeBinary(**fields)
+
+
+def test_phoebe_eclipse_finder_pads_a_one_period_window():
+    from spice.models import find_binary_eclipses
+    # One period, both ends included: the eclipse at t = 0 straddles the window start.
+    b = _fake_phoebe_binary(np.linspace(0.0, 1.0, 101))
+    mids = sorted(e["mid"] for e in find_binary_eclipses(b))
+    np.testing.assert_allclose(mids, [0.0, 0.5], atol=1e-6)
+
+
+def test_phoebe_eclipse_finder_keeps_every_eclipse_in_a_longer_window():
+    from spice.models import find_binary_eclipses
+    b = _fake_phoebe_binary(np.linspace(-0.2, 2.2, 241))
+    mids = sorted(e["mid"] for e in find_binary_eclipses(b))
+    np.testing.assert_allclose(mids, [0.0, 0.5, 1.0, 1.5, 2.0], atol=1e-6)
+
+
+def test_phoebe_eclipse_finder_warns_for_a_window_shorter_than_a_period():
+    from spice.models import find_binary_eclipses
+    b = _fake_phoebe_binary(np.linspace(0.0, 0.8, 81))
+    with pytest.warns(RuntimeWarning, match="less than one period"):
+        mids = [e["mid"] for e in find_binary_eclipses(b)]
+    np.testing.assert_allclose(mids, [0.5], atol=1e-6)
