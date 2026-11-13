@@ -83,7 +83,7 @@ class LightCurve:
 
 def eclipse_windows(lc: LightCurve, theta, margin=0.15):
     """[(label, phase_start, phase_end)] for both eclipses, labelled by which star is
-    hidden (find_binary_eclipses calls both of these 'total', so its kind is no key)."""
+    hidden (unique keys; find_binary_eclipses also reports this as e['front'])."""
     from spice.models import find_binary_eclipses
     from spice.models.binary import evaluate_orbit
     b = lc.binary(theta)

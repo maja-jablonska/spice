@@ -155,16 +155,16 @@ concentrate the synthesis time points there:
 
     eclipses = find_binary_eclipses(binary)   # scans one period by default
     for e in eclipses:
-        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in years
+        print(e['kind'], e['front'], e['T1'], e['mid'], e['T4'])   # times in years
 
     # Densely sample the first eclipse window only
     dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 10)
     primaries, secondaries = evaluate_orbit_at_times(binary, dense)
 
-For the system above this finds two eclipses per period, at phases 0.25 and
-0.75. Both are reported with ``kind='total'``: the label only says that the
-smaller disc lies entirely inside the larger one, not which star is in front,
-so the phase-0.25 event is physically a transit of the secondary.
+For the system above this finds two eclipses per period. At phase 0.25 the
+smaller secondary crosses the primary (``front=2``, ``kind='annular'``); at
+phase 0.75 the primary hides the secondary completely (``front=1``,
+``kind='total'``).
 
 See :doc:`binaries` for the full binary-modelling guide (including PHOEBE
 import) and :doc:`synthetic_photometry` for the available filters and

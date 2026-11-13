@@ -152,33 +152,33 @@ events instead of sampling the whole orbit densely:
 
     eclipses = find_binary_eclipses(binary)   # scans one period by default
     for e in eclipses:
-        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in years
+        print(e['kind'], e['front'], e['T1'], e['mid'], e['T4'])   # times in years
 
     # Concentrate synthesis points inside the first eclipse window
     dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 10)
     primaries, secondaries = evaluate_orbit_at_times(binary, dense)
 
-``kind`` is one of:
+``front`` is the component nearer the observer at mid-eclipse (1 for
+``body1``, 2 for ``body2``), and ``kind`` is one of:
 
 ``'partial'``
     The discs overlap, but the smaller one never lies entirely inside the
     larger one. ``T2`` and ``T3`` are ``None``.
-``'total'`` / ``'annular'``
-    The smaller disc lies entirely inside the larger one between the inner
-    contacts ``T2`` and ``T3``. The event is called ``'total'`` when
-    ``body1`` is at least as large as ``body2`` and ``'annular'`` otherwise.
+``'total'``
+    The front component is at least as large as the back one and hides it
+    completely between the inner contacts ``T2`` and ``T3``.
+``'annular'``
+    A smaller front component lies entirely inside the back one's disc
+    between ``T2`` and ``T3``: a transit.
 ``'grazing'``
     The minimum separation reaches the inner-contact limit ``|R1 - R2|``, but
     the inner contacts cannot be resolved (totality is numerically
     borderline). ``T2`` and ``T3`` are ``None``.
 
-The label reflects only the relative radii of ``body1`` and ``body2``, not
-which star is in front. Both events of one system therefore get the same
-label. For the edge-on system above this finds two eclipses per period, at
-phases 0.25 and 0.75, both ``'total'``, although the phase-0.25 event is
-physically a transit of the smaller secondary across the primary. To tell
-which component is in front, compare the components' positions along the
-line of sight at ``e['mid']`` (the companion notebook shows how).
+For the edge-on system above this finds two eclipses per period: at phase
+0.25 the smaller secondary transits the primary (``front=2``,
+``kind='annular'``), and at phase 0.75 the primary hides it completely
+(``front=1``, ``kind='total'``).
 
 The sky plane defaults to the plane perpendicular to ``body1``'s line of
 sight — the same vector the occlusion resolution uses — so the finder agrees
@@ -265,7 +265,10 @@ Padding assumes a strictly periodic orbit, with no apsidal motion or period
 change. A window shorter than one period cannot be padded: the finder emits
 a ``RuntimeWarning``, and eclipses cut by its ends are missed. For the bundle
 above, sampled over exactly one 1-day period, it finds both eclipses, centred
-at 0 and 0.5 d (both ``'partial'``):
+at 0 and 0.5 d. The secondary is in front at 0 d (PHOEBE's superior
+conjunction) and the primary at 0.5 d. Both are ``'grazing'``: the default
+components have equal radii on an edge-on orbit, so their discs coincide
+only for an instant at mid-eclipse:
 
 .. code-block:: python
 
@@ -273,4 +276,4 @@ at 0 and 0.5 d (both ``'partial'``):
 
     eclipses = find_binary_eclipses(binary)   # the PhoebeBinary from above
     for e in eclipses:
-        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in days
+        print(e['kind'], e['front'], e['T1'], e['mid'], e['T4'])   # times in days
