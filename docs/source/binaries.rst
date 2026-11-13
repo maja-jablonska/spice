@@ -255,13 +255,17 @@ uses ``'orb01'`` automatically, or the dataset passed as
 ``orbit_dataset_name``. The component radii are PHOEBE's ``requiv``, so the
 contact times treat Roche-distorted components as spheres of equal volume.
 
-Times are in days (the PHOEBE clock). Only eclipses whose ingress and egress
-both lie inside the computed time window are found, so pad the PHOEBE
-``compute_times`` around events at the window edges. ``n_points``, ``times``
-and ``los_vector`` are ignored. For the bundle above, sampled over exactly
-one 1-day period, this finds only the eclipse in the middle of the window
-(``'partial'``, mid-eclipse at 0.5 d). The eclipse centred on the window
-edges (t = 0 and 1 d) is missed:
+Times are in days (the PHOEBE clock). ``n_points``, ``times`` and
+``los_vector`` are ignored. When the computed window spans at least one
+orbital period, the finder pads it periodically (the samples shifted by one
+period on either side), so an eclipse cut by either end of the window is still
+found. It returns every eclipse whose mid time lies in ``[t[0], t[-1])``; the
+contact times of an edge eclipse can fall just outside the computed times.
+Padding assumes a strictly periodic orbit, with no apsidal motion or period
+change. A window shorter than one period cannot be padded: the finder emits
+a ``RuntimeWarning``, and eclipses cut by its ends are missed. For the bundle
+above, sampled over exactly one 1-day period, it finds both eclipses, centred
+at 0 and 0.5 d (both ``'partial'``):
 
 .. code-block:: python
 
