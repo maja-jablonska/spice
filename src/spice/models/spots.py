@@ -373,6 +373,10 @@ def add_spherical_harmonic_spots(mesh: MeshModel,
     """
     if isinstance(mesh, PhoebeModel):
         raise ValueError("PHOEBE models are read-only.")
+    if (tilt_axes is None) != (tilt_angles is None):
+        raise ValueError(
+            "tilt_axes and tilt_angles must be given together (or both omitted); got only "
+            f"{'tilt_axes' if tilt_axes is not None else 'tilt_angles'}.")
     if (tilt_axes is not None) and (tilt_angles is not None):
         return _add_spherical_harmonic_spots_with_tilt(mesh, m_orders, n_degrees, param_deltas, param_indices, tilt_axes, tilt_angles)
     else:

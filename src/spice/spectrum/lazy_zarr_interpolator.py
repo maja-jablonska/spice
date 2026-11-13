@@ -92,7 +92,12 @@ def _axis_linear_bracket(values, value, radius=0, atol=1e-6, rtol=1e-6):
     denom = hi_value - lo_value
     safe_denom = jnp.where(same, jnp.ones_like(denom), denom)
     t_raw = (value - lo_value) / safe_denom
-    t = jnp.where(same, jnp.zeros_like(t_raw), t_raw)
+    # Clamp to the edge node. Without the clip, a query off the grid on two or
+    # more axes gets product weights such as (1-t0)(1-t1) with t0, t1 < 0 that
+    # are positive on an interior corner: at (-1, -1) on a 3x3 grid, 20% of the
+    # weight went to node (1, 1). The single-axis case was clamped only because
+    # its negative weight is dropped and the rest renormalised.
+    t = jnp.where(same, jnp.zeros_like(t_raw), jnp.clip(t_raw, 0.0, 1.0))
 
     return lo, hi, t
 
@@ -600,7 +605,10 @@ class LazyZarrInterpolator(SpectrumEmulator[ArrayLike]):
             self.store = zarr.open(zarr_path, mode='r')
             self.length = int(self.store['flux'].shape[0])
             if params is None:
-                params = list(self.store['param_names'][:])
+                # Stores written with byte-string names (e.g. numpy 'S' arrays)
+                # give b'teff', which then misses the index columns.
+                params = [p.decode() if isinstance(p, bytes) else str(p)
+                          for p in self.store['param_names'][:]]
 
             index_path = f'{zarr_path}/index.parquet'
             if not os.path.exists(index_path):

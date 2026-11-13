@@ -127,7 +127,11 @@ def get_orbit_jax(time, m1, m2, P, ecc, T, i, omega, Omega, mean_anomaly,
       i     : Inclination (radians).
       omega : Argument of periastron (radians).
       Omega : Longitude of ascending node (radians).
-      mean_anomaly : Mean anomaly at ``reference_time`` (radians).
+      mean_anomaly : Additive phase offset in radians on top of the periastron
+                     timing: ``M(t) = mean_anomaly + n * (t - T)``. It is *not*
+                     the mean anomaly at ``reference_time`` (that is
+                     ``mean_anomaly + n * (reference_time - T)``). Set either
+                     ``mean_anomaly`` or ``T``, not both.
       reference_time : Reference epoch in **years**.
       vgamma : Systemic radial velocity in **km/s** (PHOEBE / ``vgamma@binary`` units).
                Added to the barycenter velocity only (not the per-body velocities).

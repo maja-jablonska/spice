@@ -465,11 +465,11 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
 
     Args:
         binary (Binary): The binary system to evaluate. Can be a general Binary or a PhoebeBinary.
-        time (ArrayLike): The specific time at which to evaluate the orbit. This should be a scalar value
-            representing a point in time where the positions and velocities of the binary components are desired.
-        search_radius_factor (float, optional): The search radius factor to use for KD-tree based occlusion detection.
-            This parameter controls how far to search for potential occluders around each triangle.
-            Defaults to an optimal value determined based on the mesh properties.
+        time (ArrayLike): Scalar time in **years**, on the same clock as the orbit's ``T`` and
+            ``reference_time`` (see :func:`add_orbit`).
+
+    The number of occlusion neighbours searched per triangle is taken from the
+    binary itself (``n_neighbours1`` / ``n_neighbours2``, set by :func:`add_orbit`).
 
     Returns:
         Tuple[Model, Model]: A tuple containing the updated models for the primary and secondary components of
@@ -500,11 +500,11 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
 
     Args:
         binary (Binary): The binary system to evaluate. Can be a general Binary or a PhoebeBinary.
-        times (ArrayLike): An array of times at which to evaluate the orbit. Each time should correspond to a specific
-            point in the orbit where the positions and velocities of the binary components are desired.
-        search_radius_factor (float, optional): The search radius factor to use for KD-tree based occlusion detection.
-            This parameter controls how far to search for potential occluders around each triangle.
-            Defaults to an optimal value determined based on the mesh properties.
+        times (ArrayLike): 1D array of times in **years**, on the same clock as the orbit's ``T``
+            and ``reference_time`` (see :func:`add_orbit`).
+
+    The number of occlusion neighbours searched per triangle is taken from the
+    binary itself (``n_neighbours1`` / ``n_neighbours2``, set by :func:`add_orbit`).
 
     Returns:
         Tuple[List[Model], List[Model]]: A tuple containing lists of evaluated models for the primary and secondary 

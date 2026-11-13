@@ -677,54 +677,54 @@ def plot_3D_mesh_and_spectrum(mesh, spectrum, wavelengths,
                             timestamp=None,
                             timestamp_label=None) -> Tuple[plt.figure, plt.axes, plt.axes]:
     """
-    Create an animation showing both a 3D mesh model and its corresponding spectrum over time.
-    
+    Plot a single 3D mesh model next to one spectrum, in a static figure.
+
     Parameters
     ----------
-    meshes : List[MeshModel]
-        List of mesh models to animate
-    spectra : ndarray
-        Array of spectra corresponding to each mesh, shape (n_frames, n_wavelengths)
+    mesh : MeshModel
+        The mesh model to draw.
+    spectrum : ndarray
+        One spectrum, shape (n_wavelengths,), plotted against ``wavelengths``
+        (e.g. one column of ``simulate_observed_flux``'s output).
     wavelengths : ndarray
-        Wavelength array for the spectra
+        Wavelengths [Angstrom] for ``spectrum``.
     property : Union[str, int], default: DEFAULT_PROPERTY
-        Property to color the mesh by (attribute name or parameter index)
+        Property to color the mesh by (attribute name or parameter index).
     cmap : Optional[str], default: None
-        Matplotlib colormap name. If None, uses defaults based on property
+        Matplotlib colormap name. If None, uses the default for the property.
     property_label : Optional[str], default: None
-        Custom label for the colorbar. If None, uses default for the property
-    filename : str, default: 'mesh_and_spectra_animation.mp4'
-        Output filename for the animation
-    figsize : Tuple[int, int], default: (12, 8)
-        Figure size
+        Custom label for the colorbar. If None, uses the default for the property.
+    figsize : Tuple[int, int], default: (15, 5)
+        Figure size.
     mode : str, default: 'MESH'
-        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter)
+        Visualization mode - 'MESH' (triangular mesh) or 'POINTS' (scatter of
+        element centers).
     draw_los_vector : bool, default: True
-        Whether to draw the line-of-sight vector
+        Whether to draw the line-of-sight vector.
     draw_rotation_axis : bool, default: True
-        Whether to draw the rotation axis
+        Whether to draw the rotation axis.
     linewidth : float, default: 0.1
-        Line width for mesh edges
+        Line width for mesh edges.
     axes_lim : Optional[float], default: None
-        Limit for all axes. If None, calculated from mesh radius
-    timestamps : Optional[ArrayLike], default: None
-        List of timestamps corresponding to each mesh
+        Half-width of all three axes. If None, 1.5 x the mesh radius.
+    timestamp : Optional[float], default: None
+        If given, shown in the figure title as ``"Time: <timestamp> <timestamp_label>"``.
     timestamp_label : Optional[str], default: None
-        Label to accompany timestamps (e.g., "hours", "days")
-        
+        Unit label to accompany ``timestamp`` (e.g. "hours", "days").
+
     Returns
     -------
     fig : matplotlib.figure.Figure
-        The figure containing the mesh and spectrum plots
+        The figure containing the mesh and spectrum plots.
     mesh_ax : matplotlib.axes.Axes
-        The axis containing the mesh plot
+        The 3D axis containing the mesh plot.
     spec_ax : matplotlib.axes.Axes
-        The axis containing the spectrum plot
-    
+        The axis containing the spectrum plot.
+
     Raises
     ------
     ValueError
-        If the mode is invalid or if spectra and meshes have different lengths
+        If ``mode`` is not one of the supported plot modes.
     """
     if mode.upper() not in PLOT_MODES:
         raise ValueError(f'Mode must be one of {PLOT_MODES}. Got {mode.upper()}')

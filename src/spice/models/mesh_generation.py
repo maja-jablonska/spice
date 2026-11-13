@@ -225,14 +225,23 @@ def _user_icosphere_cache_dir() -> str:
 
 
 def icosphere(points: int, use_cache: bool = True) -> Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
-    """Create an icosphere_cache with at least that n points.
+    """Create a unit icosphere with at least ``points`` triangular faces.
+
+    ``points`` is a target *face* count, not a vertex count: the mesh is the
+    smallest subdivision level ``s`` with ``20 * 4**s >= points`` faces, which
+    has ``10 * 4**s + 2`` vertices. For example ``points=1000`` gives
+    ``s = 3``: 1280 faces and 642 vertices.
 
     Args:
-        points (int): Minimal number of vertices in the icosphere_cache
+        points (int): Minimum number of triangular faces (rounded up to the next
+            subdivision level, as above).
         use_cache (bool): Read icospheres from pre-generated pickle files (should speed the process up)
 
     Returns:
-        Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n, 3), triangle areas (n,), centers (n, 3)
+        Tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]: vertices (n, 3), faces (n_faces, 3),
+        triangle areas (n_faces,), face centers (n_faces, 3). The vertex array is the
+        subdivision buffer and can hold unused rows (1272 for ``points=1000``); the faces
+        reference ``10 * 4**s + 2`` distinct vertices.
     """
     # plain Python arithmetic: under jit a jnp expression on this constant is staged into a
     # tracer and the int() cast fails, which made IcosphereModel.construct untraceable
