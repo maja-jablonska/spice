@@ -28,7 +28,8 @@ A grid is a zarr store with (at least) these arrays:
 - ``wavelength`` — shared wavelength sampling, shape ``(L,)``, including when ``L == N``
 - ``flux`` and ``continuum`` — one row per grid node, shape ``(N, L)``
 - ``params`` — node parameters, shape ``(N, P)``
-- ``param_names`` — the ``P`` parameter labels (e.g. ``teff``, ``logg``, ``mu``)
+- ``param_names`` — the ``P`` parameter labels (e.g. ``teff``, ``logg``, ``mu``),
+  stored as strings or byte strings
 
 plus an ``index.parquet`` file that maps parameter combinations to row
 indices. Generate it once per grid:
@@ -52,6 +53,11 @@ Loading and querying
     # The result has shape (n_wavelengths, 2): [flux, continuum].
     log_wavelengths = jnp.log10(jnp.linspace(5000., 5010., 200))
     spec = interp.flux(log_wavelengths, interp.to_parameters({"teff": 5777., "logg": 4.44}))
+
+``params`` selects the interpolation axes by name and fixes their order. If
+it is omitted, the names and their order are read from the store's
+``param_names`` array; labels stored as strings or as byte strings are both
+accepted, byte strings being decoded to ``str``.
 
 Key constructor options:
 
@@ -82,7 +88,8 @@ Two subclasses adapt a grid to the two synthesis interfaces:
     ``mu`` with Gauss–Legendre quadrature. The ``mu`` axis may appear anywhere
     in ``params``; the interpolator maps the supplied stellar parameters and
     separate ``mu`` argument into the index's axis order. If ``params`` is
-    omitted, it reads the stored ``param_names`` metadata.
+    omitted, the axes come from the stored ``param_names`` (which must then
+    include ``mu``).
 
 :class:`~spice.spectrum.FluxLazyZarrInterpolator`
     For flux-only grids. Its ``intensity`` derives angle dependence from a

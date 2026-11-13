@@ -155,7 +155,7 @@ from spice.spectrum import simulate_observed_flux, Blackbody, AB_passband_lumino
 from spice.spectrum.filter import GaiaG
 
 bb = Blackbody()
-los = jnp.array([0.0, 1.0, 0.0])  # line of sight
+los = jnp.array([0.0, 0.0, -1.0])  # line of sight (observer -> star); orbit inclination is measured from +z
 
 # Create binary components (cast to the line of sight for occlusion handling)
 primary = get_mesh_view(
@@ -181,8 +181,10 @@ binary = add_orbit(
     orbit_resolution_points=50,
 )
 
-# Evaluate the orbit across phases (eclipses/occlusions resolved internally)
-times = jnp.linspace(0.0, 1.0, 100)
+# Evaluate the orbit across phases (eclipses/occlusions resolved internally).
+# Each step resolves occlusions between two ~1000-vertex meshes; on a laptop
+# CPU 20 steps take several minutes.
+times = jnp.linspace(0.0, 1.0, 20)
 primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
 # Combined Gaia G-band light curve
@@ -224,7 +226,8 @@ config = PhoebeConfig(b, 'mesh01')
 pb = PhoebeBinary.construct(config, ['teff', 'logg', 'abun'])
 
 # Evaluate the components at a snapshot time, then synthesise the spectrum
-primary, secondary = evaluate_orbit(pb, config.times[0])
+# (t = 0 is the primary eclipse of the default binary, so pick a later time)
+primary, secondary = evaluate_orbit(pb, config.times[2])
 wavelengths = np.logspace(3, 4, 1000)
 flux = simulate_observed_flux(bb.intensity, primary, np.log10(wavelengths))
 ```

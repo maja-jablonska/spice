@@ -39,7 +39,7 @@ Optional extras
      - ``astro-emulators-toolkit`` (>= 0.2)
    * - ``[dev]``
      - Running the test suite
-     - ``pytest``, ``pytest-datadir``, ``coverage``
+     - ``pytest``, ``pytest-datadir``, ``coverage``, ``chex``
 
 Extras combine freely, e.g.:
 

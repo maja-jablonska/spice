@@ -30,6 +30,20 @@ Two members are required:
     Converts a ``{name: value}`` mapping (or ``None`` for solar defaults)
     into the model's parameter vector.
 
+Two members have defaults you can override:
+
+``wavelength_range`` (property)
+    ``(min, max)`` wavelengths in Angstrom over which the model is valid, or
+    ``None`` (the default) if unrestricted. The synthesis entry points emit a
+    ``WavelengthCoverageWarning`` when asked for wavelengths outside it;
+    override it if your model has a finite range.
+
+``solar_parameters`` (property)
+    The solar parameter vector, by default
+    ``to_parameters(SOLAR_PARAMETERS)`` with ``SOLAR_PARAMETERS`` from
+    ``spice.spectrum.solar_parameters`` (``teff`` 5777 K, ``logg`` 4.44,
+    ``v_micro`` 2 km/s, keyed by those names).
+
 Two are optional capabilities, raising ``NotImplementedError`` by default:
 
 ``intensity(log_wavelengths, mu, parameters)``
@@ -91,7 +105,7 @@ darkening and a temperature-dependent line depth:
             line = 1.0 - depth * jnp.exp(-0.5 * ((wavelengths - self.line_center) / self.width) ** 2)
             return jnp.stack([continuum * line, continuum], axis=-1)
 
-Use it exactly like the built-in emulators:
+Use it like any built-in emulator:
 
 .. code-block:: python
 
@@ -113,6 +127,21 @@ rotation-phase-dependent.
 
 Built-in implementations to crib from
 -------------------------------------
+
+Not every built-in model subclasses :class:`~spice.spectrum.SpectrumEmulator`.
+The grid interpolators (``LazyZarrInterpolator`` and its intensity/flux
+variants), :class:`~spice.spectrum.UserSpectrumInterpolator` and the aemu
+wrappers do; :class:`~spice.spectrum.Blackbody`,
+:class:`~spice.spectrum.GaussianLineEmulator` and
+:class:`~spice.spectrum.PhysicalLineEmulator` are standalone classes that
+follow the interface by convention (duck typing) and only partly:
+``Blackbody`` and ``GaussianLineEmulator`` define ``stellar_parameter_names``,
+``solar_parameters``, ``to_parameters``, ``intensity`` and ``flux`` but no
+``wavelength_range``, and ``PhysicalLineEmulator`` defines only
+``parameter_names``, ``to_parameters`` and ``intensity``. Synthesis only needs
+the ``intensity`` callable, so either style works; subclassing gives you the
+default ``wavelength_range`` / ``solar_parameters`` and the abstract-method
+checks.
 
 - :class:`~spice.spectrum.Blackbody` — minimal single-parameter emulator
   with optional limb darkening (``blackbody.py``).

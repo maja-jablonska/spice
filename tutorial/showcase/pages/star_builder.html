@@ -1,0 +1,211 @@
+<title>SPICE Star Builder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: an observing console. Star on the left, its spectrum on the right, one control strip underneath. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --fg: #121417; --muted: #555b66; --rule: #dde0e6;
+  --accent: #eb6834; --ghost: #a3a7b0; --focus: #2a78d6;
+  --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1114; --surface: #171a1f; --fg: #eef0f3; --muted: #a2a8b3; --rule: #2a2f37;
+  --accent: #f07a45; --ghost: #5d636d; --focus: #3987e5; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1114; --surface: #171a1f; --fg: #eef0f3; --muted: #a2a8b3; --rule: #2a2f37;
+  --accent: #f07a45; --ghost: #5d636d; --focus: #3987e5; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 28px 40px; display: grid; gap: 22px; }
+header h1 { font-family: var(--display); font-weight: 600; font-size: clamp(1.7rem, 3.2vw, 2.4rem); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 68ch; }
+.stage { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 22px; align-items: stretch; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.readout { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.readout b { color: var(--fg); font-weight: 500; }
+#disk { width: 100%; max-width: 420px; aspect-ratio: 1; justify-self: center; display: block; }
+#spec { width: 100%; height: auto; display: block; overflow: visible; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 22px; }
+.ctl { display: grid; gap: 6px; min-width: 0; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, .play { font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; padding: 8px 10px; border-radius: 6px;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.seg button:focus-visible, .play:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.phase { display: flex; gap: 10px; align-items: center; }
+.phase input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.note { font-size: 13px; color: var(--muted); max-width: 80ch; }
+.tip { font-family: var(--mono); font-size: 12px; fill: var(--fg); }
+svg text { fill: var(--muted); font-family: var(--mono); font-size: 12px; }
+@media (max-width: 760px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Build a star, read its spectrum</h1>
+    <p>Pick a temperature, spin and viewing angle, add a cool spot and turn the star. Every spectrum here was synthesised by SPICE from its surface mesh with the TPayne-spice-harps-interp v1.2.0 emulator, element by element, with Doppler shifts and limb darkening.</p>
+  </header>
+
+  <section class="stage">
+    <div class="panel">
+      <div class="label">Sky view</div>
+      <canvas id="disk" width="840" height="840" aria-label="Rendered stellar disc"></canvas>
+      <div class="readout" id="starReadout"></div>
+    </div>
+    <div class="panel">
+      <div class="label">Mg b triplet, normalised flux</div>
+      <svg id="spec" viewBox="0 0 640 360" role="img" aria-label="Synthetic spectrum"></svg>
+      <div class="readout"><span><svg width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--accent)" stroke-width="2.5"/></svg> this star</span>
+        <span><svg width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--ghost)" stroke-width="1.5"/></svg> same star, not rotating, no spot</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="controls">
+      <div class="ctl"><span class="label" id="lT">Effective temperature [K]</span><div class="seg" id="cT" role="group" aria-labelledby="lT"></div></div>
+      <div class="ctl"><span class="label" id="lV">Equatorial velocity [km/s]</span><div class="seg" id="cV" role="group" aria-labelledby="lV"></div></div>
+      <div class="ctl"><span class="label" id="lI">Inclination [deg]</span><div class="seg" id="cI" role="group" aria-labelledby="lI"></div></div>
+      <div class="ctl"><span class="label" id="lS">Cool spot</span><div class="seg" id="cS" role="group" aria-labelledby="lS"></div></div>
+      <div class="ctl"><label class="label" for="ph">Rotation phase</label>
+        <div class="phase"><input type="range" id="ph" min="0" step="1" value="0"><button class="play" id="play" type="button">Play</button></div></div>
+    </div>
+    <p class="note">The grid is precomputed: log g 4.4, solar abundances, ξ 1.5 km/s; the spot is 25° in radius and 25% cooler than the photosphere. The disc colours use a blackbody approximation and simple limb darkening for display only; the spectra carry the emulator's own angle dependence.</p>
+  </section>
+</div>
+
+<script>
+const D = /*__DATA__*/null;
+const dec = (s, T) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); };
+const WL = dec(D.wl, Float32Array), FLUX = dec(D.flux, Uint16Array), V = dec(D.verts, Float32Array), F = dec(D.faces, Int32Array);
+const SW = dec(D.spotW, Uint8Array), ROT = dec(D.rots, Float32Array), BAS = dec(D.bases, Float32Array);
+const [nT, nV, nI, nS, nP, nW] = D.dims, nF = F.length / 3, nVert = V.length / 3;
+const st = { t: 2, v: 2, i: 1, s: 2, p: 0 };
+let playing = !matchMedia("(prefers-reduced-motion: reduce)").matches, timer = null;
+
+function spectrum(t, v, i, s, p) {
+  const off = (((((t * nV + v) * nI + i) * nS + s) * nP + p) * nW), out = new Float32Array(nW);
+  for (let k = 0; k < nW; k++) out[k] = FLUX[off + k] / 65535 * 1.2;
+  return out;
+}
+
+// ---- controls
+function seg(id, values, key, fmt) {
+  const el = document.getElementById(id);
+  values.forEach((val, j) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = fmt(val);
+    b.addEventListener("click", () => { st[key] = j; sync(); draw(); });
+    el.appendChild(b);
+  });
+}
+seg("cT", D.teffs, "t", x => x.toFixed(0));
+seg("cV", D.veqs, "v", x => x.toFixed(0));
+seg("cI", D.incls, "i", x => x.toFixed(0));
+seg("cS", D.spotLats, "s", x => x === null ? "none" : (x === 0 ? "equator" : `lat ${x}°`));
+const ph = document.getElementById("ph"); ph.max = nP - 1;
+ph.addEventListener("input", () => { st.p = +ph.value; stop(); draw(); });
+const playBtn = document.getElementById("play");
+playBtn.addEventListener("click", () => { playing ? stop() : start(); });
+function start() { playing = true; playBtn.textContent = "Pause"; clearInterval(timer);
+  timer = setInterval(() => { st.p = (st.p + 1) % nP; ph.value = st.p; draw(); }, 260); }
+function stop() { playing = false; playBtn.textContent = "Play"; clearInterval(timer); }
+function sync() {
+  for (const [id, key] of [["cT", "t"], ["cV", "v"], ["cI", "i"], ["cS", "s"]])
+    [...document.getElementById(id).children].forEach((b, j) => b.setAttribute("aria-pressed", j === st[key]));
+  ph.value = st.p;
+}
+
+// ---- disc
+function bb(T) {  // approximate sRGB of a blackbody (Helland), 0..1
+  const t = T / 100; let r, g, b;
+  r = t <= 66 ? 255 : 329.7 * Math.pow(t - 60, -0.1332);
+  g = t <= 66 ? 99.47 * Math.log(t) - 161.12 : 288.12 * Math.pow(t - 60, -0.0755);
+  b = t >= 66 ? 255 : (t <= 19 ? 0 : 138.52 * Math.log(t - 10) - 305.04);
+  return [r, g, b].map(x => Math.min(255, Math.max(0, x)) / 255);
+}
+const cv = document.getElementById("disk"), ctx = cv.getContext("2d");
+function drawDisk() {
+  const R = ROT.subarray(st.p * 9, st.p * 9 + 9), B = BAS.subarray(st.i * 9, st.i * 9 + 9);
+  const n = [B[0], B[1], B[2]], r = [B[3], B[4], B[5]], u = [B[6], B[7], B[8]];
+  const P = new Float32Array(nVert * 3);
+  for (let k = 0; k < nVert; k++) for (let j = 0; j < 3; j++)
+    P[3 * k + j] = V[3 * k] * R[j] + V[3 * k + 1] * R[3 + j] + V[3 * k + 2] * R[6 + j];
+  const W = cv.width, s = W / 2 / 1.08, T0 = D.teffs[st.t], frac = D.spotDtFrac;
+  const vis = [];
+  for (let f = 0; f < nF; f++) {
+    const a = F[3 * f], b = F[3 * f + 1], c = F[3 * f + 2];
+    const cx = (P[3 * a] + P[3 * b] + P[3 * c]) / 3, cy = (P[3 * a + 1] + P[3 * b + 1] + P[3 * c + 1]) / 3, cz = (P[3 * a + 2] + P[3 * b + 2] + P[3 * c + 2]) / 3;
+    const len = Math.hypot(cx, cy, cz); if (len === 0) continue;
+    const depth = cx * n[0] + cy * n[1] + cz * n[2], mu = -depth / len;
+    if (mu <= 0) continue;
+    vis.push([depth, f, mu]);
+  }
+  vis.sort((p, q) => q[0] - p[0]);
+  ctx.clearRect(0, 0, W, W);
+  for (const [, f, mu] of vis) {
+    const w = st.s === 0 ? 0 : SW[(st.s - 1) * nF + f] / 255;
+    const col = bb(T0 * (1 + frac * w)), ld = 0.35 + 0.65 * mu;
+    const css = `rgb(${col.map(x => Math.round(255 * x * ld)).join(",")})`;
+    ctx.beginPath();
+    for (let j = 0; j < 3; j++) {
+      const v = F[3 * f + j], x = P[3 * v] * r[0] + P[3 * v + 1] * r[1] + P[3 * v + 2] * r[2], y = P[3 * v] * u[0] + P[3 * v + 1] * u[1] + P[3 * v + 2] * u[2];
+      j ? ctx.lineTo(W / 2 + s * x, W / 2 - s * y) : ctx.moveTo(W / 2 + s * x, W / 2 - s * y);
+    }
+    ctx.closePath(); ctx.fillStyle = css; ctx.strokeStyle = css; ctx.lineWidth = 0.8; ctx.fill(); ctx.stroke();
+  }
+  const vsini = D.veqs[st.v] * Math.sin(D.incls[st.i] * Math.PI / 180);
+  document.getElementById("starReadout").innerHTML =
+    `<span>T<sub>eff</sub> <b>${T0.toFixed(0)} K</b></span><span>v sin i <b>${vsini.toFixed(1)} km/s</b></span><span>phase <b>${D.phases[st.p].toFixed(2)}</b></span>`;
+}
+
+// ---- spectrum (SVG, one scale for marks and ticks)
+const svg = document.getElementById("spec"), NS = "http://www.w3.org/2000/svg";
+const M = { l: 46, r: 12, t: 26, b: 34 }, VW = 640, VH = 360;
+const x0 = WL[0], x1 = WL[nW - 1], y0 = 0, y1 = 1.08;
+const X = w => M.l + (w - x0) / (x1 - x0) * (VW - M.l - M.r), Y = f => VH - M.b - (f - y0) / (y1 - y0) * (VH - M.t - M.b);
+function el(tag, attrs, parent = svg) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; }
+for (let y = 0; y <= 1.0001; y += 0.25) {
+  el("line", { x1: M.l, x2: VW - M.r, y1: Y(y), y2: Y(y), stroke: "var(--rule)", "stroke-width": 1 });
+  el("text", { x: M.l - 8, y: Y(y) + 4, "text-anchor": "end" }).textContent = y.toFixed(2);
+}
+for (let w = Math.ceil(x0 / 5) * 5; w <= x1; w += 5)
+  el("text", { x: X(w), y: VH - M.b + 20, "text-anchor": "middle" }).textContent = w.toFixed(0);
+el("text", { x: VW - M.r, y: VH - 2, "text-anchor": "end" }).textContent = "wavelength [Å]";
+for (const [lam, nm] of [[5167.32, "Mg I"], [5172.68, "Mg I"], [5183.60, "Mg I"]]) {
+  el("line", { x1: X(lam), x2: X(lam), y1: M.t - 8, y2: M.t - 2, stroke: "var(--muted)", "stroke-width": 1 });
+  el("text", { x: X(lam), y: M.t - 12, "text-anchor": "middle" }).textContent = nm;
+}
+const ghost = el("path", { fill: "none", stroke: "var(--ghost)", "stroke-width": 1.5 });
+const line = el("path", { fill: "none", stroke: "var(--accent)", "stroke-width": 2.2, "stroke-linejoin": "round" });
+const cross = el("line", { y1: M.t, y2: VH - M.b, stroke: "var(--muted)", "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" });
+const dot = el("circle", { r: 4, fill: "var(--accent)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" });
+const tip = el("text", { class: "tip", visibility: "hidden" });
+const pathOf = f => { let d = ""; for (let k = 0; k < nW; k++) d += (k ? "L" : "M") + X(WL[k]).toFixed(1) + "," + Y(f[k]).toFixed(1); return d; };
+let cur = null;
+function drawSpec() {
+  cur = spectrum(st.t, st.v, st.i, st.s, st.p);
+  ghost.setAttribute("d", pathOf(spectrum(st.t, 0, st.i, 0, 0)));
+  line.setAttribute("d", pathOf(cur));
+}
+svg.addEventListener("pointermove", e => {
+  const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  const w = x0 + (p.x - M.l) / (VW - M.l - M.r) * (x1 - x0);
+  if (w < x0 || w > x1 || !cur) return hide();
+  let k = Math.round((w - x0) / (x1 - x0) * (nW - 1)); k = Math.max(0, Math.min(nW - 1, k));
+  const X0 = X(WL[k]), Y0 = Y(cur[k]);
+  cross.setAttribute("x1", X0); cross.setAttribute("x2", X0); dot.setAttribute("cx", X0); dot.setAttribute("cy", Y0);
+  tip.textContent = `${WL[k].toFixed(2)} Å   ${cur[k].toFixed(3)}`;
+  const right = X0 > VW * 0.65; tip.setAttribute("x", right ? X0 - 8 : X0 + 8); tip.setAttribute("text-anchor", right ? "end" : "start");
+  tip.setAttribute("y", Math.max(M.t + 12, Y0 - 10));
+  for (const n of [cross, dot, tip]) n.setAttribute("visibility", "visible");
+});
+function hide() { for (const n of [cross, dot, tip]) n.setAttribute("visibility", "hidden"); }
+svg.addEventListener("pointerleave", hide);
+
+function draw() { drawDisk(); drawSpec(); }
+sync(); draw(); if (playing) start();
+</script>

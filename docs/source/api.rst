@@ -64,12 +64,12 @@ MeshModel
    .. py:attribute:: vertices_pulsation_offsets
       :type: Float[Array, "n_vertices 3"]
 
-      Pulsation offsets for vertices in km/s.
+      Pulsation displacements of the vertices in solar radii (R☉).
 
    .. py:attribute:: center_pulsation_offsets
       :type: Float[Array, "n_mesh_elements 3"]
 
-      Pulsation offsets for centers in km/s.
+      Pulsation displacements of the face centers in solar radii (R☉).
 
    .. py:attribute:: area_pulsation_offsets
       :type: Float[Array, "n_mesh_elements"]
@@ -172,7 +172,12 @@ Constants
    :type: List[str]
    :value: ['logg', 'loggs', 'log_g', 'log_gs', 'log g', 'log gs', 'surface gravity', 'surface gravities', 'surface_gravity', 'surface_gravities']
 
-   List of valid parameter names for surface gravity. If the parameter name is not in this list, the surface gravity will be calculated using the mass and center positions.
+   Parameter names recognized as surface gravity (log g). If one of the mesh's
+   ``parameter_names`` is in this list (or ``log_g_index`` is passed), that
+   column is treated as log g and, unless ``override_log_g=True``, its values are
+   replaced by log g computed from the model's mass and per-element center
+   radius. If no name matches and no ``log_g_index`` is given, no parameter is
+   treated as log g and nothing is computed.
 
 The default line-of-sight vector is ``[0., 0., -1.]`` (observer → star, the
 standard astronomical convention shared with the binary-orbit utilities) and

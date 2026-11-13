@@ -7,6 +7,11 @@ a one-dimensional flux density in erg/s/cm²/Å. The spectrum must cover the
 filter's response and resolve its structure; missing wavelengths are not
 extrapolated into the magnitude integral.
 
+.. note::
+
+   Every snippet on this page, with the values it prints, is in the companion notebook
+   `tutorial/docs_examples/synthetic_photometry_examples.ipynb <https://github.com/maja-jablonska/spice/blob/main/tutorial/docs_examples/synthetic_photometry_examples.ipynb>`_.
+
 Magnitude systems
 -----------------
 
@@ -95,8 +100,12 @@ SPICE warns (``spice.spectrum.WavelengthCoverageWarning``) when
   unrestricted model such as ``Blackbody``).
 
 ``Filter.wavelength_coverage(wavelengths)`` returns the covered fraction
-directly. The checks need concrete arrays and are skipped inside ``jax.jit``;
-call the function once outside the traced code to see them.
+directly. The emulator check finds the emulator through the function you pass,
+so it applies to a bound method such as ``emulator.intensity`` or
+``emulator.flux``; a function of your own that calls the emulator (like
+``surface_flux`` below) hides it, and no range check is made. All of these
+checks need concrete arrays and are skipped inside ``jax.jit``; call the
+function once outside the traced code to see them.
 
 Available filters
 -----------------

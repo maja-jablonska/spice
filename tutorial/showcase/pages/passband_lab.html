@@ -1,0 +1,180 @@
+<title>SPICE Passband Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: one wide spectrum with a draggable filter laid over it; the magnitude readout and the SPICE cross-check sit beneath. */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --fg: #121417; --muted: #555b66; --rule: #dde0e6;
+  --spec: #2a78d6; --band: #eb6834; --bandfill: rgba(235, 104, 52, 0.14); --focus: #2a78d6;
+  --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1114; --surface: #171a1f; --fg: #eef0f3; --muted: #a2a8b3; --rule: #2a2f37;
+  --spec: #3987e5; --band: #f07a45; --bandfill: rgba(240, 122, 69, 0.18); --focus: #3987e5; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1114; --surface: #171a1f; --fg: #eef0f3; --muted: #a2a8b3; --rule: #2a2f37;
+  --spec: #3987e5; --band: #f07a45; --bandfill: rgba(240, 122, 69, 0.18); --focus: #3987e5; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 28px 40px; display: grid; gap: 20px; }
+h1 { font-family: var(--display); font-weight: 600; font-size: clamp(1.7rem, 3.2vw, 2.4rem); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 6px 0 0; color: var(--muted); max-width: 70ch; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; min-width: 0; display: grid; gap: 12px; }
+.label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; gap: 14px 26px; align-items: end; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { font: 500 13px/1 var(--mono); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--surface); color: var(--fg); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.seg button:focus-visible, input[type=range]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ctl { display: grid; gap: 6px; min-width: 0; }
+.ctl input { width: min(260px, 70vw); accent-color: var(--band); }
+#chart { width: 100%; height: auto; display: block; touch-action: none; }
+svg text { fill: var(--muted); font-family: var(--mono); font-size: 12px; }
+.mag { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; }
+.mag .big { font-family: var(--display); font-size: clamp(2rem, 5vw, 2.8rem); font-variant-numeric: tabular-nums; }
+.mag .sub { color: var(--muted); font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; min-width: 420px; }
+th, td { text-align: right; padding: 6px 14px; border-bottom: 1px solid var(--rule); }
+th:first-child, td:first-child { text-align: left; padding-left: 0; }
+th { color: var(--muted); font-weight: 500; }
+.note { font-size: 13px; color: var(--muted); max-width: 80ch; margin: 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Photometry is an integral over the spectrum</h1>
+    <p>Drag the orange filter across a SPICE spectrum, or pull its edges to change the width. The page integrates the photon-counting AB magnitude live. For the Strömgren v, b and y presets it also shows the value SPICE itself computed, so you can check the two agree.</p>
+  </header>
+
+  <section class="panel">
+    <div class="bar">
+      <div class="ctl"><span class="label" id="lStar">Star (absolute, 10 pc)</span><div class="seg" id="cStar" role="group" aria-labelledby="lStar"></div></div>
+      <div class="ctl"><span class="label" id="lF">Filter</span><div class="seg" id="cF" role="group" aria-labelledby="lF"></div></div>
+      <div class="ctl" id="wctl"><label class="label" for="width">Box width [Å]</label><input type="range" id="width" min="20" max="1200" step="5" value="300"></div>
+    </div>
+    <svg id="chart" viewBox="0 0 1000 380" role="img" aria-label="Spectrum with movable passband"></svg>
+    <div class="mag"><span class="big" id="mag">–</span><span class="sub" id="magsub"></span></div>
+  </section>
+
+  <section class="panel">
+    <span class="label">Cross-check against SPICE (this star)</span>
+    <div class="tablewrap"><table id="tbl"></table></div>
+    <p class="note">The spectra are disc-integrated syntheses from the TPayne-spice-harps-interp v1.2.0 emulator over its full 3790–6900 Å range (15,000 points), for a K dwarf, the Sun and an A/F star at 10 pc. Only passbands that fit entirely inside that range give meaningful magnitudes, which is why Johnson B and V are not offered.</p>
+  </section>
+</div>
+
+<script>
+const D = /*__DATA__*/null;
+const dec = (s, T) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); };
+const WL = dec(D.wl, Float32Array), FL = dec(D.flux, Float32Array), CU = dec(D.curves, Float32Array), N = D.n;
+const AB_ZP = -22.40788262039795;
+const st = { star: 1, filter: -1, c: 5500, w: 300 };
+
+function flux(s) { return FL.subarray(s * N, (s + 1) * N); }
+function trans(k, i) { return k >= 0 ? CU[k * N + i] : (Math.abs(WL[i] - st.c) <= st.w / 2 ? 1 : 0); }
+function abMag(s, k) {  // same integral as spice.spectrum AB_passband_luminosity (photonic)
+  const f = flux(s); let num = 0, den = 0;
+  for (let i = 1; i < N; i++) {
+    const dw = WL[i] - WL[i - 1], t0 = trans(k, i - 1), t1 = trans(k, i);
+    num += 0.5 * dw * (WL[i - 1] * f[i - 1] * t0 + WL[i] * f[i] * t1);
+    den += 0.5 * dw * (t0 / WL[i - 1] + t1 / WL[i]);
+  }
+  if (num <= 0 || den <= 0) return NaN;
+  return -2.5 * Math.log10(1e-8 * num / den) + (k >= 0 ? D.filters[k].zp : AB_ZP);
+}
+
+// controls
+function seg(id, labels, key, after) {
+  const el = document.getElementById(id);
+  labels.forEach(([lab, val]) => { const b = document.createElement("button"); b.type = "button"; b.textContent = lab;
+    b.addEventListener("click", () => { st[key] = val; after && after(); sync(); draw(); }); el.appendChild(b); b.dataset.v = val; });
+}
+seg("cStar", D.stars.map((s, j) => [`${s.name} ${s.teff.toFixed(0)} K`, j]), "star");
+seg("cF", [["Box", -1], ...D.filters.map((f, j) => [f.name.replace("Strömgren ", ""), j])], "filter");
+const width = document.getElementById("width");
+width.addEventListener("input", () => { st.w = +width.value; draw(); });
+function sync() {
+  for (const [id, key] of [["cStar", "star"], ["cF", "filter"]])
+    [...document.getElementById(id).children].forEach(b => b.setAttribute("aria-pressed", +b.dataset.v === st[key]));
+  document.getElementById("wctl").hidden = st.filter >= 0;
+}
+
+// chart: one x scale and one y scale for marks, ticks and the filter box
+const svg = document.getElementById("chart"), NS = "http://www.w3.org/2000/svg";
+const M = { l: 64, r: 16, t: 16, b: 40 }, VW = 1000, VH = 380, x0 = WL[0], x1 = WL[N - 1];
+const X = w => M.l + (w - x0) / (x1 - x0) * (VW - M.l - M.r);
+const Xinv = x => x0 + (x - M.l) / (VW - M.l - M.r) * (x1 - x0);
+function el(tag, a, parent = svg) { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); parent.appendChild(e); return e; }
+const gGrid = el("g", {}), band = el("path", { fill: "var(--bandfill)", stroke: "var(--band)", "stroke-width": 2 });
+const spec = el("path", { fill: "none", stroke: "var(--spec)", "stroke-width": 1.2, "stroke-linejoin": "round" });
+const gAx = el("g", {});
+for (let w = 4000; w <= 6800; w += 400) { el("text", { x: X(w), y: VH - M.b + 22, "text-anchor": "middle" }, gAx).textContent = w; }
+el("text", { x: VW - M.r, y: VH - 4, "text-anchor": "end" }, gAx).textContent = "wavelength [Å]";
+
+function draw() {
+  const f = flux(st.star);
+  let ymax = 0; for (let i = 0; i < N; i++) ymax = Math.max(ymax, f[i]);
+  const e = Math.floor(Math.log10(ymax)), scale = Math.pow(10, e), top = Math.ceil(ymax / scale * 1.05 * 2) / 2;
+  const Y = v => VH - M.b - v / scale / top * (VH - M.t - M.b);
+  gGrid.replaceChildren();
+  const step = top > 4 ? 1 : 0.5;
+  for (let v = 0; v <= top + 1e-9; v += step) {
+    el("line", { x1: M.l, x2: VW - M.r, y1: Y(v * scale), y2: Y(v * scale), stroke: "var(--rule)" }, gGrid);
+    el("text", { x: M.l - 8, y: Y(v * scale) + 4, "text-anchor": "end" }, gGrid).textContent = v.toFixed(1);
+  }
+  el("text", { x: 4, y: M.t + 2, "text-anchor": "start" }, gGrid).textContent = `F_λ [10^${e} erg s⁻¹ cm⁻² Å⁻¹]`;
+  // decimate to one min/max pair per pixel column so lines survive
+  let d = "", cols = Math.round(VW - M.l - M.r), i = 0;
+  for (let c = 0; c < cols; c++) {
+    const wEnd = Xinv(M.l + c + 1); let lo = Infinity, hi = -Infinity;
+    while (i < N && WL[i] <= wEnd) { lo = Math.min(lo, f[i]); hi = Math.max(hi, f[i]); i++; }
+    if (hi > -Infinity) d += `${d ? "L" : "M"}${(M.l + c).toFixed(1)},${Y(hi).toFixed(1)}L${(M.l + c).toFixed(1)},${Y(lo).toFixed(1)}`;
+  }
+  spec.setAttribute("d", d);
+  // the passband, drawn on the same y axis scaled to the plot height
+  let b = `M${X(x0)},${Y(0)}`;
+  for (let k = 0; k < N; k += 4) b += `L${X(WL[k]).toFixed(1)},${(VH - M.b - trans(st.filter, k) * 0.92 * (VH - M.t - M.b)).toFixed(1)}`;
+  band.setAttribute("d", b + `L${X(x1)},${Y(0)}Z`);
+  const m = abMag(st.star, st.filter);
+  document.getElementById("mag").textContent = isFinite(m) ? `${m.toFixed(3)} mag` : "–";
+  document.getElementById("magsub").textContent = st.filter >= 0
+    ? `${D.filters[st.filter].name}, AB · SPICE: ${D.mags[st.star][st.filter].toFixed(3)}`
+    : `box ${(st.c - st.w / 2).toFixed(0)}–${(st.c + st.w / 2).toFixed(0)} Å, AB`;
+  table();
+}
+
+function table() {
+  const rows = D.filters.map((f, k) => {
+    const js = abMag(st.star, k), sp = D.mags[st.star][k];
+    return `<tr><td>${f.name}</td><td>${sp.toFixed(4)}</td><td>${js.toFixed(4)}</td><td>${(1000 * (js - sp)).toFixed(2)}</td></tr>`;
+  }).join("");
+  document.getElementById("tbl").innerHTML =
+    `<thead><tr><th>passband</th><th>SPICE [mag]</th><th>this page [mag]</th><th>Δ [mmag]</th></tr></thead><tbody>${rows}` +
+    `<tr><td>b − y colour</td><td>${(D.mags[st.star][1] - D.mags[st.star][2]).toFixed(4)}</td><td></td><td></td></tr></tbody>`;
+}
+
+// dragging: the body moves the box, within 12 px of an edge resizes it
+let drag = null;
+function svgX(e) { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()).x; }
+svg.addEventListener("pointerdown", e => {
+  if (st.filter >= 0) { st.filter = -1; sync(); }
+  const x = svgX(e), L = X(st.c - st.w / 2), R = X(st.c + st.w / 2);
+  drag = Math.abs(x - L) < 12 ? "l" : Math.abs(x - R) < 12 ? "r" : (x > L && x < R ? { off: Xinv(x) - st.c } : { off: 0 });
+  if (drag.off !== undefined && !(x > L && x < R)) st.c = Xinv(x);
+  svg.setPointerCapture(e.pointerId); draw();
+});
+svg.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const w = Math.min(x1, Math.max(x0, Xinv(svgX(e))));
+  if (drag === "l") { const r = st.c + st.w / 2; st.w = Math.max(20, r - w); st.c = r - st.w / 2; }
+  else if (drag === "r") { const l = st.c - st.w / 2; st.w = Math.max(20, w - l); st.c = l + st.w / 2; }
+  else st.c = w - drag.off;
+  width.value = st.w; draw();
+});
+svg.addEventListener("pointerup", () => { drag = null; });
+sync(); draw();
+</script>

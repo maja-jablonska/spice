@@ -166,7 +166,7 @@ Here's an example of what the output should look like:
    :alt: 3D visualization of a rotated mesh
    :class: only-dark
 
-In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight, and the black arrow shows the rotation axis.
+In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight. ``plot_3D`` also draws the rotation axis (listed in the legend), but here it lies along +y inside the star and is hidden by the mesh surface; the rotation shows up as the velocity gradient across the disc instead.
 
 You can customize the visualization by changing the `property` parameter. For example, you could use 'los_velocities' to color the mesh by line-of-sight velocities, or 'mus' to show the angle between the normal and the line of sight.
 
@@ -201,9 +201,9 @@ The pulsation amplitude is given by the fourier series parameters. It can be cal
 
 .. math::
 
-   A = D + \sum_{n=1}^N A_n \cos\left(\frac{2\pi n}{P}t - \phi_n\right)
+   A = \sum_{n=1}^N A_n \cos\left(\frac{2\pi n}{P}t - \phi_n\right)
 
-where :math:`D` is the mean amplitude, :math:`A_n` are the amplitudes, :math:`\phi_n` are the phases, and :math:`P` is the pulsation period.
+where :math:`A_n` are the amplitudes, :math:`\phi_n` are the phases, and :math:`P` is the pulsation period.
 The amplitude is a fraction of the reference stellar radius: 0.1 means 10%.
 
 The Fourier series parameters are provided either as a 2D array with shape (N, 2) — interpreted as a purely radial pulsation — or as a full (3, N, 2) array whose first axis indexes the [radial, spheroidal, toroidal] vector-spherical-harmonic components. N is the number of terms in the series, and each innermost pair contains [A_n, phi_n], where A_n is the amplitude and phi_n is the phase for the nth term. For example, [[0.1, 0.0], [0.05, 1.57]] represents a radial series with two terms: the first with amplitude 0.1 and phase 0, and the second with amplitude 0.05 and phase π/2.
@@ -257,8 +257,9 @@ or ``"retrograde"``:
 
     snapshot = evaluate_pulsations(prograde, 0.05)   # t in days
 
-A travelling mode is :math:`\mathrm{Re}[Y_l^m e^{\mp i\omega t}]` for each
-Fourier harmonic: the pattern keeps its shape and its peak displacement
+A travelling mode is :math:`\mathrm{Re}[Y_l^m e^{\pm i\omega t}]` for each
+Fourier harmonic, with the upper sign for prograde and the lower sign for
+retrograde (SPICE stars spin toward decreasing longitude): the pattern keeps its shape and its peak displacement
 (the amplitude) and moves at :math:`\omega/m` in longitude about the mode axis.
 The frequency is in the frame of the stellar surface: evaluating pulsations
 before ``evaluate_rotation`` adds the rotation on top. Travelling modes need
@@ -391,17 +392,23 @@ You can add temperature spots to your model using spherical harmonics:
 
     from spice.models.spots import add_spherical_harmonic_spot
 
-    base_temp = 5700
-    spot_temp = 15000
-
-    # Add temperature spots
+    # Add a temperature pattern following Re[Y_4^4]
     m_harm_spot = add_spherical_harmonic_spot(
         m, # Model instance
         4, # m order
         4, # l degree
-        param_delta=9300, # difference in the parameter value between the spot and the background
+        param_delta=2000, # amplitude multiplying Re[Y_l^m]; added on top of the existing value
         param_index=0 # index of the parameter in the parameters array
     )
+
+``add_spherical_harmonic_spot`` adds :math:`\Delta \cdot \mathrm{Re}[Y_l^m(\theta, \phi)]`
+to the chosen parameter, where :math:`\Delta` is ``param_delta`` and
+:math:`Y_l^m` is the orthonormal spherical harmonic about the rotation axis.
+``param_delta`` is therefore an amplitude, not a spot-minus-background
+difference: the pattern is both positive and negative, and its extremes are
+:math:`\pm\Delta \max|\mathrm{Re}\,Y_l^m|` (about :math:`\pm 0.44\,\Delta`
+for :math:`l = m = 4`). Here the 5777 K (solar) Blackbody mesh ranges
+between roughly 4910 and 6650 K.
 
 which should produce a temperature map like this:
 
@@ -423,7 +430,7 @@ Similarly to pulsation, you can tilt the spot by specifying the `tilt_axis` and 
         m, # Model instance
         4, # m order
         4, # l degree
-        param_delta=9300, # difference in the parameter value between the spot and the background
+        param_delta=2000, # amplitude multiplying Re[Y_l^m]
         param_index=0, # index of the parameter in the parameters array
         tilt_axis=jnp.array([1., 0., 0.]),  # perpendicular to the default +y rotation axis
         tilt_angle=45.  # tilt angle in degrees

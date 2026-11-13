@@ -36,3 +36,6 @@ docs/build/
 tutorial/paper_results/cepheid/harpsn_raw/*.fits.gz
 tutorial/paper_results/cepheid/harpsn_raw.npz
 tutorial/paper_results/cepheid/harpsn_normalized.npz
+
+# showcase outputs copied back from Gadi (docs use the WebP copies in docs/img/showcase)
+tutorial/showcase/out/

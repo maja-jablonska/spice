@@ -73,10 +73,12 @@ Parameters that matter
 
 ``ld_law`` / ``ld_coeffs``
     Bind a limb-darkening law into the intensity function (e.g.
-    ``ld_law="linear"``, ``ld_coeffs=[0.5]``). Only effective for intensity
-    functions that accept these keywords, such as the flux-emulator-based
-    implementations; :class:`~spice.spectrum.Blackbody` takes its LD
-    configuration in its constructor instead.
+    ``ld_law="linear"``, ``ld_coeffs=[0.5]``). The intensity function must
+    accept these keywords, as the flux-emulator-based implementations do;
+    passing them with one that does not, such as ``Blackbody().intensity``,
+    raises ``TypeError``. :class:`~spice.spectrum.Blackbody` takes its LD
+    configuration in its constructor instead
+    (``Blackbody(ld_law="linear", ld_coeffs=[0.5])``).
 
 Doppler shifts
 --------------
@@ -85,14 +87,36 @@ Each element's ``los_velocity`` (negative = approaching, see
 :doc:`conventions`) shifts its contribution: the rest-frame spectrum is
 sampled at :math:`\lambda_{\mathrm{obs}} / (1 + v/c)`, so approaching
 material imprints blueshifted features and a rotating star shows the
-familiar line broadening:
+familiar line broadening. A blackbody has no lines to broaden, so this
+example uses :class:`~spice.spectrum.GaussianLineEmulator`, a blackbody
+continuum with Gaussian absorption lines that needs only the core install:
 
 .. code-block:: python
 
     from spice.models.mesh_transform import add_rotation, evaluate_rotation
+    from spice.spectrum import GaussianLineEmulator
 
-    fast = evaluate_rotation(add_rotation(star, rotation_velocity=50.), 0.)
-    flux_rot = simulate_observed_flux(bb.intensity, fast, np.log10(wavelengths))
+    emu = GaussianLineEmulator(line_centers=[5500.], line_widths=[0.1], line_depths=[0.6])
+    line_star = IcosphereModel.construct(1000, 1., 1., emu.to_parameters(), emu.parameter_names)
+    line_wavelengths = np.linspace(5497., 5503., 1000)   # Angstroms
+
+    flux_static = simulate_observed_flux(emu.intensity, line_star, np.log10(line_wavelengths))
+    fast = evaluate_rotation(add_rotation(line_star, rotation_velocity=50.), 0.)
+    flux_rot = simulate_observed_flux(emu.intensity, fast, np.log10(line_wavelengths))
+    normalized_rot = flux_rot[:, 0] / flux_rot[:, 1]   # lines / continuum
+
+.. image:: ../img/rotation_broadening.png
+   :width: 600
+   :alt: A Gaussian absorption line without rotation and at 50 km/s
+   :class: only-light
+
+.. image:: ../img/rotation_broadening_dark.png
+   :width: 600
+   :alt: A Gaussian absorption line without rotation and at 50 km/s
+   :class: only-dark
+
+At 50 km/s the line spreads to :math:`\pm v \sin i / c \times 5500` Å
+:math:`\approx \pm 0.92` Å (dashed lines), and its equivalent width is unchanged.
 
 Luminosities
 ------------
@@ -141,8 +165,8 @@ uniform log10 wavelength grid:
     import jax.numpy as jnp
     from spice.spectrum.utils import apply_variable_resolution
 
-    log_wavelengths = jnp.linspace(jnp.log10(4960.), jnp.log10(5040.), 2001)
-    flux_fast = simulate_observed_flux(bb.intensity, fast, log_wavelengths)
+    log_wavelengths = jnp.linspace(jnp.log10(5460.), jnp.log10(5540.), 2001)
+    flux_fast = simulate_observed_flux(emu.intensity, fast, log_wavelengths)
     resolving_power = jnp.linspace(20000., 30000., len(log_wavelengths))
     broadened = apply_variable_resolution(
         log_wavelengths, flux_fast[:, 0], resolving_power, segment_size=512)

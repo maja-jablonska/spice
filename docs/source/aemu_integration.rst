@@ -138,15 +138,21 @@ iron spot on a rotating star:
    :alt: Iron line profiles
 
 Similarly, pulsating models produce phase-dependent line profiles (see the
-companion notebook for the full plotting code):
+companion notebook for the full plotting code). The Fourier amplitude is a
+displacement in solar radii, so a radial mode with amplitude
+:math:`A = 0.03\,R_\odot` and period :math:`P = 0.1` d changes the radius by
+:math:`\pm 3` per cent and reaches a surface velocity of
+:math:`2\pi A / P \approx 15` km/s, a :math:`\pm 0.25` Å shift of the
+lines at 5000 Å:
 
 .. code-block:: python
 
     from spice.models.mesh_transform import add_pulsation, evaluate_pulsations
 
-    mp = add_pulsation(m, 0, 0, 5., jnp.array([[1e-4, 0.]]))  # period in days
+    # radial mode, amplitude in solar radii, period in days
+    mp = add_pulsation(m, 0, 0, 0.1, jnp.array([[0.03, 0.]]))
 
-    TIMESTAMPS = jnp.linspace(0., 5., 20)
+    TIMESTAMPS = jnp.linspace(0., 0.1, 20)   # one period, in days
     mps = [evaluate_pulsations(mp, t) for t in TIMESTAMPS]
     specs = [simulate_observed_flux(emu.intensity, _m, jnp.log10(vws)) for _m in mps]
 
