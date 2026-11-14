@@ -22,14 +22,6 @@ meshes and wavelength arrays when calculations need it:
 
 Alternatively, set ``JAX_ENABLE_X64=1`` before starting Python.
 
-A synthesis kernel requires a finite, strictly increasing grid uniform in
-log10 wavelength. Use ``jnp.linspace(log10(lo), log10(hi), n)`` rather than
-``jnp.log10(jnp.linspace(lo, hi, n))``. Float32 rounding is accepted, but
-duplicate wavelength samples are not. If the spacing cannot be represented
-in float32, enable float64 and recreate the grid; casting existing rounded
-values does not recover precision. Direct ``simulate_observed_flux`` does
-not impose the kernel's uniform-grid requirement.
-
 Unexpected magnitudes or luminosities
 -------------------------------------
 

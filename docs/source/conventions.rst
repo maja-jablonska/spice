@@ -129,9 +129,9 @@ Spots and pulsations
   ``m != 0`` pulsation modes are standing waves unless ``add_pulsation`` is given
   ``travelling="prograde"`` (moving with the spin) or ``"retrograde"``.
 - ``evaluate_rotation`` turns the pulsation displacements and velocities with
-  the surface, so ``evaluate_rotation(evaluate_pulsations(m, t), t)`` keeps the
-  mode attached to the star (``t`` is in days for pulsations, seconds for
-  rotation).
+  the surface, so
+  ``evaluate_rotation(evaluate_pulsations(m, t_days), t_days * 86400.)`` keeps
+  the mode attached to the star (pulsations take days, rotation seconds).
 - Pulsation Fourier parameters have shape ``(3, N, 2)`` per mode — the first
   axis indexes the vector-spherical-harmonic components
   ``[radial, spheroidal, toroidal]``, and each innermost pair is
@@ -161,8 +161,8 @@ Precision
 Updating existing calculations
 ------------------------------
 
-The corrections on this branch change absolute predictions. Recompute
-stored results with the corrected functions:
+Recent corrections change absolute predictions. Recompute stored results
+with the corrected functions:
 
 - The per-Angstrom photometry correction removes a +20 magnitude offset
   from affected AB, ST, and Vega paths, including Gaia. Energy-response
@@ -181,3 +181,23 @@ stored results with the corrected functions:
 - The centrifugal gravity reduction now uses consistent velocity units;
   rebuild or re-evaluate previously saved rotating meshes. Automatically
   managed atmosphere gravity now follows rotation and pulsation changes.
+- AB magnitudes are true AB (flat 3631 Jy gives 0 in every filter). The
+  Johnson-Cousins, Hipparcos/Tycho and Strömgren zero points used to include
+  the Bessell & Murphy (2012) standard-system offsets (e.g. -0.761 mag in U);
+  those offsets are now ``Filter.AB_to_Vega_offset`` and
+  :func:`~spice.spectrum.Vega_passband_luminosity` returns the old numbers.
+  Pan-STARRS PS1 curves are integrated as photon-counting responses
+  (previously +18 mmag in g, +49 mmag in w at 5772 K), and 2MASS Vega zero
+  points are the Cohen et al. (2003) values (previously off by
+  -18/+35/-14 mmag in J/H/Ks).
+- Spot positions, spherical-harmonic spots, pulsation modes and
+  :func:`~spice.models.utils.inclination_to_los_axis` are measured in the
+  rotation-axis frame (they assumed a +z axis before). Stars with an explicit
+  ``[0., 0., 1.]`` axis are unchanged; stars with the default ``[0., 1., 0.]``
+  axis have different spot and mode geometry.
+- Occlusions are searched from the occluding faces as well, so transits of a
+  small, finely meshed body in front of a coarser star are no longer too
+  shallow (by 49-62% in tests). Recompute transit and eclipse depths.
+- The gravitational constant is the CODATA 2018 value
+  (6.67430e-11 m³ kg⁻¹ s⁻²), consistent with the IAU nominal solar mass
+  parameter; orbital separations and velocities shift slightly.

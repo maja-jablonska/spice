@@ -52,11 +52,13 @@ Attach the orbit — component masses come from the meshes; the elements are:
         mean_anomaly=0.0,         # additive phase offset from periastron timing [rad]
         reference_time=0.0,       # reference time [years]
         vgamma=0.0,               # systemic velocity [km/s], positive = receding
-        orbit_resolution_points=50,
+        orbit_resolution_points=20,
     )
 
 ``orbit_resolution_points`` sets how densely the orbit is precomputed for
-interpolation; increase it for very eccentric orbits.
+interpolation (positions and velocities are interpolated linearly between
+the precomputed points); increase it for very eccentric orbits or when you
+need the orbit more accurately than this short example does.
 
 .. warning::
 
@@ -79,10 +81,12 @@ a time array:
 
 .. code-block:: python
 
-    times = jnp.linspace(0.0, 0.01, 100)   # one orbital period
+    # Each time step resolves occlusions between two ~1000-vertex meshes;
+    # on a laptop CPU these 20 steps take several minutes.
+    times = jnp.linspace(0.0, 0.01, 20)   # one orbital period
     primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
-    wavelengths = np.linspace(900, 40000, 1000)
+    wavelengths = np.linspace(900, 40000, 500)
     spectra = [
         simulate_observed_flux(bb.intensity, p1, np.log10(wavelengths))[:, 0]
         + simulate_observed_flux(bb.intensity, p2, np.log10(wavelengths))[:, 0]
@@ -95,26 +99,52 @@ curve (see :doc:`quickstart` for the complete example), and each component's
 ``los_velocities`` carry the orbital radial-velocity signal, so spectral
 time series show the orbital Doppler shifts (plus ``vgamma``).
 
+The cost is dominated by the occlusion step, so it grows with the number of
+time steps and the mesh resolution. Sample densely only where it matters,
+for example inside the eclipse windows (see `Locating eclipses`_ below).
+
 Occlusion and mesh resolution
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Occlusion checks every target face, so an uneven tessellation can have more
-than half of its faces visible without losing them from the calculation.
-Neighbour-search and mesh resolution still affect eclipse accuracy: check
-convergence for grazing events, very different component sizes, and
-locally refined meshes. This all-face calculation can use more work and
-memory than earlier versions that truncated the target faces.
+At every time step the component that is farther along the line of sight
+is the occluded one. Each of its front-facing faces (``mu > 0``) is clipped
+against the overlapping front-facing faces of the nearer component in the
+sky plane, and the overlap is subtracted from its visible area. No face is
+dropped: an uneven tessellation can have more than half of its faces visible
+without losing any of them from the calculation.
+
+Candidate face pairs come from a nearest-neighbour search, whose size ``k``
+and direction :meth:`~spice.models.Binary.from_bodies` picks once, from the
+meshes as passed. This is why the components must be cast to the line of
+sight with ``get_mesh_view`` first. ``k`` is estimated from the projected face
+sizes and face densities (clipped to 24-256). By default each occluded face
+searches its ``k`` nearest occluder faces. When that would need more than 256
+neighbours, as for a small, finely meshed body in front of coarse faces (a
+planetary transit), the search runs from the occluder side instead
+(``from_occluder``): each occluder face searches its nearest occluded faces.
+Both directions sum the same overlapping pairs. Before the November 2026 fix
+the occluded-side search was simply capped in that case, which dropped most
+of the occluder faces, and transits came out about 49-62% too shallow. Redo
+transit light curves computed with earlier versions.
+
+Passing ``n_neighbours1``/``n_neighbours2`` to ``from_bodies`` overrides the
+estimate and always uses the occluded-side search. If even the cheaper
+direction needs more than 256 neighbours, ``from_bodies`` emits a
+``RuntimeWarning`` (the eclipse may come out too shallow); give the two bodies
+more similar mesh resolutions. Mesh resolution still limits eclipse
+accuracy, so check convergence for grazing events, very different component
+sizes, and locally refined meshes.
 
 Locating eclipses
 ^^^^^^^^^^^^^^^^^
 
 :func:`~spice.models.find_binary_eclipses` locates eclipse windows directly
-from a ``Binary`` (or ``PhoebeBinary``): it samples a low-resolution orbit
-itself from the binary's stored orbital elements, so no manual orbit
-evaluation is needed. It returns the contact times (T1–T4), the mid-eclipse
-time, and whether each event is partial, total, or grazing. Use it to
-concentrate expensive synthesis time points around the events instead of
-sampling the whole orbit densely:
+from a ``Binary``: it samples a low-resolution orbit itself from the
+binary's stored orbital elements, so no manual orbit evaluation is needed
+(for a ``PhoebeBinary`` see `Locating eclipses in a PHOEBE binary`_). It
+returns the contact times (T1–T4), the mid-eclipse time, and the eclipse
+``kind``. Use it to concentrate expensive synthesis time points around the
+events instead of sampling the whole orbit densely:
 
 .. code-block:: python
 
@@ -122,20 +152,38 @@ sampling the whole orbit densely:
 
     eclipses = find_binary_eclipses(binary)   # scans one period by default
     for e in eclipses:
-        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in years
+        print(e['kind'], e['front'], e['T1'], e['mid'], e['T4'])   # times in years
 
     # Concentrate synthesis points inside the first eclipse window
-    dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 50)
+    dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 10)
     primaries, secondaries = evaluate_orbit_at_times(binary, dense)
 
-For the edge-on system above this finds two total eclipses per period, at
-phases 0.25 and 0.75.
+``front`` is the component nearer the observer at mid-eclipse (1 for
+``body1``, 2 for ``body2``), and ``kind`` is one of:
+
+``'partial'``
+    The discs overlap, but the smaller one never lies entirely inside the
+    larger one. ``T2`` and ``T3`` are ``None``.
+``'total'``
+    The front component is at least as large as the back one and hides it
+    completely between the inner contacts ``T2`` and ``T3``.
+``'annular'``
+    A smaller front component lies entirely inside the back one's disc
+    between ``T2`` and ``T3``: a transit.
+``'grazing'``
+    The minimum separation reaches the inner-contact limit ``|R1 - R2|``, but
+    the inner contacts cannot be resolved (totality is numerically
+    borderline). ``T2`` and ``T3`` are ``None``.
+
+For the edge-on system above this finds two eclipses per period: at phase
+0.25 the smaller secondary transits the primary (``front=2``,
+``kind='annular'``), and at phase 0.75 the primary hides it completely
+(``front=1``, ``kind='total'``).
 
 The sky plane defaults to the plane perpendicular to ``body1``'s line of
 sight — the same vector the occlusion resolution uses — so the finder agrees
 with what the synthesis will actually eclipse; pass ``los_vector=`` to
-override. For a ``PhoebeBinary`` the returned times are in days (the PHOEBE
-clock). The lower-level :func:`~spice.models.find_eclipses` remains available
+override. The lower-level :func:`~spice.models.find_eclipses` remains available
 for orbits sampled by other means: it takes sky-projected positions and
 velocities of the two components explicitly.
 
@@ -192,3 +240,40 @@ PHOEBE meshes are read-only inside SPICE — geometry, rotation, and orbital
 state all come from the PHOEBE computation (times in PHOEBE's native days),
 and SPICE adds the spectral synthesis on top. For more detail on the wrapper
 classes see :doc:`phoebe_integration`.
+
+Locating eclipses in a PHOEBE binary
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:func:`~spice.models.find_binary_eclipses` also accepts a ``PhoebeBinary``.
+In that case it does not solve a Kepler orbit. It scans PHOEBE's own
+precomputed orbit: the ``us``/``vs`` positions and ``vus``/``vvs`` velocities
+of the ``orb`` dataset in the ``uvw`` frame (``u`` and ``v`` span the sky
+plane, ``w`` is the line of sight). The bundle therefore needs an ``orb``
+dataset computed at the same times as the mesh, with
+``run_compute(coordinates='uvw')``, as in the example above. ``PhoebeConfig``
+uses ``'orb01'`` automatically, or the dataset passed as
+``orbit_dataset_name``. The component radii are PHOEBE's ``requiv``, so the
+contact times treat Roche-distorted components as spheres of equal volume.
+
+Times are in days (the PHOEBE clock). ``n_points``, ``times`` and
+``los_vector`` are ignored. When the computed window spans at least one
+orbital period, the finder pads it periodically (the samples shifted by one
+period on either side), so an eclipse cut by either end of the window is still
+found. It returns every eclipse whose mid time lies in ``[t[0], t[-1])``; the
+contact times of an edge eclipse can fall just outside the computed times.
+Padding assumes a strictly periodic orbit, with no apsidal motion or period
+change. A window shorter than one period cannot be padded: the finder emits
+a ``RuntimeWarning``, and eclipses cut by its ends are missed. For the bundle
+above, sampled over exactly one 1-day period, it finds both eclipses, centred
+at 0 and 0.5 d. The secondary is in front at 0 d (PHOEBE's superior
+conjunction) and the primary at 0.5 d. Both are ``'grazing'``: the default
+components have equal radii on an edge-on orbit, so their discs coincide
+only for an instant at mid-eclipse:
+
+.. code-block:: python
+
+    from spice.models import find_binary_eclipses
+
+    eclipses = find_binary_eclipses(binary)   # the PhoebeBinary from above
+    for e in eclipses:
+        print(e['kind'], e['front'], e['T1'], e['mid'], e['T4'])   # times in days

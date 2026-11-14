@@ -59,8 +59,8 @@ it. Read the Docs uses Python 3.11 and the same requirements file.
 - **Lazy imports.** Public symbols are registered in each subpackage's
   `__init__.py` `_lazy_imports` map (or exposed via `__getattr__`); avoid adding
   eager `from .foo import Bar` lines for heavy modules.
-- **Optional dependencies** (`phoebe`, `astro_emulators_toolkit`, `h5py`-backed
-  paths) must be guarded with `try/except ImportError` and remain importable
+- **Optional dependencies** (`phoebe`, `astro_emulators_toolkit`, the `[grid]`
+  extra's `zarr`/`pandas`/`polars`/`pyarrow`) must be guarded with `try/except ImportError` and remain importable
   when the extra is absent.
 - **Dtype.** Honor the `jax_enable_x64` flag via the shared `_float_dtype`
   helper rather than hardcoding `float64`.

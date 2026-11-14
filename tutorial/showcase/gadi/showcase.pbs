@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -P dg97
+#PBS -q gpursaa
+#PBS -l ncpus=14
+#PBS -l ngpus=1
+#PBS -l mem=100GB
+#PBS -l walltime=04:00:00
+#PBS -l storage=scratch/y89+gdata/y89
+#PBS -l wd
+#PBS -j oe
+# Runs showcase scripts in sequence: SCRIPTS="s01_rotation s02_doppler_imaging ...", QUICK=1 for the smoke test.
+# Outputs: $ROOT/out[_quick]/<script>/. No PBS commands in here (chaining is done by submit_showcase.sh).
+set -u
+ROOT=/scratch/y89/mj8805/showcase
+export PYTHONPATH=$ROOT/src
+export SPICE_HARPS_BUNDLE=/scratch/y89/mj8805/emu_train/interp_t02_v2/smooth_wings/ft_pen1z/bundle_released
+export ASTRO_EMU_CACHE_DIR=$ROOT/cache MPLCONFIGDIR=$ROOT/cache/mpl
+export JAX_ENABLE_X64=1 JAX_DEFAULT_MATMUL_PRECISION=highest XLA_PYTHON_CLIENT_PREALLOCATE=false JAX_PLATFORMS=cuda,cpu
+PY=/g/data/y89/mj8805/miniforge/envs/aemu2/bin/python
+grep -q be34b85ed6ca3b079b69fa6af80b02e602f0ec3436b26b78ff3bf679905d9b4f $SPICE_HARPS_BUNDLE/bundle_integrity.json || { echo "bundle is not v1.2.0"; exit 1; }
+nvidia-smi -L
+OUT=$ROOT/out; FLAG=""
+[ "${QUICK:-0}" = "1" ] && { OUT=$ROOT/out_quick; FLAG=--quick; }
+cd $ROOT/tutorial/showcase
+rc=0
+for s in $SCRIPTS; do
+  echo "===== $s $(date +%T)"
+  t0=$(date +%s)
+  $PY -u $s.py --out $OUT/$s $FLAG || { echo "!!!!! $s FAILED"; rc=1; }
+  echo "===== $s took $(( $(date +%s) - t0 )) s"
+done
+du -sh $OUT/* 2>/dev/null
+echo "===== DONE (exit $rc) ====="
+exit $rc

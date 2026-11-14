@@ -1,7 +1,7 @@
 SPICE: SPectral Integration Compiled Engine
 ===========================================
 
-SPICE (SPectral Integration Compiled Engine) is a Python library designed for simulating synthetic **spectra of inhomogeneous stellar surfaces**. SPICE offers the following capabilities:
+SPICE (SPectral Integration Compiled Engine) is a Python library designed for simulating synthetic **spectra of inhomogeneous stellar surfaces**.
 
 The core principle of SPICE is numerical integration over a stellar surface. Here's how it works:
 
@@ -10,6 +10,8 @@ The core principle of SPICE is numerical integration over a stellar surface. Her
 3. These individual spectra are then summed to produce the final, integrated spectrum of the entire stellar surface.
 
 This approach allows SPICE to accurately model stars with inhomogeneous surfaces, including features like spots, temperature variations, or chemical abundance patterns.
+
+SPICE offers the following capabilities:
 
 1. **Stellar Surface Modeling**:
    - Create icosphere models of stellar surfaces with varying resolutions
@@ -39,7 +41,7 @@ This approach allows SPICE to accurately model stars with inhomogeneous surfaces
    - Support for GPU acceleration
 
 7. **Interoperability**:
-   - Integration with other astronomical tools and libraries (e.g., PHOEBE, Synphot)
+   - Import of Roche-lobe geometry and binary meshes from PHOEBE
 
 
 The underlying spectrum model is configurable — machine-learning emulators are consumed as ``astro-emulators-toolkit`` (aemu) bundles; see :doc:`aemu_integration`.
@@ -57,6 +59,7 @@ Contents
    introduction
    installation
    quickstart
+   gallery
    conventions
    mesh
    spectral_synthesis

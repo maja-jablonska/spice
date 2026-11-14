@@ -104,15 +104,17 @@ An eclipsing binary with a light curve
         mean_anomaly=0.0,         # additive phase offset from periastron timing [rad]
         reference_time=0.0,       # reference time [years]
         vgamma=0.0,               # systemic velocity [km/s]
-        orbit_resolution_points=50,
+        orbit_resolution_points=20,
     )
 
-    # Evaluate the orbit across one period (eclipses/occlusions resolved internally)
-    times = jnp.linspace(0.0, 0.01, 100)
+    # Evaluate the orbit across one period (eclipses/occlusions resolved internally).
+    # Each time step resolves occlusions between two ~1000-vertex meshes; on a
+    # laptop CPU these 20 steps take several minutes.
+    times = jnp.linspace(0.0, 0.01, 20)
     primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
     # Combined Gaia G-band light curve
-    wavelengths = np.linspace(900, 40000, 1000)
+    wavelengths = np.linspace(900, 40000, 500)
     gaia_g = GaiaG()
     light_curve = [
         AB_passband_luminosity(
@@ -124,8 +126,10 @@ An eclipsing binary with a light curve
         for p1, p2 in zip(primaries, secondaries)
     ]
 
-The two total eclipses (at phases 0.25 and 0.75) show up as dips in the
-light curve:
+The two eclipses show up as dips in the light curve: at phase 0.25 the
+secondary transits the primary, and at phase 0.75 the larger primary hides
+the secondary completely (total eclipse). With equal temperatures both dips
+have the same depth:
 
 .. image:: ../img/quickstart_light_curve.png
    :width: 600
@@ -151,14 +155,16 @@ concentrate the synthesis time points there:
 
     eclipses = find_binary_eclipses(binary)   # scans one period by default
     for e in eclipses:
-        print(e['kind'], e['T1'], e['mid'], e['T4'])   # times in years
+        print(e['kind'], e['front'], e['T1'], e['mid'], e['T4'])   # times in years
 
     # Densely sample the first eclipse window only
-    dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 50)
+    dense = jnp.linspace(eclipses[0]['T1'], eclipses[0]['T4'], 10)
     primaries, secondaries = evaluate_orbit_at_times(binary, dense)
 
-For the system above this finds two total eclipses per period, at phases
-0.25 and 0.75.
+For the system above this finds two eclipses per period. At phase 0.25 the
+smaller secondary crosses the primary (``front=2``, ``kind='annular'``); at
+phase 0.75 the primary hides the secondary completely (``front=1``,
+``kind='total'``).
 
 See :doc:`binaries` for the full binary-modelling guide (including PHOEBE
 import) and :doc:`synthetic_photometry` for the available filters and
