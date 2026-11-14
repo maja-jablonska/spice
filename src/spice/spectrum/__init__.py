@@ -41,10 +41,6 @@ _lazy_imports = {
     "PretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
     "FluxPretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
     "IntensityPretrainedAemuSpectrumEmulator": ".aemu_spectrum_emulator",
-    # marcs_nodes.py
-    "MARCS_FEH_NODES": ".marcs_nodes",
-    "snap_marcs_feh": ".marcs_nodes",
-    "resolve_marcs_fe_h": ".marcs_nodes",
     # filter.py
     "Filter": ".filter",
 }

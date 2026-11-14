@@ -123,7 +123,7 @@ def test_to_parameters_follows_the_grid_column_order(linear_grid):
 @pytest.mark.parametrize("name,value", [
     ("teff", TEFF), ("Teff", TEFF), ("marcs_teff", TEFF), ("logg", LOGG), ("marcs_logg", LOGG),
     ("v_micro", VMICRO), ("vmicro", VMICRO), ("marcs_vmicro", VMICRO),
-    ("feh", 0.0), ("marcs_fe_h", 0.0), ("c", 0.0),
+    ("feh", 0.0), ("c", 0.0),
 ])
 def test_solar_value_recognises_emulator_input_names(name, value):
     assert solar_value(name) == value

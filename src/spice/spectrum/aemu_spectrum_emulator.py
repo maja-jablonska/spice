@@ -220,12 +220,6 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
             from .parameters import resolve_parameter_names
             parameter_values = resolve_parameter_names(parameter_values, names)
         parameter_values = dict(parameter_values)
-        # Bundles with a ``marcs_fe_h`` input (HARPS cno-v2, 2026-10): when only ``feh`` is
-        # given, derive the atmosphere metallicity from it rather than defaulting to 0.
-        if "marcs_fe_h" in names and "marcs_fe_h" not in parameter_values and "feh" in parameter_values:
-            from .marcs_nodes import resolve_marcs_fe_h
-            mode = getattr(interpolator, "marcs_fe_h_mode", "feh")
-            parameter_values["marcs_fe_h"] = resolve_marcs_fe_h(parameter_values["feh"], mode)
         parameters = np.array([parameter_values.get(name, solar_value(name)) for name in names])
         for i, name in enumerate(names):
             if name in parameter_values:
@@ -501,16 +495,9 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
     normalise → apply → denormalise → ``10**y``.
     """
 
-    def __init__(self, name: str, marcs_fe_h_mode: str = "feh", revision: Optional[str] = None):
+    def __init__(self, name: str, revision: Optional[str] = None):
         """``revision`` pins a Hugging Face tag, branch or commit of ``name`` (default:
-        the repo's main revision). ``marcs_fe_h_mode`` sets how ``to_parameters`` fills the ``marcs_fe_h`` input
-        of bundles that have one when only ``feh`` is given: ``"feh"`` (default) copies
-        the synthesis metallicity, ``"snap"`` uses the nearest MARCS node
-        (see :mod:`spice.spectrum.marcs_nodes`). Ignored for bundles without it."""
-        from .marcs_nodes import MARCS_FE_H_MODES
-        if marcs_fe_h_mode not in MARCS_FE_H_MODES:
-            raise ValueError(f"marcs_fe_h_mode must be one of {MARCS_FE_H_MODES}, got {marcs_fe_h_mode!r}")
-        self.marcs_fe_h_mode = marcs_fe_h_mode
+        the repo's main revision)."""
         super().__init__(name, revision=revision)
         ref_outputs = _affine_reference_scaling(self.emulator, "outputs")
         if self.ref is None or ref_outputs is None:
