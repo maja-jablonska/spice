@@ -432,6 +432,19 @@ def __flux_flash_sum_with_padding(intensity_fn,
 
 
 @partial(jax.jit, static_argnums=(0, 3, 4))
+def _simulate_monochromatic_luminosity_impl(flux_fn, m: MeshModel, log_wavelengths,
+                                            chunk_size: int, wavelengths_chunk_size: int,
+                                            disable_doppler_shift: bool):
+    return jnp.nan_to_num(__flux_flash_sum_with_padding(flux_fn,
+                                           log_wavelengths,
+                                           _adjust_dim(m.areas, chunk_size),
+                                           _adjust_dim(m.los_velocities, chunk_size),
+                                           _adjust_dim(m.parameters, chunk_size),
+                                           chunk_size,
+                                           wavelengths_chunk_size,
+                                           disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)[:len(log_wavelengths), :]
+
+
 def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
                                       m: MeshModel,
                                       log_wavelengths: Float[Array, "n_wavelengths"],
@@ -462,17 +475,17 @@ def simulate_monochromatic_luminosity(flux_fn: Callable[[Float[Array, "n_wavelen
         Both emulator channels are integrated separately; for atmosphere grids
         they are spectrum and continuum, not luminosity and uncertainty.
     """
+    # Checked here, outside the jit: inside it the wavelengths are tracers and
+    # the check is skipped (this function used to be jitted and never warned).
     warn_if_outside_emulator_range(flux_fn, log_wavelengths)
-    return jnp.nan_to_num(__flux_flash_sum_with_padding(flux_fn,
-                                           log_wavelengths,
-                                           _adjust_dim(m.areas, chunk_size),
-                                           _adjust_dim(m.los_velocities, chunk_size),
-                                           _adjust_dim(m.parameters, chunk_size),
-                                           chunk_size,
-                                           _resolve_wavelength_chunk_size(
-                                               wavelengths_chunk_size,
-                                               jnp.shape(log_wavelengths)[0]),
-                                           disable_doppler_shift) * jnp.power(m.radius, 2) * 4.8399849e+21)[:len(log_wavelengths), :]
+    return _simulate_monochromatic_luminosity_impl(flux_fn,
+                                                   m,
+                                                   log_wavelengths,
+                                                   chunk_size,
+                                                   _resolve_wavelength_chunk_size(
+                                                       wavelengths_chunk_size,
+                                                       jnp.shape(log_wavelengths)[0]),
+                                                   disable_doppler_shift)
 
 
 def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n_mesh_elements n_parameters"]], Float[Array, "n_wavelengths 2"]],
@@ -509,7 +522,11 @@ def luminosity(flux_fn: Callable[[Float[Array, "n_wavelengths"], Float[Array, "n
 
 @partial(jax.jit, static_argnums=(0, 3, 4))
 def _luminosity_impl(flux_fn, model, wavelengths, chunk_size=DEFAULT_CHUNK_SIZE, wavelengths_chunk_size=None):
-    flux = jnp.nan_to_num(simulate_monochromatic_luminosity(flux_fn, model, jnp.log10(wavelengths), chunk_size, wavelengths_chunk_size))
+    log_wavelengths = jnp.log10(wavelengths)
+    flux = jnp.nan_to_num(_simulate_monochromatic_luminosity_impl(
+        flux_fn, model, log_wavelengths, chunk_size,
+        _resolve_wavelength_chunk_size(wavelengths_chunk_size, jnp.shape(log_wavelengths)[0]),
+        False))
     return trapezoid(y=flux[:, 0], x=wavelengths)
 
 

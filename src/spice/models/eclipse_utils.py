@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 # ---------- Utilities ----------
@@ -147,16 +149,62 @@ class RelativeSkyMotion:
 
 # ---------- Eclipse finder ----------
 def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
-                  tol=1e-6, sample_factor=5, want_total=True):
+                  tol=1e-6, sample_factor=5, want_total=True,
+                  depth1=None, depth2=None):
+    """Find eclipses in a sampled two-body orbit.
+
+    Args:
+        t: Sample times, strictly increasing.
+        pos1, vel1, pos2, vel2: Sky-plane positions ``(n, 2)`` and velocities of the
+            two components, in units consistent with ``t`` and the radii.
+        R1, R2: Component radii.
+        tol, sample_factor, want_total: Root tolerance, coarse samples per segment,
+            and whether to resolve the inner contacts T2/T3.
+        depth1, depth2 (optional): Each component's distance from the observer
+            along the line of sight at the sample times (larger = farther). When
+            given, each eclipse records which component is in front and is named
+            after it; without them ``front`` is ``None`` and a full overlap is named
+            from the radii alone, as if ``body1`` were in front.
+
+    Returns:
+        List of dicts with keys ``seg``, ``T1``, ``T2``, ``mid``, ``T3``, ``T4``,
+        ``front`` and ``kind``. ``front`` is 1 or 2, the component nearer the
+        observer at mid-eclipse. ``kind`` is ``'partial'``, ``'grazing'`` (the inner
+        contacts cannot be resolved), ``'total'`` (the front component is at least as
+        large as the back one and hides it completely between T2 and T3) or
+        ``'annular'`` (a smaller front component lies entirely inside the back
+        one's disc between T2 and T3, e.g. a transit).
     """
-    Returns list of eclipses; each is a dict with keys:
-    {'seg': i, 'T1':..., 'T2':..., 'mid':..., 'T3':..., 'T4':..., 'kind': 'partial'|'total'|'grazing'}
-    """
+    t0 = _log_eclipse_search_start()
+    eclipses = _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
+                                  tol=tol, sample_factor=sample_factor, want_total=want_total,
+                                  depth1=depth1, depth2=depth2)
+    _log_eclipse_search_done(eclipses, t0)
+    return eclipses
+
+
+def _log_eclipse_search_start():
     import time as _time
     from spice.utils import log as _spice_log
     if _spice_log.is_verbose():
         _spice_log.info("Finding eclipses...")
-    _t0 = _time.perf_counter()
+    return _time.perf_counter()
+
+
+def _log_eclipse_search_done(eclipses, t0):
+    import time as _time
+    from spice.utils import log as _spice_log
+    done = f"Found {len(eclipses)} eclipse(s) in {_time.perf_counter() - t0:.1f} s"
+    if _spice_log.is_verbose():
+        _spice_log.substitute(done)
+    else:
+        _spice_log.info(done)
+
+
+def _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
+                       tol=1e-6, sample_factor=5, want_total=True,
+                       depth1=None, depth2=None):
+    """:func:`find_eclipses` without the progress log (callers log after filtering)."""
     motion = RelativeSkyMotion(t, pos1, vel1, pos2, vel2)
     Rsum = float(R1 + R2)
     Rdiff = float(abs(R1 - R2))
@@ -191,18 +239,6 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
         if T1 is None: 
             continue
 
-        # Now march forward to find T2 (inner limb) or mid if no totality
-        # First bracket the interior of eclipse until we cross outer limb again
-        # Expand a small window to ensure we capture T2..T4
-        # Use local dense grid
-        local = np.linspace(T1, min(T1 + (b-a)*50, t[-1]), 64)
-        rho_local = motion.rho(local)
-
-        # Determine if totality is possible (min rho < Rdiff)
-        min_idx = np.argmin(rho_local)
-        rho_min = rho_local[min_idx]
-        t_min_guess = local[min_idx]
-
         # T4: next crossing of gout back to zero after T1
         # Find bracket for T4 by scanning forward
         T4 = None
@@ -231,12 +267,32 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
         if T4 is None or T4 - T1 <= tol:
             continue
 
+        # Minimum separation over the whole eclipse (decides whether totality is
+        # possible). A fixed-length window after T1 stopped short of mid-eclipse
+        # whenever the eclipse spanned more than ~10 orbit samples.
+        local = np.linspace(T1, T4, 129)
+        rho_local = motion.rho(local)
+        min_idx = np.argmin(rho_local)
+        rho_min = rho_local[min_idx]
+        t_min_guess = local[min_idx]
+
         # Mid-eclipse: where r·v = 0 between T1 and T4
         # Option B (einsum; robust if shapes are (1,2))
         mid = root_on(lambda x: float(np.einsum('ij,ij->', *motion.rv([x]))), T1, T4)
 
         if mid is None:
             mid = t_min_guess
+        # Include the separation at mid-eclipse itself, so an instantaneous full
+        # overlap (equal radii, zero impact parameter) is seen regardless of the grid.
+        rho_min = min(rho_min, float(motion.rho([mid])[0]))
+
+        # Which component is nearer the observer at mid-eclipse
+        front = None
+        if depth1 is not None and depth2 is not None:
+            d1 = np.interp(mid, t, np.asarray(depth1, dtype=float))
+            d2 = np.interp(mid, t, np.asarray(depth2, dtype=float))
+            front = 1 if d1 < d2 else 2
+        R_front, R_back = (R2, R1) if front == 2 else (R1, R2)
 
         # T2/T3 if (potentially) total
         T2 = T3 = None
@@ -257,7 +313,7 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
             if len(roots) >= 2:
                 roots.sort()
                 T2, T3 = roots[0], roots[-1]
-                kind = 'total' if R1 >= R2 else 'annular'  # purely geometric naming
+                kind = 'total' if R_front >= R_back else 'annular'
             else:
                 # Numerically grazing totality; keep partial but note grazing
                 kind = 'grazing'
@@ -270,14 +326,25 @@ def find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
 
         eclipses.append(dict(seg=idx,
                              T1=T1, T2=T2, mid=mid, T3=T3, T4=T4,
-                             kind=kind))
+                             front=front, kind=kind))
 
-    _done = f"Found {len(eclipses)} eclipse(s) in {_time.perf_counter() - _t0:.1f} s"
-    if _spice_log.is_verbose():
-        _spice_log.substitute(_done)
-    else:
-        _spice_log.info(_done)
     return eclipses
+
+
+def _periodic_pad(t, arrays, period, pad):
+    """Extend a sampled periodic orbit by ``pad`` on both sides.
+
+    Samples shifted by -``period`` that fall before ``t[0]`` and samples shifted by
+    +``period`` that fall after ``t[-1]`` (within ``pad``) are added, so the result
+    stays strictly increasing. ``t`` must span at least one period.
+    """
+    t = np.asarray(t, dtype=float)
+    t_lo, t_hi = t[0], t[-1]
+    before = (t - period < t_lo) & (t - period >= t_lo - pad)
+    after = (t + period > t_hi) & (t + period <= t_hi + pad)
+    t_new = np.concatenate([t[before] - period, t, t[after] + period])
+    arrays_new = tuple(np.concatenate([a[before], a, a[after]]) for a in arrays)
+    return t_new, arrays_new
 
 
 def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
@@ -309,7 +376,10 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
 
     Returns:
         List of eclipse dicts (keys ``T1``, ``T2``, ``mid``, ``T3``, ``T4``,
-        ``kind``) as documented in :func:`find_eclipses`. Times are in years for
+        ``front``, ``kind``) as documented in :func:`find_eclipses`. ``front`` (1 or
+        2) is the component nearer the observer at mid-eclipse, and ``kind`` is named
+        after it: ``'total'`` when the front star hides the other completely,
+        ``'annular'`` when a smaller front star crosses the other's disc. Times are in years for
         a ``Binary`` and in **days** for a ``PhoebeBinary`` (matching the PHOEBE
         clock of ``evaluated_times``).
 
@@ -318,14 +388,21 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
         orbit samples (``evaluated_times`` / ``body*_centers`` / ``body*_velocities``)
         rather than re-solving the Kepler orbit from elements — u/v span the sky
         plane and w is the line of sight, so the events found are exactly the ones
-        the PHOEBE meshes produce, and eclipses are only found within the
-        precomputed time window.
+        the PHOEBE meshes produce. If the precomputed window spans at least one
+        orbital period, it is padded periodically (samples shifted by +-P), so an
+        eclipse straddling either end of the window is still found; every eclipse
+        whose mid time lies in ``[t[0], t[-1])`` is returned, and its contact times
+        may fall just outside the window. A window shorter than one period cannot
+        be padded: a ``RuntimeWarning`` is emitted and eclipses cut by its ends are
+        missed. Periodic padding assumes a strictly periodic orbit (no apsidal
+        motion or period change across the window).
     """
     import jax.numpy as jnp
     from spice.constants import SOLAR_RAD_M
-    from spice.models.binary import PhoebeBinary
+    from spice.models.binary import PhoebeBinary, DAY_TO_YEAR
     from spice.models.orbit_utils import get_orbit_jax, Constants
 
+    t0 = _log_eclipse_search_start()
     R1 = float(binary.body1.radius)
     R2 = float(binary.body2.radius)
 
@@ -339,8 +416,38 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
         pos2 = np.asarray(binary.body2_centers)[:, :2]
         vel1 = np.asarray(binary.body1_velocities)[:, :2] * kms_to_solrad_per_day
         vel2 = np.asarray(binary.body2_velocities)[:, :2] * kms_to_solrad_per_day
-        return find_eclipses(t, pos1, vel1, pos2, vel2, R1, R2,
-                             tol=tol, sample_factor=sample_factor, want_total=want_total)
+        # PHOEBE's w axis points toward the observer: distance from the observer is -w.
+        depth1 = -np.asarray(binary.body1_centers)[:, 2]
+        depth2 = -np.asarray(binary.body2_centers)[:, 2]
+        P_days = float(binary.P) / DAY_TO_YEAR
+        t_lo, t_hi = float(t[0]), float(t[-1])
+        if t_hi - t_lo >= P_days * (1.0 - 1e-9):
+            # The window covers a full period: pad it on both sides with the
+            # samples shifted by one period, so an eclipse straddling either edge
+            # is bracketed by its own ingress and egress.
+            t, (pos1, vel1, pos2, vel2, depth1, depth2) = _periodic_pad(
+                t, (pos1, vel1, pos2, vel2, depth1, depth2), P_days, 0.25 * P_days)
+            eclipses = _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
+                                     tol=tol, sample_factor=sample_factor, want_total=want_total,
+                                     depth1=depth1, depth2=depth2)
+            eps = 1e-6 * P_days
+            # Half-open window, like the [0, P) window of a Keplerian Binary: an
+            # eclipse at the start of a one-period window is not reported again
+            # at its end.
+            eclipses = [e for e in eclipses if t_lo - eps <= e["mid"] < t_hi - eps]
+            _log_eclipse_search_done(eclipses, t0)
+            return eclipses
+        warnings.warn(
+            f"The PHOEBE orbit covers {t_hi - t_lo:.4g} d, less than one period "
+            f"({P_days:.4g} d), so it cannot be padded periodically: eclipses whose "
+            "ingress or egress falls outside the computed times are not found. "
+            "Compute the orb dataset over at least one full period.",
+            RuntimeWarning, stacklevel=2)
+        eclipses = _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
+                                      tol=tol, sample_factor=sample_factor, want_total=want_total,
+                                      depth1=depth1, depth2=depth2)
+        _log_eclipse_search_done(eclipses, t0)
+        return eclipses
 
     default_window = times is None
     if default_window:
@@ -371,12 +478,19 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
     vel1 = np.asarray(orbit[3]) * kms_to_solrad_per_year @ basis
     pos2 = np.asarray(orbit[4]) / SOLAR_RAD_M @ basis
     vel2 = np.asarray(orbit[5]) * kms_to_solrad_per_year @ basis
+    # Distance from the observer along the line of sight (los points observer -> star).
+    los_hat = np.asarray(los_vector, dtype=float)
+    los_hat = los_hat / np.linalg.norm(los_hat)
+    depth1 = np.asarray(orbit[2]) / SOLAR_RAD_M @ los_hat
+    depth2 = np.asarray(orbit[4]) / SOLAR_RAD_M @ los_hat
 
-    eclipses = find_eclipses(times, pos1, vel1, pos2, vel2, R1, R2,
-                             tol=tol, sample_factor=sample_factor, want_total=want_total)
+    eclipses = _find_eclipses_raw(times, pos1, vel1, pos2, vel2, R1, R2,
+                                  tol=tol, sample_factor=sample_factor, want_total=want_total,
+                                  depth1=depth1, depth2=depth2)
     if default_window:
         # The same eclipse can be found at both ends (mid ~ 0 and ~ P); keep the
         # copy inside [0, P) with a round-off tolerance.
         eps = 1e-6 * P
         eclipses = [ecl for ecl in eclipses if -eps <= ecl["mid"] < P - eps]
+    _log_eclipse_search_done(eclipses, t0)
     return eclipses

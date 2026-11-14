@@ -88,3 +88,14 @@ def test_bundle_wavelength_range_from_extras():
         pytest.approx(HARPS)
     assert _bundle_wavelength_range(SimpleNamespace(bundle_extras={"wavelength_angstrom": [4000.0, 5000.0]})) == (4000.0, 5000.0)
     assert _bundle_wavelength_range(SimpleNamespace(bundle_extras={})) is None
+
+
+def test_simulate_monochromatic_luminosity_warns_outside_the_emulator_range():
+    # It was jitted as a whole, so the check saw tracers and never warned.
+    from spice.spectrum import simulate_monochromatic_luminosity
+    emu = _RangedBlackbody()
+    m = IcosphereModel.construct(100, 1.0, 1.0, emu.to_parameters(), emu.stellar_parameter_names)
+    lw = jnp.log10(jnp.linspace(6800.0, 7200.0, 20))
+    assert _coverage_warnings(simulate_monochromatic_luminosity, emu.flux, m, lw)
+    assert not _coverage_warnings(simulate_monochromatic_luminosity, emu.flux, m,
+                                  jnp.log10(jnp.linspace(*HARPS, 20)))

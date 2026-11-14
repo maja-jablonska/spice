@@ -460,6 +460,27 @@ def _add_pulsation(m: MeshModel, spherical_harmonics_parameters: ArrayLike,
     )
 
 
+def _validate_mode_capacity(m: MeshModel, l_degrees) -> None:
+    """Reject degrees the mesh has no pulsation slot for.
+
+    Modes are stored at index ``m + max_pulsation_mode * l``, so only
+    ``l < max_pulsation_mode`` fits. A higher degree used to produce only a
+    warning and then silently do nothing (l = 5 on the default mesh gave zero
+    offsets).
+    """
+    try:
+        ls = np.atleast_1d(np.asarray(l_degrees, dtype=float))
+        max_mode = int(m.max_pulsation_mode)
+    except Exception:  # traced values: cannot check here
+        return
+    if np.any(ls >= max_mode):
+        raise ValueError(
+            f"Pulsation degree l = {int(np.max(ls))} does not fit this mesh model: it was "
+            f"built with max_pulsation_mode = {max_mode}, which supports l <= {max_mode - 1}. "
+            f"Construct the model with max_pulsation_mode > {int(np.max(ls))} (e.g. "
+            f"IcosphereModel.construct(..., max_pulsation_mode={int(np.max(ls)) + 1})).")
+
+
 def _validate_modes(m_orders, l_degrees) -> None:
     """Reject (m, l) pairs the real-harmonic basis cannot represent.
 
@@ -557,6 +578,8 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
 
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only within SPICE.
+        ValueError: If ``l_degree >= m.max_pulsation_mode`` (the mesh has no slot for the
+            mode; construct it with a larger ``max_pulsation_mode``).
     """
     if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
@@ -578,11 +601,8 @@ def add_pulsation(m: MeshModel, m_order: Float, l_degree: Float,
         pulsation_angles = 0.
 
     _validate_modes(m_order, l_degree)
+    _validate_mode_capacity(m, l_degree)
     harmonic_ind = m_order + m.max_pulsation_mode * l_degree
-    if harmonic_ind >= len(m.pulsation_periods):
-        warnings.warn("Pulsation mode is too high for the mesh model - the mesh model has" +
-                      "been initialized with a maximum pulsation mode of {}".format(m.max_pulsation_mode) +
-                      "This pulsation will have no effect.")
 
     sense = _travelling_sense(travelling, m_order)
 
@@ -665,6 +685,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
     Raises:
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only within SPICE.
         ValueError: If the input arrays have inconsistent lengths.
+        ValueError: If any degree is ``>= m.max_pulsation_mode``.
     """
     if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
@@ -689,6 +710,7 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
         pulsation_angles = jnp.zeros_like(m_orders)
 
     _validate_modes(m_orders, l_degrees)
+    _validate_mode_capacity(m, l_degrees)
     harmonic_indices = m_orders + m.max_pulsation_mode * l_degrees
 
     # n_terms is along axis 2 of the (n_pulsations, 3, n_terms, 2) array

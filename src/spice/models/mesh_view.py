@@ -109,11 +109,19 @@ def get_mesh_view(mesh: MeshModel, los_vector: Float[Array, "3"]) -> MeshModel:
 
 
 @jax.jit
-def _visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]:
-    """
-    Compute the visible area between two polygons (vertices1 and vertices2).
-    The function expects vertices1 and vertices2 to be (N, 3) arrays representing
-    the 3D coordinates of the polygon vertices. The output is a scalar area.
+def _visible_area(vertices1: Float[Array, "n1 2"], vertices2: Float[Array, "n2 2"]) -> Float[Array, ""]:
+    """Overlap area of two projected (2D) polygons.
+
+    Args:
+        vertices1: (n1, 2) vertices of the first polygon in the plane of the sky
+            (e.g. a triangle of ``MeshModel.cast_vertices``), in order.
+        vertices2: (n2, 2) vertices of the second (convex, clipping) polygon.
+
+    Returns:
+        Scalar area of the intersection of the two polygons, in the squared units
+        of the input coordinates. Despite the name this is the *overlapping*
+        (i.e. occluded) area, not the area left visible; it is 0 when the
+        polygons do not overlap.
     """
     clipped = clip(vertices1, vertices2)  # (n_clipped, 3)
     
@@ -136,11 +144,19 @@ def _visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3
     return 0.5 * jnp.abs(jnp.sum(terms))  # scalar
 
 
-def visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"]) -> Float[Array, ""]:
-    """
-    Compute the visible area between two polygons (vertices1 and vertices2).
-    The function expects vertices1 and vertices2 to be (N, 3) arrays representing
-    the 3D coordinates of the polygon vertices. The output is a scalar area.
+def visible_area(vertices1: Float[Array, "n1 2"], vertices2: Float[Array, "n2 2"]) -> Float[Array, ""]:
+    """Overlap area of two projected (2D) polygons.
+
+    Args:
+        vertices1: (n1, 2) vertices of the first polygon in the plane of the sky
+            (e.g. a triangle of ``MeshModel.cast_vertices``), in order.
+        vertices2: (n2, 2) vertices of the second (convex, clipping) polygon.
+
+    Returns:
+        Scalar area of the intersection of the two polygons, in the squared units
+        of the input coordinates. Despite the name this is the *overlapping*
+        (i.e. occluded) area, not the area left visible; it is 0 when the
+        polygons do not overlap, and also when either polygon contains NaN vertices.
     """
     nan1 = jnp.any(jnp.isnan(vertices1))
     nan2 = jnp.any(jnp.isnan(vertices2))
@@ -152,11 +168,11 @@ def visible_area(vertices1: Float[Array, "n1 3"], vertices2: Float[Array, "n2 3"
     )
 
 
-# total_visible_area: (vertices1: (n1, 3), vertices2s: (n_faces2, n2, 3)) -> (n_faces2,)
-# total visible area considering multiple occluders
+# total_visible_area: (vertices1: (n1, 2), vertices2s: (n_faces2, n2, 2)) -> (n_faces2,)
+# overlap area of one projected polygon with each of several occluders
 total_visible_area = jax.jit(jax.vmap(visible_area, in_axes=(None, 0)))
 
-# visibility_areas: (vertices1s: (n_faces1, n1, 3), vertices2s: (n_faces2, n2, 3)) -> (n_faces1, n_faces2)
+# v_total_visible_area: (vertices1s: (n_faces1, n1, 2), vertices2s: (n_faces1, k, n2, 2)) -> (n_faces1, k)
 v_total_visible_area = jax.jit(jax.vmap(total_visible_area, in_axes=(0, 0)))
 
 @partial(jax.jit, static_argnums=(2,))

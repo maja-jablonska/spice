@@ -312,7 +312,10 @@ class IcosphereModel(MeshModel):
         centers). It also handles the calculation of surface gravity (log g) values if required.
 
         Args:
-            n_vertices (int): Mesh resolution request, rounded to a discrete refinement level.
+            n_vertices (int): Mesh resolution request. Despite the name this is a target number
+                of triangular *faces* (surface elements): it is rounded up to the next icosphere
+                subdivision level, ``20 * 4**s >= n_vertices`` faces with ``10 * 4**s + 2``
+                vertices. E.g. ``n_vertices=1000`` gives 1280 faces and 642 vertices.
             radius (float): Radius in solar radii.
             mass (float): Mass in solar masses.
             parameters (Union[float, Float[Array, "n_mesh_elements n_parameters"]]):
@@ -336,7 +339,7 @@ class IcosphereModel(MeshModel):
 
         from spice.utils import log
         with log.timed(
-            f"Constructing IcosphereModel ({n_vertices} vertices)",
+            f"Constructing IcosphereModel (resolution request {n_vertices} faces)",
             "IcosphereModel constructed in {elapsed:.1f} s",
         ):
             vertices, faces, areas, centers = icosphere(n_vertices)

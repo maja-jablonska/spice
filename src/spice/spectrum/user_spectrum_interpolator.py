@@ -6,6 +6,7 @@ import warnings
 from typing import List, Optional, Dict, Union, Tuple
 from numpy.typing import ArrayLike
 
+from spice.spectrum.solar_parameters import LOGG, TEFF, solar_value
 from spice.spectrum.spectrum_emulator import SpectrumEmulator
 from spice.spectrum.utils import linear_multivariate_interpolation
 from spice.utils import log as _log
@@ -332,6 +333,31 @@ class UserSpectrumInterpolator(SpectrumEmulator[ArrayLike]):
         """Get labels of stellar parameters (no geometry-related parameters)."""
         return self._parameter_names
     
+    @property
+    @override
+    def solar_parameters(self) -> ArrayLike:
+        """Solar parameter vector in this grid's own column order.
+
+        The base implementation passed the generic ``{teff, logg, v_micro}``
+        mapping to :meth:`to_parameters`, which rejects ``v_micro`` unless the
+        grid has such a column. Here each column gets its solar value directly:
+        temperature and gravity aliases get the solar Teff / log g, metallicity
+        and abundance columns 0, and other recognised names (e.g. vmicro) their
+        usual solar value.
+        """
+        values = []
+        for name in self._parameter_names:
+            lowered = name.lower() if isinstance(name, str) else name
+            if lowered in TEFF_NAMES:
+                values.append(TEFF)
+            elif lowered in LOG_G_NAMES:
+                values.append(LOGG)
+            elif lowered in METALLICITY_NAMES:
+                values.append(0.0)
+            else:
+                values.append(solar_value(name))
+        return jnp.array(values)
+
     @override
     def to_parameters(self, parameters: Union[ArrayLike, Dict, None] = None) -> ArrayLike:
         """
