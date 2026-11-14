@@ -5,7 +5,7 @@ The grids and model outputs behind the results of the SPICE paper
 (`arXiv:2511.10998 <https://arxiv.org/abs/2511.10998>`_) are published as the
 public Hugging Face dataset
 `mjablonska/spice-paper-data <https://huggingface.co/datasets/mjablonska/spice-paper-data>`_.
-The revision used for the paper is tagged ``v1.0``. The scripts and notebooks
+The revision used for the paper is tagged ``v1.1``. The scripts and notebooks
 that use these files are in this repository under ``tutorial/paper_results/``.
 
 Downloading
