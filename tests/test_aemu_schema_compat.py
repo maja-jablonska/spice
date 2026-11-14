@@ -359,3 +359,35 @@ class TestInputDomainParamBounds:
         np.testing.assert_array_equal(
             _input_domain_param_bounds(emu, "min"), flat_bounds
         )
+
+
+# --- revision pinning ----------------------------------------------------------
+
+def _recording_aemu(calls):
+    def from_pretrained(name, **kw):
+        calls.append(("pretrained", name, kw))
+        return SimpleNamespace()
+
+    def from_bundle(name, **kw):
+        calls.append(("bundle", name, kw))
+        return SimpleNamespace()
+
+    emulator = SimpleNamespace(from_pretrained=from_pretrained, from_bundle=from_bundle)
+    return SimpleNamespace(Emulator=emulator)
+
+
+def test_load_emulator_passes_revision_to_from_pretrained(monkeypatch):
+    calls = []
+    monkeypatch.setattr(aemu_module, "aemu", _recording_aemu(calls))
+    aemu_module._load_emulator("someone/some-bundle", revision="v1.2.0")
+    aemu_module._load_emulator("someone/some-bundle")
+    assert calls == [("pretrained", "someone/some-bundle", {"revision": "v1.2.0"}),
+                     ("pretrained", "someone/some-bundle", {})]
+
+
+def test_load_emulator_rejects_revision_for_a_local_bundle(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(aemu_module, "aemu", _recording_aemu(calls))
+    with pytest.raises(ValueError, match="local bundle directory"):
+        aemu_module._load_emulator(str(tmp_path), revision="v1.2.0")
+    assert calls == []

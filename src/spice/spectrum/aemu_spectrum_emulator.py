@@ -81,11 +81,12 @@ def _reject_known_bad_revision(name: str, emulator: "aemu.Emulator") -> None:
             )
 
 
-def _load_emulator(name: str) -> "aemu.Emulator":
+def _load_emulator(name: str, revision: Optional[str] = None) -> "aemu.Emulator":
     """Load an :class:`aemu.Emulator` from ``name``.
 
     Accepts either a local bundle directory (loaded with ``Emulator.from_bundle``)
-    or a Hugging Face repo id (loaded with ``Emulator.from_pretrained``). The
+    or a Hugging Face repo id (loaded with ``Emulator.from_pretrained``, at
+    ``revision`` -- a tag such as ``"v1.2.0"``, branch or commit hash -- when given). The
     older code path only supported the latter, which broke when ``name`` was a
     path to a bundle produced by a local training run.
 
@@ -97,10 +98,16 @@ def _load_emulator(name: str) -> "aemu.Emulator":
     except (TypeError, ValueError):
         is_dir = False
     if is_dir:
+        if revision is not None:
+            raise ValueError(f"revision={revision!r} applies to a Hugging Face repo id, "
+                             f"but {name!r} is a local bundle directory.")
         emulator = aemu.Emulator.from_bundle(name)
         _reject_known_bad_revision(name, emulator)
         return emulator
-    emulator = aemu.Emulator.from_pretrained(name)
+    if revision is None:
+        emulator = aemu.Emulator.from_pretrained(name)
+    else:
+        emulator = aemu.Emulator.from_pretrained(name, revision=revision)
     _reject_known_bad_revision(name, emulator)
     return emulator
 
@@ -360,9 +367,10 @@ REQUIRED_BUNDLE_PARAMETERS: Dict[str, str] = {
 
 
 class PretrainedAemuSpectrumEmulator(AemuSpectrumEmulator):
-    def __init__(self, name: str):
-        # ``name`` may be a Hugging Face repo id or a local bundle directory.
-        emulator = _load_emulator(name)
+    def __init__(self, name: str, revision: Optional[str] = None):
+        # ``name`` may be a Hugging Face repo id or a local bundle directory;
+        # ``revision`` pins a Hugging Face tag, branch or commit (default: main).
+        emulator = _load_emulator(name, revision=revision)
         super().__init__(emulator)
         required = REQUIRED_BUNDLE_PARAMETERS.get(name)
         if required is not None and required not in self.stellar_parameter_names:
@@ -410,8 +418,9 @@ class FluxPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
         self,
         name: str,
         native_wavelengths: Optional[ArrayLike] = None,
+        revision: Optional[str] = None,
     ):
-        super().__init__(name)
+        super().__init__(name, revision=revision)
         if native_wavelengths is None:
             native_wavelengths = _infer_native_wavelengths(self.emulator)
         if native_wavelengths is None:
@@ -492,8 +501,9 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
     normalise → apply → denormalise → ``10**y``.
     """
 
-    def __init__(self, name: str, marcs_fe_h_mode: str = "feh"):
-        """``marcs_fe_h_mode`` sets how ``to_parameters`` fills the ``marcs_fe_h`` input
+    def __init__(self, name: str, marcs_fe_h_mode: str = "feh", revision: Optional[str] = None):
+        """``revision`` pins a Hugging Face tag, branch or commit of ``name`` (default:
+        the repo's main revision). ``marcs_fe_h_mode`` sets how ``to_parameters`` fills the ``marcs_fe_h`` input
         of bundles that have one when only ``feh`` is given: ``"feh"`` (default) copies
         the synthesis metallicity, ``"snap"`` uses the nearest MARCS node
         (see :mod:`spice.spectrum.marcs_nodes`). Ignored for bundles without it."""
@@ -501,7 +511,7 @@ class IntensityPretrainedAemuSpectrumEmulator(PretrainedAemuSpectrumEmulator):
         if marcs_fe_h_mode not in MARCS_FE_H_MODES:
             raise ValueError(f"marcs_fe_h_mode must be one of {MARCS_FE_H_MODES}, got {marcs_fe_h_mode!r}")
         self.marcs_fe_h_mode = marcs_fe_h_mode
-        super().__init__(name)
+        super().__init__(name, revision=revision)
         ref_outputs = _affine_reference_scaling(self.emulator, "outputs")
         if self.ref is None or ref_outputs is None:
             raise ValueError(
