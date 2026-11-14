@@ -33,16 +33,21 @@ Loading a bundle
 ----------------
 
 A bundle name may be a Hugging Face repo id or a local bundle directory
-(e.g. from your own training run):
+(e.g. from your own training run). For a repo id, ``revision=`` pins a tag,
+branch or commit; without it the repo's main revision is used:
 
 .. code-block:: python
 
     from spice.spectrum import IntensityPretrainedAemuSpectrumEmulator
 
-    emu = IntensityPretrainedAemuSpectrumEmulator("RozanskiT/TPayne-spice-small-random")
+    # The emulator of the SPICE paper, pinned to its v1.2.0 release
+    emu = IntensityPretrainedAemuSpectrumEmulator("mjablonska/TPayne-spice-harps-interp",
+                                                  revision="v1.2.0")
 
     # The parameter contract comes from the bundle:
     print(emu.stellar_parameter_names)
+    # ['teff', 'logg', 'feh', 'vmicro', 'a', 'c', 'n', 'o', 'r', 's']
+    print(emu.wavelength_range)   # (3780.0, 6910.0) Angstrom
 
 Three wrapper classes cover the bundle flavors:
 
@@ -93,7 +98,7 @@ bundle's parameters, then synthesize:
 
     mt = evaluate_rotation(add_rotation(m, 100, jnp.array([0., 1., 0.])), 0.)
 
-    vws = np.linspace(5000, 5020, 2000)   # inside this bundle's 5000-5020 A range
+    vws = np.linspace(5000, 5020, 2000)   # the bundle covers 3780-6910 A
     spec_no_rot = simulate_observed_flux(emu.intensity, m, jnp.log10(vws))
     spec_rot = simulate_observed_flux(emu.intensity, mt, jnp.log10(vws))
 
@@ -118,14 +123,14 @@ iron spot on a rotating star:
 
     from spice.models.spots import add_spot
 
-    timestamps = np.linspace(0, 48*3600, 100)
+    timestamps = np.linspace(0, 48*3600, 50)
 
     m_spotted = add_spot(m, spot_center_theta=1., spot_center_phi=1., spot_radius=30.,
                          parameter_delta=0.5,
-                         parameter_index=emu.stellar_parameter_names.index('[Fe/H]'))
+                         parameter_index=emu.stellar_parameter_names.index('feh'))
     m_spotted = [evaluate_rotation(add_rotation(m_spotted, 25.), t) for t in timestamps]
 
-    vws_line = np.linspace(5004.5, 5007.5, 1000)   # Fe I 5005.71 + 5006.12 A
+    vws_line = np.linspace(5004.5, 5007.5, 400)   # Fe I 5005.71 + 5006.12 A
     spec_rot_spotted = [simulate_observed_flux(emu.intensity, _m, jnp.log10(vws_line))
                         for _m in m_spotted]
 
@@ -154,7 +159,7 @@ lines at 5000 Å:
 
     TIMESTAMPS = jnp.linspace(0., 0.1, 20)   # one period, in days
     mps = [evaluate_pulsations(mp, t) for t in TIMESTAMPS]
-    specs = [simulate_observed_flux(emu.intensity, _m, jnp.log10(vws)) for _m in mps]
+    specs = [simulate_observed_flux(emu.intensity, _m, jnp.log10(vws_line)) for _m in mps]
 
 .. image:: ../img/tpayne_pulsation.png
    :width: 600
