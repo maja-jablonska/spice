@@ -13,6 +13,7 @@
 """
 import itertools
 import pickle
+import warnings
 
 import jax.numpy as jnp
 import numpy as np
@@ -266,3 +267,55 @@ def test_full_overlap_found_when_the_eclipse_spans_many_samples():
     (e,) = find_eclipses(t, z, z, pos2, vel2, 1.0, 0.5)
     assert e["kind"] == "total"
     np.testing.assert_allclose([e["T2"], e["T3"]], [-np.sqrt(0.24) / 10, np.sqrt(0.24) / 10], atol=1e-6)
+
+
+@pytest.mark.parametrize("n", [100, 101, 20])
+def test_phoebe_eclipse_finder_pads_a_phase_grid_without_its_endpoint(n):
+    # linspace(0, P, n, endpoint=False) spans P minus one step; it still covers the
+    # whole orbit, so the eclipse at t = 0 must not be lost (it used to warn and miss it).
+    from spice.models import find_binary_eclipses
+    b = _fake_phoebe_binary(np.linspace(0.0, 1.0, n, endpoint=False))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        mids = sorted(e["mid"] for e in find_binary_eclipses(b))
+    np.testing.assert_allclose(mids, [0.0, 0.5], atol=1e-6)
+
+
+def _straight_line_eclipse(t, impact, R1=1.0, R2=0.5, speed=10.0):
+    from spice.models import find_eclipses
+    z = np.zeros((t.size, 2))
+    pos2 = np.stack([speed * t, np.full_like(t, impact)], axis=1)
+    vel2 = np.stack([np.full_like(t, speed), np.zeros_like(t)], axis=1)
+    return find_eclipses(t, z, z, pos2, vel2, R1, R2)
+
+
+def test_contacts_falling_exactly_on_samples_are_found():
+    # Ingress at t = -0.15 and egress at +0.15 are exact samples of this grid; the
+    # bracketing used to skip exact zeros and dropped the eclipse entirely.
+    (e,) = _straight_line_eclipse(np.linspace(-0.3, 0.3, 61), 0.0)
+    assert e["kind"] == "total"
+    np.testing.assert_allclose([e["T1"], e["T2"], e["T3"], e["T4"]],
+                               [-0.15, -0.05, 0.05, 0.15], atol=1e-9)
+    # Inner contacts on the old 64-point inner grid: was labelled 'grazing'.
+    (e,) = _straight_line_eclipse(np.linspace(-0.3013, 0.2987, 61), 0.0)
+    assert e["kind"] == "total"
+    np.testing.assert_allclose([e["T2"], e["T3"]], [-0.05, 0.05], atol=1e-9)
+
+
+def test_very_short_totality_is_resolved():
+    # Totality lasts ~1/350 of the eclipse, shorter than the old inner-contact grid step.
+    R1, R2, impact = 1.0, 0.1, 0.89999
+    (e,) = _straight_line_eclipse(np.linspace(-0.3, 0.3, 61), impact, R1, R2)
+    assert e["kind"] == "total"
+    half = np.sqrt((R1 - R2) ** 2 - impact ** 2) / 10.0
+    np.testing.assert_allclose([e["T2"], e["T3"]], [-half, half], rtol=1e-4)
+
+
+def test_bracket_sign_changes_handles_exact_zeros():
+    from spice.models.eclipse_utils import _bracket_sign_changes
+    assert _bracket_sign_changes([1.0, 0.0, -1.0]) == [0]      # crossing through a zero sample
+    assert _bracket_sign_changes([1.0, 0.0, 1.0]) == []        # touching, not crossing
+    assert _bracket_sign_changes([0.0, -1.0, -2.0]) == [0]     # zero at the first sample
+    assert _bracket_sign_changes([-1.0, 0.0]) == [0]           # zero at the last sample
+    assert _bracket_sign_changes([1.0, 0.0, 0.0, -1.0]) == [0]
+    assert _bracket_sign_changes([1.0, -1.0, 1.0]) == [0, 1]

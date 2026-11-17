@@ -30,15 +30,28 @@ def _hermite_eval(a, b, c, d, s):
     return p, dp_ds
 
 def _bracket_sign_changes(fvals):
-    # Return list of indices i where f[i]*f[i+1] <= 0 and not both zero
+    """Indices ``i`` whose interval ``[i, i+1]`` contains a root of ``f``.
+
+    A strict sign change brackets a root. A sample that is exactly zero is a root
+    too: it is assigned to the interval ending at it when ``f`` changes sign
+    through it (or it is the last sample), and to the first interval when it is
+    the first sample. Touching zero without crossing is not a root crossing.
+    """
+    f = np.asarray(fvals, dtype=float)
+    n = len(f)
     idx = []
-    for i in range(len(fvals)-1):
-        a, b = fvals[i], fvals[i+1]
-        if a == 0:  # treat exact sample zeros as tiny sign flip
-            a = np.copysign(1e-30, b if b!=0 else 1.0)
-        if b == 0:
-            b = np.copysign(1e-30, a if a!=0 else 1.0)
-        if a*b < 0:
+    for i in range(n - 1):
+        a, b = f[i], f[i + 1]
+        if a * b < 0:
+            idx.append(i)
+        elif b == 0 and a != 0:
+            # Zero at sample i+1: look past any run of zeros for the next sign.
+            k = i + 2
+            while k < n and f[k] == 0:
+                k += 1
+            if k == n or f[k] * a < 0:
+                idx.append(i)
+        elif a == 0 and i == 0 and b != 0:
             idx.append(i)
     return idx
 
@@ -242,8 +255,8 @@ def _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
         # T4: next crossing of gout back to zero after T1
         # Find bracket for T4 by scanning forward
         T4 = None
-        for j in range(idx+1, len(Tgrid)-1):
-            if gout[j]*gout[j+1] < 0 and Tgrid[j] > T1:
+        for j in br_out:
+            if j > idx and Tgrid[j+1] > T1:
                 T4 = root_on(lambda x: motion.rho([x])[0] - Rsum, Tgrid[j], Tgrid[j+1])
                 break
 
@@ -258,7 +271,7 @@ def _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
                 # check sign change in this raw segment's ends
                 g_a2 = motion.rho([a2])[0] - Rsum
                 g_b2 = motion.rho([b2])[0] - Rsum
-                if g_a2*g_b2 < 0:
+                if g_a2*g_b2 < 0 or (g_b2 == 0 and b2 > T1):
                     T4 = root_on(lambda x: motion.rho([x])[0] - Rsum, a2, b2)
                     break
 
@@ -284,7 +297,9 @@ def _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
             mid = t_min_guess
         # Include the separation at mid-eclipse itself, so an instantaneous full
         # overlap (equal radii, zero impact parameter) is seen regardless of the grid.
-        rho_min = min(rho_min, float(motion.rho([mid])[0]))
+        rho_mid = float(motion.rho([mid])[0])
+        if rho_mid <= rho_min:
+            rho_min, t_min_guess = rho_mid, mid
 
         # Which component is nearer the observer at mid-eclipse
         front = None
@@ -298,21 +313,17 @@ def _find_eclipses_raw(t, pos1, vel1, pos2, vel2, R1, R2,
         T2 = T3 = None
         kind = 'partial'
         if want_total and rho_min < Rdiff + 1e-12:
-            # Find inner contacts where rho = |R1-R2|
-            # bracket around mid for inner crossings
-            # Coarse brackets inside [T1,T4]
-            local2 = np.linspace(T1, T4, 64)
-            gin = motion.rho(local2) - Rdiff
-            br_in = _bracket_sign_changes(gin)
-            # Expect two roots
+            # Inner contacts where rho = |R1-R2|. rho - Rdiff is positive at T1 and
+            # T4 (R1+R2-|R1-R2| > 0) and negative at the minimum separation, so
+            # [T1, t_min] and [t_min, T4] each bracket one root, however short the
+            # totality (a fixed sampling grid can step over a brief one).
+            g_in = lambda x: motion.rho([x])[0] - Rdiff
             roots = []
-            for k in br_in:
-                rtk = root_on(lambda x: motion.rho([x])[0] - Rdiff, local2[k], local2[k+1])
-                if rtk is not None:
-                    roots.append(rtk)
-            if len(roots) >= 2:
-                roots.sort()
-                T2, T3 = roots[0], roots[-1]
+            if rho_min < Rdiff:
+                roots = [root_on(g_in, T1, t_min_guess), root_on(g_in, t_min_guess, T4)]
+                roots = [r_ for r_ in roots if r_ is not None]
+            if len(roots) == 2 and roots[1] > roots[0]:
+                T2, T3 = roots
                 kind = 'total' if R_front >= R_back else 'annular'
             else:
                 # Numerically grazing totality; keep partial but note grazing
@@ -336,7 +347,8 @@ def _periodic_pad(t, arrays, period, pad):
 
     Samples shifted by -``period`` that fall before ``t[0]`` and samples shifted by
     +``period`` that fall after ``t[-1]`` (within ``pad``) are added, so the result
-    stays strictly increasing. ``t`` must span at least one period.
+    stays strictly increasing. ``t`` must cover at least one period, up to one
+    sample step (a phase grid without its endpoint).
     """
     t = np.asarray(t, dtype=float)
     t_lo, t_hi = t[0], t[-1]
@@ -421,7 +433,11 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
         depth2 = -np.asarray(binary.body2_centers)[:, 2]
         P_days = float(binary.P) / DAY_TO_YEAR
         t_lo, t_hi = float(t[0]), float(t[-1])
-        if t_hi - t_lo >= P_days * (1.0 - 1e-9):
+        # A phase grid sampled without its endpoint (linspace(0, P, N,
+        # endpoint=False)) spans P minus one step; the wrap-around gap is then no
+        # wider than the grid's own steps, so it is padded too.
+        max_step = float(np.max(np.diff(t))) if len(t) > 1 else 0.0
+        if t_lo + P_days - t_hi <= max_step * (1.0 + 1e-6) + 1e-9 * P_days:
             # The window covers a full period: pad it on both sides with the
             # samples shifted by one period, so an eclipse straddling either edge
             # is bracketed by its own ingress and egress.
@@ -434,7 +450,8 @@ def find_binary_eclipses(binary, n_points=100, times=None, los_vector=None,
             # Half-open window, like the [0, P) window of a Keplerian Binary: an
             # eclipse at the start of a one-period window is not reported again
             # at its end.
-            eclipses = [e for e in eclipses if t_lo - eps <= e["mid"] < t_hi - eps]
+            t_end = max(t_hi, t_lo + P_days)
+            eclipses = [e for e in eclipses if t_lo - eps <= e["mid"] < t_end - eps]
             _log_eclipse_search_done(eclipses, t0)
             return eclipses
         warnings.warn(
