@@ -186,7 +186,7 @@ class MeshModel(Model, MeshModelNamedTuple):
     fourier_series_parameters: Float[Array, "n_puls_orders 3 n_fourier_orders 2"]
 
     pulsation_axes: Float[Array, "n_puls_orders 3"]
-    pulsation_angles: Float[Array, "n_puls_orders"]
+    pulsation_angles: Float[Array, "n_puls_orders 1"]
     # Per mode: 0 standing, -1 prograde, +1 retrograde (sense of azimuthal motion
     # about rotation_axis; SPICE stars spin clockwise about it). None = all standing.
     pulsation_travelling: Optional[Float[Array, "n_puls_orders"]]

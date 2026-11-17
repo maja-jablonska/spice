@@ -46,12 +46,12 @@ To use PHOEBE with SPICE, you first need to create a PHOEBE model. Here's a basi
                                {pn: sp for pn, sp in zip(bb.parameter_names, bb.solar_parameters)},
                                component='starA')
 
-The `PhoebeConfig` class wraps a PHOEBE bundle and provides methods to extract relevant information for SPICE. The `PhoebeModel` class represents a snapshot of the binary system at a specific time.
+The ``PhoebeConfig`` class wraps a PHOEBE bundle and provides methods to extract relevant information for SPICE. A ``PhoebeModel`` is the mesh of one component (here ``starA``) at one time; for both components of a binary use :class:`~spice.models.PhoebeBinary`.
 
 There are a few requirements PHOEBE needs to be set up so that SPICE can extract the necessary information:
 
-- The `mesh` dataset needs to be added with all the necessary columns (see `_mesh_columns`)
-- The `coordinates` parameter needs to be set to `uvw`
+- The ``mesh`` dataset needs to be added with all the necessary columns (see ``_mesh_columns``)
+- The ``coordinates`` parameter needs to be set to ``uvw``
 - For some emulators, a dictionary of stellar parameters and the corresponding values needs to be provided. Some parameters are not provided by PHOEBE and need to be manually assigned to the mesh model
 
 Viewing convention
@@ -83,4 +83,4 @@ Once you have a PhoebeModel, you can use it with SPICE's spectral synthesis func
     # Simulate a spectrum
     spectrum = simulate_observed_flux(bb.intensity, pm, np.log10(wavelengths))
 
-This will generate a synthetic spectrum based on the PHOEBE model at the specified time. (Default distance is $d=10$ pc)
+This will generate a synthetic spectrum based on the PHOEBE model at the specified time. (The default distance is :math:`d = 10` pc.)

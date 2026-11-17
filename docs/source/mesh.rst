@@ -166,9 +166,9 @@ Here's an example of what the output should look like:
    :alt: 3D visualization of a rotated mesh
    :class: only-dark
 
-In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight. ``plot_3D`` also draws the rotation axis (listed in the legend), but here it lies along +y inside the star and is hidden by the mesh surface; the rotation shows up as the velocity gradient across the disc instead.
+In this image, you can see the 3D structure of the mesh, with colors representing the 'los_velocities' values. The red arrow indicates the line of sight. ``plot_3D`` also draws the rotation axis (listed in the legend), but here it points along +y just outside the star, behind the sphere from this camera angle, so it is hidden; the rotation shows up as the velocity gradient across the disc instead.
 
-You can customize the visualization by changing the `property` parameter. For example, you could use 'los_velocities' to color the mesh by line-of-sight velocities, or 'mus' to show the angle between the normal and the line of sight.
+You can customize the visualization by changing the `property` parameter. For example, you could use 'los_velocities' to color the mesh by line-of-sight velocities, or 'mus' to show the cosine of the angle between each normal and the direction towards the observer.
 
 
 

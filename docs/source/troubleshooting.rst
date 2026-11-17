@@ -33,7 +33,9 @@ Unexpected magnitudes or luminosities
   returns intensity at ``mu=1``; the un-darkened blackbody example in
   :doc:`synthetic_photometry` supplies the required factor of pi.
 - Check wavelength coverage: ``luminosity`` integrates only the range
-  supplied, and photometry requires the full passband response.
+  supplied. Photometry integrates only the part of the passband the
+  wavelengths cover and emits a ``WavelengthCoverageWarning`` when part of the
+  response is missing, so supply the full passband range.
 - Results affected by the earlier per-Angstrom conversion errors should
   be recomputed. Remove any manual unit corrections that compensated for
   those bugs; see :doc:`conventions`.

@@ -469,7 +469,7 @@ def evaluate_orbit(binary: Binary, time: ArrayLike) -> Tuple[Model, Model]:
             ``reference_time`` (see :func:`add_orbit`).
 
     The number of occlusion neighbours searched per triangle is taken from the
-    binary itself (``n_neighbours1`` / ``n_neighbours2``, set by :func:`add_orbit`).
+    binary itself (``n_neighbours1`` / ``n_neighbours2``, set by :meth:`Binary.from_bodies`).
 
     Returns:
         Tuple[Model, Model]: A tuple containing the updated models for the primary and secondary components of
@@ -504,7 +504,7 @@ def evaluate_orbit_at_times(binary: Binary, times: ArrayLike) -> Tuple[List[Mode
             and ``reference_time`` (see :func:`add_orbit`).
 
     The number of occlusion neighbours searched per triangle is taken from the
-    binary itself (``n_neighbours1`` / ``n_neighbours2``, set by :func:`add_orbit`).
+    binary itself (``n_neighbours1`` / ``n_neighbours2``, set by :meth:`Binary.from_bodies`).
 
     Returns:
         Tuple[List[Model], List[Model]]: A tuple containing lists of evaluated models for the primary and secondary 

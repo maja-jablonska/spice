@@ -62,12 +62,17 @@ Three wrapper classes cover the bundle flavors:
     flux-conservation limb darkening.
 
 :class:`~spice.spectrum.AemuSpectrumEmulator`
-    The generic base wrapper around an already-loaded ``aemu.Emulator``
-    instance, for bundles that don't match the two pretrained layouts.
+    The base class around an already-loaded ``aemu.Emulator`` instance. Its
+    ``intensity`` and ``flux`` raise ``NotImplementedError``, so for a bundle
+    that matches neither pretrained layout, subclass it and implement them.
 
-Input/output min-max scaling declared by the bundle (both the older split
+Min-max input scaling declared by the bundle (both the older split
 ``reference_scaling_inputs``/``outputs`` layout and the newer combined
-``reference_scaling`` block) is applied automatically.
+``reference_scaling`` block) is applied automatically by both pretrained wrappers. Output
+scaling is undone only by
+:class:`~spice.spectrum.IntensityPretrainedAemuSpectrumEmulator`;
+:class:`~spice.spectrum.FluxPretrainedAemuSpectrumEmulator` returns the bundle's
+``flux`` output as is, interpolated onto the requested wavelengths.
 
 .. warning::
 
@@ -116,7 +121,7 @@ Abundance spots and line profiles
 ---------------------------------
 
 Because bundle parameters typically include individual abundances, surface
-abundance patterns become time-dependent line-profile variations. A
+abundance patterns become time-dependent line-profile variations. An
 iron spot on a rotating star:
 
 .. code-block:: python
@@ -137,24 +142,38 @@ iron spot on a rotating star:
 .. image:: ../img/feh_spot_0.png
    :width: 600
    :alt: Iron spot at phase 0
+   :class: only-light
+
+.. image:: ../img/feh_spot_0_dark.png
+   :width: 600
+   :alt: Iron spot at phase 0
+   :class: only-dark
 
 .. image:: ../img/feh_line_profile.png
    :width: 600
    :alt: Iron line profiles
+   :class: only-light
+
+.. image:: ../img/feh_line_profile_dark.png
+   :width: 600
+   :alt: Iron line profiles
+   :class: only-dark
 
 Similarly, pulsating models produce phase-dependent line profiles (see the
 companion notebook for the full plotting code). The Fourier amplitude is a
-displacement in solar radii, so a radial mode with amplitude
-:math:`A = 0.03\,R_\odot` and period :math:`P = 0.1` d changes the radius by
+fraction of the stellar radius, so on this 1 :math:`R_\odot` star a radial mode
+with amplitude :math:`A = 0.03` and period :math:`P = 0.1` d changes the radius by
 :math:`\pm 3` per cent and reaches a surface velocity of
-:math:`2\pi A / P \approx 15` km/s, a :math:`\pm 0.25` Å shift of the
-lines at 5000 Å:
+:math:`2\pi A R / P \approx 15` km/s. Surface elements at disc centre shift by
+:math:`\pm 0.25` Å at 5000 Å; the disc-integrated line moves by about two thirds
+of that (:math:`\approx \pm 0.17` Å), because the velocity is radial and is
+foreshortened towards the limb:
 
 .. code-block:: python
 
     from spice.models.mesh_transform import add_pulsation, evaluate_pulsations
 
-    # radial mode, amplitude in solar radii, period in days
+    # radial mode, amplitude as a fraction of the radius, period in days
     mp = add_pulsation(m, 0, 0, 0.1, jnp.array([[0.03, 0.]]))
 
     TIMESTAMPS = jnp.linspace(0., 0.1, 20)   # one period, in days

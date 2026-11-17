@@ -70,7 +70,7 @@ The grids and model outputs behind the paper are in the Hugging Face dataset [mj
 
 - **Spherical harmonic spot modeling** for complex spot distributions
 - **Temperature contrast** between spots and photosphere
-- **Time-evolving spot patterns**
+- **Spots that rotate with the surface**
 - **Spot-induced spectral variations**
 
 ### ⭐ **Binary Star Systems**
@@ -157,7 +157,8 @@ from spice.spectrum.filter import GaiaG
 bb = Blackbody()
 los = jnp.array([0.0, 0.0, -1.0])  # line of sight (observer -> star); orbit inclination is measured from +z
 
-# Create binary components (cast to the line of sight for occlusion handling)
+# Create binary components. Meshes already use the default line of sight above;
+# get_mesh_view only matters for a different one, which both components must share.
 primary = get_mesh_view(
     IcosphereModel.construct(1000, 1.0, 1.0, bb.solar_parameters, bb.parameter_names), los)
 secondary = get_mesh_view(
@@ -166,25 +167,25 @@ secondary = get_mesh_view(
 # Assemble the system
 binary = Binary.from_bodies(primary, secondary)
 
-# Add orbital elements
+# A close, edge-on orbit (P ~ 3.65 days) so the components eclipse
 binary = add_orbit(
     binary,
-    P=1.0,                    # orbital period [years]
-    ecc=0.1,                  # eccentricity
+    P=0.01,                   # orbital period [years]
+    ecc=0.0,                  # eccentricity
     T=0.0,                    # time of periastron passage [years]
-    i=np.pi / 3,              # inclination [rad]
+    i=np.pi / 2,              # inclination [rad], edge-on
     omega=0.0,                # argument of periastron [rad]
     Omega=0.0,                # longitude of the ascending node [rad]
     mean_anomaly=0.0,         # additive phase offset from periastron timing [rad]
     reference_time=0.0,       # reference time [years]
     vgamma=0.0,               # systemic velocity [km/s]
-    orbit_resolution_points=50,
+    orbit_resolution_points=20,
 )
 
-# Evaluate the orbit across phases (eclipses/occlusions resolved internally).
-# Each step resolves occlusions between two ~1000-vertex meshes; on a laptop
-# CPU 20 steps take several minutes.
-times = jnp.linspace(0.0, 1.0, 20)
+# Evaluate the orbit across one period (eclipses/occlusions resolved internally).
+# Each step resolves occlusions between two 1280-face meshes; on a laptop CPU
+# the 20 steps take under a minute or two.
+times = jnp.linspace(0.0, 0.01, 20)
 primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
 # Combined Gaia G-band light curve
