@@ -15,8 +15,9 @@ with :func:`~spice.spectrum.simulate_observed_flux`.
 Native Keplerian binaries
 -------------------------
 
-Build the two components, cast them to the line of sight (required for
-occlusion handling), and combine:
+Build the two components and combine them. Both must share the line of sight
+they are viewed along: the default ``[0, 0, -1]``, or one set with
+``get_mesh_view`` (a no-op here, shown for completeness):
 
 .. code-block:: python
 
@@ -81,8 +82,8 @@ a time array:
 
 .. code-block:: python
 
-    # Each time step resolves occlusions between two ~1000-vertex meshes;
-    # on a laptop CPU these 20 steps take several minutes.
+    # Each time step resolves occlusions between two 1280-face meshes;
+    # on a laptop CPU these 20 steps take under a minute or two.
     times = jnp.linspace(0.0, 0.01, 20)   # one orbital period
     primaries, secondaries = evaluate_orbit_at_times(binary, times)
 
@@ -114,14 +115,15 @@ dropped: an uneven tessellation can have more than half of its faces visible
 without losing any of them from the calculation.
 
 Candidate face pairs come from a nearest-neighbour search, whose size ``k``
-and direction :meth:`~spice.models.Binary.from_bodies` picks once, from the
-meshes as passed. This is why the components must be cast to the line of
-sight with ``get_mesh_view`` first. ``k`` is estimated from the projected face
+and direction :meth:`~spice.models.binary.Binary.from_bodies` picks once, from the
+meshes as passed, so the meshes must already carry the line of sight they will
+be viewed along. ``k`` is estimated from the projected face
 sizes and face densities (clipped to 24-256). By default each occluded face
 searches its ``k`` nearest occluder faces. When that would need more than 256
-neighbours, as for a small, finely meshed body in front of coarse faces (a
-planetary transit), the search runs from the occluder side instead
-(``from_occluder``): each occluder face searches its nearest occluded faces.
+neighbours and searching from the other side is cheaper, as for a small, finely
+meshed body in front of coarse faces (a planetary transit), the search runs from
+the occluder side instead (``from_occluder``): each occluder face searches its
+nearest occluded faces.
 Both directions sum the same overlapping pairs. Before the November 2026 fix
 the occluded-side search was simply capped in that case, which dropped most
 of the occluder faces, and transits came out about 49-62% too shallow. Redo
@@ -210,8 +212,6 @@ distortion matter, compute the meshes in PHOEBE and wrap them for SPICE
     b.add_dataset('mesh', compute_times=times, columns=_mesh_columns, dataset='mesh01')
     b.add_dataset('orb', compute_times=times, dataset='orb01')
     b.add_dataset('lc', compute_times=times, passband='Johnson:V', dataset='lc01')
-
-    b.set_value('distance@system', 10)  # in PHOEBE's default distance unit (m)
 
     # Make sure to set the coordinates to 'uvw'
     b.run_compute(coordinates='uvw')

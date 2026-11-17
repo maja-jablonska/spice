@@ -21,10 +21,12 @@ Geometry and line of sight
   leave ``rotation_axis`` unspecified. Viewing along an existing rotation
   axis gives a pole-on star with zero projected rotational velocity.
 - ``mesh.mus`` is the cosine of the angle between an element's surface normal
-  and the line of sight; only elements with positive ``mus`` contribute to
-  synthesized flux.
-- Occlusion handling requires each component to be cast to the line of sight
-  first via :func:`~spice.models.mesh_view.get_mesh_view`.
+  and the direction towards the observer (the reversed line of sight); only
+  elements with positive ``mus`` contribute to synthesized flux.
+- Occlusion uses the line of sight each mesh carries. Native meshes already
+  carry the default, so :func:`~spice.models.mesh_view.get_mesh_view` is needed
+  only for a different line of sight, and then both components of a binary must
+  share it.
 
 Velocities and Doppler shifts
 -----------------------------
@@ -100,8 +102,8 @@ Stellar parameters
   in km/s and converts them to m/s for the acceleration calculation. Rotation
   and pulsation updates copy this gravity into the atmosphere parameter column
   unless the model was constructed with ``override_log_g=True``.
-- Effective temperature is linear Kelvin (``teff``) for :class:`~spice.spectrum.Blackbody`,
-  the grid interpolators and the current TPayne aemu bundles; some older bundles used
+- Effective temperature is linear Kelvin for :class:`~spice.spectrum.Blackbody`
+  (parameter name ``Teff``), the grid interpolators and the current TPayne aemu bundles; some older bundles used
   log10 Kelvin (``logteff``). Check your emulator's ``stellar_parameter_names``.
 - ``to_parameters`` accepts ``teff`` and ``Teff`` interchangeably and raises
   ``ValueError`` for any name the emulator does not have, instead of silently
@@ -125,7 +127,10 @@ Spots and pulsations
   :func:`~spice.models.utils.inclination_to_los_axis` takes the same axis
   (``inclination_to_los_axis(i, mesh.rotation_axis)``).
 - Spherical-harmonic spots and pulsation modes are indexed by order ``m`` and
-  degree ``l`` with :math:`0 \le m \le l \le 10`. They are real harmonics, so
+  degree ``l`` with :math:`0 \le m \le l \le 10`. Pulsation modes must also fit
+  the mesh: ``IcosphereModel.construct`` defaults to ``max_pulsation_mode=5``,
+  which allows :math:`l \le 4`; pass ``max_pulsation_mode=l + 1`` for higher
+  degrees. They are real harmonics, so
   ``m != 0`` pulsation modes are standing waves unless ``add_pulsation`` is given
   ``travelling="prograde"`` (moving with the spin) or ``"retrograde"``.
 - ``evaluate_rotation`` turns the pulsation displacements and velocities with

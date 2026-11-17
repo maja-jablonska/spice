@@ -1,7 +1,7 @@
 """Showcase 3 - an eclipsing binary: sky view, light curve and composite spectrum.
 
 F + K dwarf pair, P = 2.5 d, i = 87 deg, synchronised aligned spins. Top: the two
-meshes on the sky coloured by line-of-sight velocity (orbit + spin), with the
+meshes on the sky coloured by spin velocity (each star's orbital motion removed), with the
 occlusion resolved per element. Bottom left: the Stromgren y light curve tracing out.
 Bottom right: the composite Mg b spectrum, the two line sets splitting and merging
 (the cooler component's lines are the deeper, narrower set).

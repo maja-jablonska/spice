@@ -135,7 +135,7 @@ MeshModel
       ``rotation_axis`` tilted by ``pulsation_angles`` about this axis.
 
    .. py:attribute:: pulsation_angles
-      :type: Float[Array, "n_puls_orders"]
+      :type: Float[Array, "n_puls_orders 1"]
 
       Tilt angles of pulsation modes, in degrees.
 

@@ -22,7 +22,7 @@ A single rotating star
 
     bb = Blackbody()
 
-    # A solar-like star: ~1000 mesh vertices, 1 solar radius, 1 solar mass
+    # A solar-like star: 1280 faces (resolution request 1000), 1 solar radius, 1 solar mass
     star = IcosphereModel.construct(1000, 1., 1., bb.solar_parameters, bb.parameter_names)
 
     # Solid-body rotation with a 2 km/s equatorial velocity, evaluated at t = 0 s
@@ -84,7 +84,8 @@ An eclipsing binary with a light curve
     bb = Blackbody()
     los = jnp.array([0.0, 0.0, -1.0])  # line of sight (observer -> star)
 
-    # Cast each component to the line of sight so occlusions can be resolved
+    # Meshes already use the default line of sight above; get_mesh_view only matters
+    # for a different one, which both components must share
     primary = get_mesh_view(
         IcosphereModel.construct(1000, 1.0, 1.0, bb.solar_parameters, bb.parameter_names), los)
     secondary = get_mesh_view(
@@ -108,8 +109,8 @@ An eclipsing binary with a light curve
     )
 
     # Evaluate the orbit across one period (eclipses/occlusions resolved internally).
-    # Each time step resolves occlusions between two ~1000-vertex meshes; on a
-    # laptop CPU these 20 steps take several minutes.
+    # Each time step resolves occlusions between two 1280-face meshes; on a
+    # laptop CPU these 20 steps take under a minute or two.
     times = jnp.linspace(0.0, 0.01, 20)
     primaries, secondaries = evaluate_orbit_at_times(binary, times)
 

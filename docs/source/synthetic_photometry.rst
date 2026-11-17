@@ -20,7 +20,8 @@ Magnitude systems
 - :func:`~spice.spectrum.ST_passband_luminosity` uses the ST system. Gaia
   filters are not supported and raise ``ValueError``.
 - :func:`~spice.spectrum.Vega_passband_luminosity` requires a Vega zero point
-  or an AB-to-Vega offset on the filter: Gaia G/BP/RP/RVS (Riello et al. 2021),
+  or an AB-to-Vega offset on the filter: Gaia G/BP/RP (Riello et al. 2021) and RVS
+  (Sartoretti et al. 2022),
   2MASS J/H/Ks (Cohen et al. 2003 zero-magnitude fluxes), and the
   standard-system Johnson-Cousins, Hipparcos/Tycho and Strömgren bands, which
   follow Bessell & Murphy (2012) as ``m_AB + offset``.
@@ -29,7 +30,10 @@ Magnitude systems
   offsets (U -0.761, B +0.130, V +0.020, R -0.163, I -0.404, Hp +0.030,
   BT +0.100, VT +0.037, u +0.308, v +0.327, b +0.187, y +0.027 mag), i.e. it
   returned standard-system magnitudes. Use ``Vega_passband_luminosity`` to get
-  those values now.
+  those values now. ``ST_passband_luminosity`` for Johnson-Cousins and
+  Hipparcos/Tycho likewise carried band offsets (U +0.142, B +0.625, V +0.019,
+  R -0.538, I -1.220, Hp +0.074, BT +0.672, VT +0.115 mag); ST magnitudes for
+  these bands now use the plain ST zero point.
 
 At 10 pc, the returned magnitude is an absolute magnitude. At another
 synthesis distance it is the apparent magnitude at that distance, without
