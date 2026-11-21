@@ -73,6 +73,18 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                                      "rotation_velocity", "rotation_axis",
                                      "parameters", "los_vector", "orbital_velocity"
                                      ])):
+    """One PHOEBE component at one computed time, as a SPICE model.
+
+    The geometry (projected vertices, centres and areas, ``mus``), velocities
+    and per-element parameters are read from PHOEBE's mesh, so Roche and
+    rotational distortion are PHOEBE's. The model is read-only in SPICE: it can
+    be synthesised (:func:`~spice.spectrum.spectrum.simulate_observed_flux`) but
+    not rotated, pulsated or spotted. Build it with :meth:`construct`; for an
+    orbiting pair use :class:`~spice.models.binary.PhoebeBinary`.
+
+    ``los_vector`` is ``[0, 0, 1]`` (PHOEBE's ``+w``), which makes
+    ``los_velocities`` equal PHOEBE's radial velocities.
+    """
     time: float
     mass: float
     radius: float
@@ -144,6 +156,30 @@ class PhoebeModel(Model, namedtuple("PhoebeModel",
                   parameter_values: Dict[str, float] = None,
                   component: Optional[Component] = None,
                   override_parameters: Optional[ArrayLike] = None) -> "PhoebeModel":
+        """Build the model of one component at one computed time.
+
+        Args:
+            phoebe_config (PhoebeConfig): The computed bundle.
+            time (float): One of ``phoebe_config.times`` [days].
+            parameter_names (List[str], optional): The emulator's parameter names.
+                Teff, log g, abundance and ``mu`` columns are filled from the PHOEBE
+                mesh (names are matched case-insensitively, ignoring grid prefixes
+                such as ``marcs_``); every other name must be in ``parameter_values``.
+                Without names the parameters are PHOEBE's per-element ``teffs``.
+            parameter_values (Dict[str, float], optional): Constant values for the
+                parameters PHOEBE does not provide.
+            component (Component, optional): Which star of the bundle (e.g.
+                ``Component.PRIMARY``); omit for a single-star bundle.
+            override_parameters (ArrayLike, optional): Use these parameters instead.
+
+        Returns:
+            PhoebeModel: The component model, centred on its orbit position when
+            the config has an orbit dataset, else at the origin.
+
+        Raises:
+            ImportError: If PHOEBE is not installed.
+            ValueError: If a parameter name is neither inferable nor in ``parameter_values``.
+        """
         if not PHOEBE_AVAILABLE:
             raise ImportError("PHOEBE is not installed. Please install it with 'pip install stellar-spice[phoebe]'")
         radius = phoebe_config.get_quantity('requiv', component=component)

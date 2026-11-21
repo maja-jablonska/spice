@@ -82,7 +82,8 @@ def test_simulate_observed_flux_warns_outside_the_emulator_range():
 
 def test_bundle_wavelength_range_from_extras():
     from types import SimpleNamespace
-    from spice.spectrum.aemu_spectrum_emulator import _bundle_wavelength_range
+    from tests.aemu_helpers import import_aemu_wrapper
+    _bundle_wavelength_range = import_aemu_wrapper()._bundle_wavelength_range
     log_grid = np.log10(np.linspace(*HARPS, 50)).tolist()
     assert _bundle_wavelength_range(SimpleNamespace(bundle_extras={"source_log10_wavelength": log_grid})) == \
         pytest.approx(HARPS)

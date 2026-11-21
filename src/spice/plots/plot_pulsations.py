@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 # Field registry
 # ---------------------------------------------------------------------------
 
+#: Scalar pulsation fields accepted by :func:`compute_pulsation_scalar` and the
+#: plotting helpers: radial, colatitudinal and azimuthal velocity, horizontal
+#: speed, total speed and line-of-sight velocity.
 PULSATION_FIELDS: Tuple[str, ...] = (
     "v_r",
     "v_theta",

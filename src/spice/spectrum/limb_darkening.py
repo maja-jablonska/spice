@@ -23,12 +23,32 @@ import jax.numpy as jnp
 LAW_IDS = {"linear": 0, "quadratic": 1, "square_root": 2, "logarithmic": 3, "nonlinear": 4}
 
 def get_limb_darkening_law_id(law: str) -> int:
+    """Integer id of a limb-darkening law for :func:`limb_darkening`.
+
+    Args:
+        law (str): ``"linear"``, ``"quadratic"``, ``"square_root"``,
+            ``"logarithmic"`` or ``"nonlinear"`` (Claret 4-parameter).
+
+    Returns:
+        int: The law id. Raises ``KeyError`` for an unknown law.
+    """
     return LAW_IDS[law]
 
 @jax.jit
 def limb_darkening(mu, law_id: int, coeffs):
-    """
-    JIT-friendly limb darkening implementation.
+    """Dimensionless limb-darkening factor f(mu) = I(mu) / I(1).
+
+    Args:
+        mu: Cosine(s) of the angle between the surface normal and the direction
+            to the observer; clipped to [1e-6, 1].
+        law_id (int): From :func:`get_limb_darkening_law_id`.
+        coeffs: Law coefficients: ``a`` (linear), ``a, b`` (quadratic,
+            square-root, logarithmic) or ``a1..a4`` (nonlinear). Up to 4 values.
+
+    Returns:
+        f(mu), with the shape of ``mu``. The laws are ``1 - a(1-mu)``,
+        ``1 - a(1-mu) - b(1-mu)^2``, ``1 - a(1-mu) - b(1-sqrt(mu))``,
+        ``1 - a(1-mu) - b mu ln(mu)`` and ``1 - sum_i a_i (1 - mu^(i/2))``.
     """
     mu = jnp.clip(mu, 1e-6, 1.0)
     # Pad coeffs to length 4 for JIT shape consistency

@@ -1,7 +1,9 @@
 from typing import Any, Dict, List, Optional, Sequence
 
 from jax.typing import ArrayLike
+import jax
 import jax.numpy as jnp
+import numpy as np
 
 from spice.spectrum.limb_darkening import limb_darkening, get_limb_darkening_law_id
 from spice.spectrum.solar_parameters import TEFF
@@ -99,22 +101,49 @@ class Blackbody:
         mu: float,
         parameters: ArrayLike,
     ) -> ArrayLike:
+        """Planck specific intensity, limb-darkened by the bound law if one is set.
+
+        Args:
+            log_wavelengths (ArrayLike): log10 of the wavelengths [Angstrom].
+            mu (float): Cosine of the angle between the surface normal and the
+                direction to the observer.
+            parameters (ArrayLike): ``[Teff]`` [K].
+
+        Returns:
+            ArrayLike: ``(n_wavelengths, 2)`` intensities [erg/s/cm2/Angstrom/sr];
+            both columns are the same (line and continuum channels).
+        """
         return blackbody_intensity(
             log_wavelengths, mu, parameters,
             ld_law=self.ld_law, ld_coeffs=self.ld_coeffs,
         )
 
-    def flux(self, log_wavelengths: ArrayLike, parameters: ArrayLike) -> ArrayLike:
-        """Intensity at mu=1, with the same two channels as :meth:`intensity`.
+    def flux(self, log_wavelengths: ArrayLike, parameters: ArrayLike,
+             mus_number: int = 20) -> ArrayLike:
+        """Emergent surface flux, :math:`F_\\lambda = 2\\pi\\int_0^1 I_\\lambda(\\mu)\\mu\\,d\\mu`.
 
-        Despite its name, this method does not integrate over solid angle.
-        For a blackbody without limb darkening, multiply by pi to obtain
-        emergent surface flux in erg/s/cm2/Angstrom for the luminosity functions.
-        With limb darkening, integrate ``2*pi*I(mu)*mu`` over mu from 0 to 1.
-        Use :func:`spice.spectrum.simulate_observed_flux` with :meth:`intensity`
-        to obtain the disc-integrated flux at an observer's distance.
+        Without limb darkening this is exactly :math:`\\pi B_\\lambda(T)`. With a
+        limb-darkening law the angular integral is evaluated by ``mus_number``-point
+        Gauss--Legendre quadrature on ``mu`` in [0, 1], as in the grid interpolators.
+        This is the flux expected by the luminosity functions; use
+        :func:`spice.spectrum.simulate_observed_flux` with :meth:`intensity` for the
+        disc-integrated flux at an observer's distance.
+
+        Args:
+            log_wavelengths (ArrayLike): log10 of the wavelengths [Angstrom].
+            parameters (ArrayLike): ``[Teff]`` [K].
+            mus_number (int): Quadrature nodes used when a limb-darkening law is set.
+
+        Returns:
+            ArrayLike: ``(n_wavelengths, 2)`` surface flux [erg/s/cm2/Angstrom];
+            both columns are the same (line and continuum channels).
         """
-        return blackbody_intensity(
-            log_wavelengths, 1.0, parameters,
-            ld_law=self.ld_law, ld_coeffs=self.ld_coeffs,
-        )
+        if self.ld_law is None:
+            return jnp.pi * blackbody_intensity(log_wavelengths, 1.0, parameters)
+        roots, weights = np.polynomial.legendre.leggauss(mus_number)
+        mus = jnp.asarray((roots + 1.0) / 2.0)
+        weights = jnp.asarray(weights / 2.0)
+        intensities = jax.vmap(self.intensity, in_axes=(None, 0, None))(
+            log_wavelengths, mus, parameters)
+        return 2.0 * jnp.pi * jnp.sum(
+            intensities * (mus * weights)[:, jnp.newaxis, jnp.newaxis], axis=0)

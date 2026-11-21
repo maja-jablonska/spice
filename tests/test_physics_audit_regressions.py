@@ -21,8 +21,8 @@ import pytest
 
 from spice.models.binary import _choose_occlusion_search
 from spice.models.mesh_model import IcosphereModel
-from spice.models.mesh_transform import (add_pulsation, add_rotation, evaluate_pulsations,
-                                         evaluate_rotation)
+from spice.models.mesh_transform import (add_pulsation, add_pulsations, add_rotation,
+                                         evaluate_pulsations, evaluate_rotation)
 from spice.models.mesh_view import resolve_occlusion
 from spice.models.spots import add_spot
 from spice.models.utils import (inclination_to_los_axis, lat_to_theta, rotation_axis_frame,
@@ -168,3 +168,15 @@ def test_negative_m_and_high_l_are_rejected():
         add_pulsation(star, 3, 2, 1.0, params)
     with pytest.raises(ValueError, match="Degree l"):
         add_pulsation(star, 0, 11, 1.0, params)
+
+
+def test_repeated_l_m_in_one_call_is_rejected():
+    # Each (l, m) has one slot on the mesh, so a repeated pair used to overwrite
+    # the earlier mode silently (the paper's pulsation gallery lost modes this way).
+    star = _star(500)
+    params = jnp.zeros((2, 3, 1, 2)).at[:, 0, 0, 0].set(0.05)
+    with pytest.raises(ValueError, match=r"Repeated \(l, m\)"):
+        add_pulsations(star, jnp.array([1, 1]), jnp.array([2, 2]), jnp.array([1.0, 0.7]), params)
+    # Distinct pairs keep both modes.
+    both = add_pulsations(star, jnp.array([1, 1]), jnp.array([2, 3]), jnp.array([1.0, 0.7]), params)
+    assert int(np.sum(np.isfinite(np.asarray(both.pulsation_periods)))) == 2

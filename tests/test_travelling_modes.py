@@ -18,7 +18,9 @@ SOLRAD_PER_DAY_TO_KMS = 8.052083333333332
 P = 1.0  # days
 
 
-def _star(axis=None, n=5000):
+def _star(axis=None, n=1000):
+    # 1280 faces: 5x cheaper than 5120 and still well inside every tolerance below
+    # (amplitude spread 0.0014 vs 0.05, pattern speed error 0.1 % vs 3 %).
     m = IcosphereModel.construct(n, 1.0, 1.0, jnp.array([5000.0, 4.0]), ["teff", "logg"])
     return add_rotation(m, 40.0, rotation_axis=axis)
 

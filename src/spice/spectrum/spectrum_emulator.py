@@ -29,10 +29,10 @@ class SpectrumEmulator(ABC, Generic[T]):
 
     @property
     def wavelength_range(self) -> Optional[Tuple[float, float]]:
-        """``(min, max)`` wavelengths in Angstrom over which the emulator is valid, or None if unrestricted.
+        """The wavelength range ``(min, max)`` in Angstrom over which the emulator is valid, or None if unrestricted.
 
         The synthesis entry points warn (``WavelengthCoverageWarning``) when asked
-        for wavelengths outside it. Override in emulators with a finite range.
+        for wavelengths outside it; emulators of a finite range override it.
         """
         return None
 

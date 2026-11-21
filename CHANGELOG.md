@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-21
+
+### Added
+- Documentation pages *Gradients* and *Performance*, and docstrings for the
+  PHOEBE adapters (`PhoebeModel`, `PhoebeBinary`, `PhoebeConfig`, `Component`),
+  the aemu emulator base classes, the zarr index builders and the
+  limb-darkening and line-profile helpers.
+- Tests: physics reference values (Planck, limb-darkening laws, disc flux,
+  eccentric-orbit velocities, spot rotation direction), plotting smoke
+  tests, `spice.cepheid_bundles` round trips and small utilities. A CI job
+  installs the PHOEBE extra and fails, rather than skips, when PHOEBE is missing.
+
+### Changed
+- `Blackbody.flux` now returns the emergent surface flux,
+  2π∫₀¹ I(μ) μ dμ: πB_λ without limb darkening, and a 20-point Gauss–Legendre
+  integral over μ when a limb-darkening law is set. It previously returned the
+  μ = 1 intensity, contrary to the `SpectrumEmulator.flux` contract, so absolute
+  luminosities computed from it were low by a factor of π. Code that multiplied
+  `Blackbody().flux` (or `intensity` at μ = 1) by π should now pass
+  `Blackbody().flux` directly.
+
+### Fixed
+- `add_pulsations` raises `ValueError` when two modes in one call share the
+  same (ℓ, m). Each (ℓ, m) has a single slot on the mesh, so the later mode used
+  to overwrite the earlier one silently.
+- The aemu test stand-in toolkit is removed from `sys.modules` after import, so
+  it no longer leaks into later test files.
+
 ## [1.9.0] - 2026-11-10
 
 ### Added

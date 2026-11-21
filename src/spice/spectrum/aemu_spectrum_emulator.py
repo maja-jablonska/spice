@@ -235,6 +235,23 @@ def _np_parameter_helper(interpolator, parameter_values: Dict[str, Any] = None) 
 
 
 class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
+    """Base wrapper around a loaded ``aemu.Emulator`` (``astro-emulators-toolkit``).
+
+    Provides what every bundle layout shares: the parameter contract
+    (:attr:`stellar_parameter_names` = the bundle's input channels without
+    ``mu``; :attr:`min_stellar_parameters` / :attr:`max_stellar_parameters` from
+    its input domain; :attr:`wavelength_range` from its extras),
+    :meth:`to_parameters`, the bundle's input min-max scaling
+    (:meth:`scale_parameters`), and a frozen apply function that runs under
+    ``jax.jit`` / ``vmap``. :meth:`flux` and :meth:`intensity` raise
+    ``NotImplementedError``: subclass it to define the forward pass for a new
+    layout, or use :class:`IntensityPretrainedAemuSpectrumEmulator` /
+    :class:`FluxPretrainedAemuSpectrumEmulator` for the two published ones.
+
+    Args:
+        emulator: An already-loaded ``aemu.Emulator``.
+    """
+
     def __init__(self, emulator: aemu.Emulator):
         self._emulator = emulator
         # Input-side affine reference scaling. Newer toolkit builds no longer
@@ -268,6 +285,11 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
         return self._emulator
 
     def scale_parameters(self, parameters: ArrayLike) -> Dict[str, ArrayLike]:
+        """Min-max scale ``parameters`` into the bundle's training space.
+
+        Returns ``{"parameters": scaled}``, or the parameters unchanged in that
+        tree when the bundle declares no input reference scaling.
+        """
         # Return a ``{"parameters": ...}`` tree even when the bundle does not
         # advertise reference_scaling_inputs, so callers (notably
         # ``to_parameters``) can uniformly index ``["parameters"]``.
@@ -293,11 +315,13 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
     @override
     @property
     def stellar_parameter_names(self) -> List[str]:
+        """The bundle's input parameter names, without ``mu``."""
         return [p for p in self._bundle_parameter_names() if p != 'mu']
 
     @override
     @property
     def min_stellar_parameters(self) -> ArrayLike:
+        """Lower bounds of the bundle's input domain, in :attr:`stellar_parameter_names` order."""
         bounds = _input_domain_param_bounds(self.emulator, "min")
         if bounds is None:
             raise ValueError("Bundle does not declare input_domain parameter bounds.")
@@ -308,6 +332,7 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
     @override
     @property
     def max_stellar_parameters(self) -> ArrayLike:
+        """Upper bounds of the bundle's input domain, in :attr:`stellar_parameter_names` order."""
         bounds = _input_domain_param_bounds(self.emulator, "max")
         if bounds is None:
             raise ValueError("Bundle does not declare input_domain parameter bounds.")
@@ -324,6 +349,17 @@ class AemuSpectrumEmulator(SpectrumEmulator[ArrayLike]):
         return self._wavelength_range
 
     def to_parameters(self, parameters: ArrayLike = None) -> ArrayLike:
+        """Parameter array ordered as :attr:`stellar_parameter_names`, in natural units.
+
+        Args:
+            parameters: A dict of named values (missing names get solar values,
+                ``teff`` and ``Teff`` are interchangeable, unknown names raise
+                ``ValueError``), or an array already in bundle order. ``None`` or
+                an empty dict gives the solar parameters.
+
+        Returns:
+            ArrayLike: The parameter vector (or one row per element for 2-D input).
+        """
         # Convert a (possibly partial) parameter dict into an ordered array of
         # raw stellar values matching ``stellar_parameter_names``. Scaling to
         # the bundle's training space happens inside ``flux``/``intensity`` via
@@ -361,6 +397,21 @@ REQUIRED_BUNDLE_PARAMETERS: Dict[str, str] = {
 
 
 class PretrainedAemuSpectrumEmulator(AemuSpectrumEmulator):
+    """:class:`AemuSpectrumEmulator` that loads its bundle by name.
+
+    Args:
+        name (str): A Hugging Face repo id (loaded with
+            ``aemu.Emulator.from_pretrained``) or a local bundle directory
+            (``aemu.Emulator.from_bundle``).
+        revision (str, optional): Hugging Face tag, branch or commit to load
+            (default: the repo's main revision). Not allowed for a local directory.
+
+    Raises:
+        ValueError: If ``revision`` is given for a local directory, if the loaded
+            revision is a known-broken one, or if the bundle lacks a parameter its
+            repo is required to expose.
+    """
+
     def __init__(self, name: str, revision: Optional[str] = None):
         # ``name`` may be a Hugging Face repo id or a local bundle directory;
         # ``revision`` pins a Hugging Face tag, branch or commit (default: main).

@@ -137,26 +137,16 @@ class PhysicalLineEmulator:
     gamma_g_alpha : float, default 0.5
         Exponent for gravity scaling of Lorentzian width.
 
-    Spectral parameter vector
-    -------------------------
-    The `spectral_parameters` vector is always ordered as:
+    Notes
+    -----
+    The ``spectral_parameters`` vector is always ordered as
+    ``[Teff [K], logg [cgs], mu]``.
 
-        [Teff [K], logg [cgs], mu]
-
-    Output
-    ------
-    For an input wavelength grid of length n, all `intensity(...)` calls return
-    an array of shape [n, 2]:
-
-        [:, 0]  full line intensity with limb darkening
-        [:, 1]  pure continuum intensity with limb darkening
-
-    Units of both columns:
-
-        erg s^-1 cm^-2 Å^-1 sr^-1
-
-    (monochromatic specific intensity at the stellar surface, along
-     the ray at cosine μ).
+    For an input wavelength grid of length n, ``intensity(...)`` returns an
+    array of shape ``(n, 2)``: column 0 is the full line intensity and column 1
+    the pure continuum intensity, both limb-darkened, in
+    erg s^-1 cm^-2 Å^-1 sr^-1 (monochromatic specific intensity at the stellar
+    surface, along the ray at cosine μ).
     """
 
     def __init__(

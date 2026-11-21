@@ -121,6 +121,8 @@ Script: ``s11_solar_oscillations.py``.
    :alt: A star with low-degree p modes, its line residuals and disc-integrated radial velocity
    :class: only-dark
 
+.. _gallery-gradients:
+
 Gradients through an eclipse
 ----------------------------
 
@@ -139,6 +141,8 @@ finite differences.
 .. image:: ../img/showcase/gradients_sweep_dark.webp
    :alt: Derivatives of the light curve with respect to radii, inclination and Teff through an eclipse
    :class: only-dark
+
+.. _gallery-fit:
 
 A gradient-based fit
 --------------------

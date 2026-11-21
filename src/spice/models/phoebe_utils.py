@@ -40,6 +40,11 @@ def cos_angle_between(v1, v2):
     return np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)
 
 class Component(Enum):
+    """A component of a PHOEBE binary bundle: ``PRIMARY`` or ``SECONDARY``.
+
+    ``str(component)`` gives the PHOEBE component label (``"primary"``,
+    ``"secondary"``).
+    """
     PRIMARY = auto()
     SECONDARY = auto()
     
@@ -47,6 +52,25 @@ class Component(Enum):
         return self.name.lower()
 
 class PhoebeConfig:
+    """Read-only view of a computed PHOEBE bundle, used to build SPICE models.
+
+    Wraps a :class:`phoebe.frontend.bundle.Bundle` whose ``mesh`` dataset (and,
+    for binaries, ``orb`` dataset) has already been computed with
+    ``b.run_compute()``, and reads per-element mesh columns (projected vertices
+    and centres, areas, ``mus``, ``teffs``, ``loggs``, velocities) and orbit
+    positions at the bundle's computed times. Positions are in solar radii and
+    velocities in km/s in PHOEBE's ``uvw`` frame (``w`` towards the observer).
+
+    Args:
+        bundle: The computed PHOEBE bundle.
+        mesh_dataset_name (str): Name of the mesh dataset (default ``"mesh01"``).
+        orbit_dataset_name (str, optional): Name of the orbit dataset. Defaults to
+            ``"orb01"`` when the bundle has one, else no orbit (a single star).
+
+    Raises:
+        ValueError: If PHOEBE is not installed or a named dataset is not in the bundle.
+    """
+
     def __init__(self,
                  bundle: 'phoebe.frontend.bundle.Bundle',
                  mesh_dataset_name: str = 'mesh01',

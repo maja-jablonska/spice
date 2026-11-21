@@ -4,6 +4,14 @@ import jax.numpy as jnp
 KIND_MAP = {"gaussian": 0, "lorentzian": 1, "voigt": 2}
 
 def get_line_profile_id(kind: str) -> int:
+    """Integer id of a line-profile shape for :func:`line_profile`.
+
+    Args:
+        kind (str): ``"gaussian"``, ``"lorentzian"`` or ``"voigt"`` (pseudo-Voigt).
+
+    Returns:
+        int: The profile id. Raises ``KeyError`` for an unknown kind.
+    """
     return KIND_MAP[kind]
 
 

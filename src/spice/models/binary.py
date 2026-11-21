@@ -203,6 +203,19 @@ class PhoebeBinary(namedtuple("PhoebeBinary",
                                "mean_anomaly", "reference_time", "vgamma",
                                "evaluated_times", "body1_centers", "body2_centers", "body1_velocities",
                                "body2_velocities", "phoebe_config", "parameter_labels", "parameter_values"])):
+    """A binary whose geometry and orbit come from a computed PHOEBE bundle.
+
+    The counterpart of :class:`Binary` for PHOEBE: both components are
+    :class:`~spice.models.phoebe_model.PhoebeModel` meshes and the orbit is
+    PHOEBE's own (``body*_centers`` / ``body*_velocities`` at
+    ``evaluated_times`` [days], in solar radii and km/s in the ``uvw`` frame),
+    not a Keplerian orbit recomputed by SPICE. The orbital elements are stored
+    in SPICE units (``P``, ``T`` and ``reference_time`` in years, angles in
+    radians). Build it with :meth:`construct`; evaluate it with
+    :func:`evaluate_orbit` or :func:`evaluate_orbit_at_times` at the bundle's
+    computed times.
+    """
+
     def __new__(cls, *args, **kwargs):
         if not PHOEBE_AVAILABLE:
             raise ImportError("PHOEBE is not installed. Please install it with 'pip install stellar-spice[phoebe]'")

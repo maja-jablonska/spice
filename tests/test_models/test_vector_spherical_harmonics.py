@@ -1,5 +1,6 @@
 """Tests for vector spherical harmonic pulsations."""
 import jax.numpy as jnp
+import pytest
 import numpy as np
 from jax import config
 
@@ -263,30 +264,34 @@ class TestVSHPulsationModel:
 
         assert jnp.max(jnp.abs(mesh.vertices_pulsation_offsets)) > 0.0
 
-    def test_numerical_derivative_magnitude_matches_analytical(self):
-        """Numerical and analytical velocity magnitudes should agree."""
-        mesh = _make_mesh()
-
+    @pytest.mark.parametrize("m_order,l_degree", [(0, 1), (1, 2)])
+    def test_pulsation_velocity_is_the_signed_time_derivative_of_the_displacement(self, m_order, l_degree):
+        """The analytical velocities, the built-in numerical ones and an independent
+        finite difference of the face-centre displacement must agree in sign and
+        size (the 2026-07 bug was a sign flip, invisible to a magnitude check)."""
+        mesh = _make_mesh(1000)
         fourier_params = jnp.array([
             [[0.05, 0.0]],
             [[0.02, 0.5]],
             [[0.01, 1.0]],
         ])
-
-        mesh = add_pulsation(mesh, m_order=0, l_degree=1,
-                             period=86400.0,
+        period = 0.5                                   # days
+        mesh = add_pulsation(mesh, m_order=m_order, l_degree=l_degree, period=period,
                              fourier_series_parameters=fourier_params)
 
-        mesh_analytical = evaluate_pulsations(mesh, t=0.25, use_numerical_derivative=False)
-        mesh_numerical = evaluate_pulsations(mesh, t=0.25, use_numerical_derivative=True)
+        t, h = 0.13, 1e-5                              # days
+        analytical = evaluate_pulsations(mesh, t, use_numerical_derivative=False).pulsation_velocities
+        numerical = evaluate_pulsations(mesh, t, use_numerical_derivative=True).pulsation_velocities
+        later = evaluate_pulsations(mesh, t + h).center_pulsation_offsets
+        earlier = evaluate_pulsations(mesh, t - h).center_pulsation_offsets
+        finite_difference = (later - earlier) / (2 * h) * 695700.0 / 86400.0   # R_sun/day -> km/s
 
-        # Compare magnitudes (sign convention may differ between analytical/numerical)
-        assert jnp.allclose(
-            jnp.abs(mesh_analytical.pulsation_velocities),
-            jnp.abs(mesh_numerical.pulsation_velocities),
-            rtol=1e-3, atol=1e-6
-        ), (f"Max diff: "
-            f"{jnp.max(jnp.abs(jnp.abs(mesh_analytical.pulsation_velocities) - jnp.abs(mesh_numerical.pulsation_velocities)))}")
+        v_max = float(jnp.max(jnp.abs(analytical)))
+        assert v_max > 2.0                              # km/s; a real, non-trivial signal
+        assert float(jnp.max(jnp.abs(analytical - numerical))) < 1e-5 * v_max
+        # Face centres follow the mean of their vertices, so allow a few per cent;
+        # a sign flip would differ by ~2 v_max.
+        assert float(jnp.max(jnp.abs(analytical - finite_difference))) < 0.05 * v_max
 
     def test_pulsation_dimensions_unchanged(self):
         """Pulsation offsets should have the correct shapes."""
