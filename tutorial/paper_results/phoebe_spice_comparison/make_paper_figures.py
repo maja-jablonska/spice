@@ -25,6 +25,12 @@ two anchors with a neutral -- not hued -- midpoint, so zero reads as "no
 difference" rather than as a colour. See the ``ATM_COLOR`` block for why
 three hues suffice for four atmosphere identities.
 """
+# Eclipse names follow the observational convention used in the paper: the
+# primary eclipse is the deeper one (Min I). In the sampled times the shallow
+# window comes first (SPICE's Kepler "primary" timing: the secondary star in
+# front, transiting the cooler, larger primary) and the deep window follows the
+# quadrature baseline (the hotter secondary occulted), so the primary eclipse is
+# slice(ref + 1, ref + 1 + n) and the secondary eclipse is slice(0, ref).
 import argparse
 import pickle
 from pathlib import Path
@@ -92,6 +98,19 @@ ATM_DASH = {"ck2004": (5.0, 1.6), "phoenix": (1.8, 1.6), "blackbody": (7.0, 2.2)
 SPICE_LW = 2.6
 SPICE_ALPHA = 0.55
 
+
+
+def orbital_phase(r):
+    """Orbital phase of the sampled times, zero at mid primary (deep) eclipse.
+
+    Wrapped to [-0.25, 0.75), so the primary eclipse sits at 0 and the
+    secondary near 0.5, as in the paper's TZ For figures.
+    """
+    times = np.asarray(r["times"], dtype=float)
+    period = float(r["system"]["period"])
+    ref, n = r["baseline_index"], r["n_per_eclipse"]
+    t0 = 0.5 * (times[ref + 1] + times[ref + n])
+    return np.mod((times - t0) / period + 0.25, 1.0) - 0.25
 
 def phoebe_kw(atm, **kw):
     kw.setdefault("color", ATM_COLOR[atm])
@@ -543,10 +562,10 @@ def fig_binary_lightcurves(binary, out, band="Stromgren:y"):
         axarr = sub.subplots(2, 2, gridspec_kw={"height_ratios": [2.4, 1]})
         times = np.asarray(r["times"])
         ref, n = r["baseline_index"], r["n_per_eclipse"]
-        blocks = [("primary", slice(0, ref)), ("secondary", slice(ref + 1, ref + 1 + n))]
+        blocks = [("primary", slice(ref + 1, ref + 1 + n)), ("secondary", slice(0, ref))]
         for e, (label, sl) in enumerate(blocks):
             a_top, a_bot = axarr[0, e], axarr[1, e]
-            t = times[sl] / float(r["system"]["period"])  # orbital phase
+            t = orbital_phase(r)[sl]
             spice = r["spice_dmag"].get((SPICE_KEY, band))
             for atm in PHOEBE_ATMS:
                 d = r["phoebe_dmag"].get((atm, band))
@@ -593,7 +612,7 @@ def fig_depth_residuals(binary, out):
         ax = axarr[k]
         r = binary[name]
         ref, n = r["baseline_index"], r["n_per_eclipse"]
-        sl_of = {"primary": slice(0, ref), "secondary": slice(ref + 1, ref + 1 + n)}
+        sl_of = {"primary": slice(ref + 1, ref + 1 + n), "secondary": slice(0, ref)}
         for atm, off in zip(PHOEBE_ATMS, (0.22, 0.0, -0.22)):
             xs = []
             for band, ecl in rows:
@@ -653,8 +672,8 @@ def fig_eclipse_depths(binary, out):
     for k, name in enumerate(systems):
         r = binary[name]
         ref, n = r["baseline_index"], r["n_per_eclipse"]
-        sl_of = {"primary": slice(0, ref),
-                 "secondary": slice(ref + 1, ref + 1 + n)}
+        sl_of = {"primary": slice(ref + 1, ref + 1 + n),
+                 "secondary": slice(0, ref)}
         for e, ecl in enumerate(("primary", "secondary")):
             ax = axarr[e, k]
 
@@ -722,8 +741,8 @@ def fig_eclipse_residual_stack(binary, out, band="Stromgren:y"):
         ref, n = r["baseline_index"], r["n_per_eclipse"]
         # Lower-case titles and an orbital-phase axis, matching the paper's
         # other eclipse figures ("deep eclipse ...", "phase from T_P").
-        blocks = [("primary eclipse", slice(0, ref)),
-                  ("secondary eclipse", slice(ref + 1, ref + 1 + n))]
+        blocks = [("primary eclipse", slice(ref + 1, ref + 1 + n)),
+                  ("secondary eclipse", slice(0, ref))]
         spice = r["spice_dmag"].get((SPICE_KEY, band))
         if spice is None:
             continue
@@ -734,7 +753,7 @@ def fig_eclipse_residual_stack(binary, out, band="Stromgren:y"):
                                   gridspec_kw={"height_ratios": [2.6, 1, 1]})
         for e, (title, sl) in enumerate(blocks):
             a_lc, a_res, a_frac = axarr[0, e], axarr[1, e], axarr[2, e]
-            t = times[sl] / period                       # orbital phase
+            t = orbital_phase(r)[sl]
             depth = float(np.nanmax(spice[sl]))
             for atm in PHOEBE_ATMS:
                 d = r["phoebe_dmag"].get((atm, band))
@@ -894,8 +913,8 @@ def fig_mesh_convergence(sweep, out, suite):
                     if r is None:
                         continue
                     ref, npe = r["baseline_index"], r["n_per_eclipse"]
-                    sl = (slice(0, ref) if ecl == "primary"
-                          else slice(ref + 1, ref + 1 + npe))
+                    sl = (slice(ref + 1, ref + 1 + npe) if ecl == "primary"
+                          else slice(0, ref))
                     sp = r["spice_dmag"].get((spice_kind, band))
                     ph = r["phoebe_dmag"].get((PHOEBE_ATMS[0], band))
                     if sp is None or ph is None:
@@ -982,8 +1001,8 @@ def fig_ingress_shape(binary, out, band="Stromgren:y", suffix=""):
     for k, name in enumerate(systems):
         r = binary[name]
         ref, n = r["baseline_index"], r["n_per_eclipse"]
-        sl = slice(0, ref)                       # primary eclipse
-        t = np.asarray(r["times"])[sl] / float(r["system"]["period"])  # orbital phase
+        sl = slice(0, ref)                       # secondary (shallow) eclipse: the transit
+        t = orbital_phase(r)[sl]
         a_top, a_bot = axarr[0, k], axarr[1, k]
         sp = r["spice_dmag"].get((spice_kind, band))
         if sp is None:
@@ -1015,7 +1034,7 @@ def fig_ingress_shape(binary, out, band="Stromgren:y", suffix=""):
 
 
 def shape_residual_rms(r, spice_kind, atm, band):
-    """RMS of the depth-normalised shape residual over the primary eclipse [%].
+    """RMS of the depth-normalised shape residual over the secondary eclipse [%].
 
     Dividing each curve by its own maximum depth removes the light ratio, so
     what is left is limb darkening. Returns NaN when either curve is missing.
