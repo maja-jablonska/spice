@@ -478,6 +478,15 @@ def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
     Returns:
       t_mid_primary, t1_p, t2_p, t3_p, t4_p,
       t_mid_secondary, t1_s, t2_s, t3_s, t4_s
+
+    Here "primary" and "secondary" are geometric: the primary eclipse is the
+    eclipse *of the primary component* (body 1, mass ``m1``), with the
+    secondary in front; the secondary eclipse has the primary in front. This
+    follows PHOEBE's ``t0_supconj``. It is not necessarily the observational
+    primary minimum (Min I, the deeper eclipse), which is the eclipse of the
+    star of higher surface brightness and can depend on the passband. For a
+    hot secondary and a cool primary, as in TZ For, Min I is the
+    "secondary" eclipse of this function.
     All returned times are in years.
     Any missing event is NaN.
     """
@@ -506,7 +515,7 @@ def eclipse_timestamps_kepler(m1, m2, P, e, Tperi, inc, omega, Omega,
     rho_sq = r_rel_sq - r_rel_dot_los**2
     rho = jnp.sqrt(jnp.maximum(0.0, rho_sq)) # ensure non-negative due to precision
 
-    zsign = jnp.sign(r_rel_dot_los)  # <0: secondary in front (primary eclipse)
+    zsign = jnp.sign(r_rel_dot_los)  # <0: secondary in front (eclipse of the primary component)
 
     # Identify local minima. The scan covers exactly one period with
     # endpoint=False, so the first and last samples are neighbours and the

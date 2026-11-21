@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- `eclipse_timestamps_kepler` and the *Binaries* page now state the eclipse
+  naming: SPICE's "primary eclipse" is the eclipse of the primary component
+  (as PHOEBE's `t0_supconj`), not necessarily the observational primary
+  minimum (Min I, the deeper eclipse).
+
 ## [1.9.1] - 2026-11-21
 
 ### Added
