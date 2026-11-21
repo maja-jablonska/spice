@@ -137,6 +137,18 @@ import matplotlib as mpl
 from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 
 def smart_save(anim, filename, fps=20):
+    """Save a matplotlib animation, choosing a writer from the file extension.
+
+    ``.gif`` uses Pillow, falling back to ffmpeg with a generated palette; other
+    extensions (``.mp4``, ``.webm``, ...) use ffmpeg with libx264 when it is
+    available, else matplotlib's default writer.
+
+    Args:
+        anim (matplotlib.animation.FuncAnimation): The animation, e.g. from one of
+            the ``animate_*`` functions.
+        filename (str): Output path; its extension selects the format.
+        fps (int): Frames per second (default 20).
+    """
     ext = filename.split('.')[-1].lower()
 
     if ext == 'gif':

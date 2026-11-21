@@ -198,20 +198,18 @@ magnitude. Integrating a restricted wavelength range gives only that
 range's contribution. The ``Bolometric`` filter above is a finite passband;
 its AB magnitude is not a bolometric magnitude.
 
-For an un-darkened blackbody, the emergent surface flux is :math:`\pi B_\lambda`.
-``Blackbody.flux`` currently returns the intensity at ``mu=1``, so define
-the surface-flux function explicitly before computing an absolute luminosity:
+For an un-darkened blackbody, the emergent surface flux is :math:`\pi B_\lambda`,
+which is what ``Blackbody.flux`` returns (with a limb-darkening law set, it
+integrates :math:`2\pi I(\mu)\mu` over :math:`\mu` instead), so it can be passed
+directly to the luminosity functions:
 
 .. code-block:: python
 
     import numpy as np
     from spice.spectrum import luminosity, absolute_bol_luminosity
 
-    def surface_flux(log_wavelengths, parameters):
-        return jnp.pi * bb.intensity(log_wavelengths, 1., parameters)
-
     lum_wavelengths = np.geomspace(100., 1.e6, 4096)  # Angstroms
-    L = luminosity(surface_flux, star, lum_wavelengths)  # erg/s
+    L = luminosity(bb.flux, star, lum_wavelengths)  # erg/s
     M_bol = absolute_bol_luminosity(L)
 
     # Stefan-Boltzmann prediction using this mesh's surface area.

@@ -1,4 +1,6 @@
 """Shared helper for tests that need the optional PHOEBE extra."""
+import os
+
 import pytest
 
 
@@ -8,7 +10,13 @@ def import_phoebe_or_skip():
     ``pytest.importorskip`` only catches ImportError, but a PHOEBE that is
     installed against incompatible astropy/NumPy fails with AttributeError and
     would otherwise error out the whole module.
+
+    With ``SPICE_REQUIRE_PHOEBE=1`` (the CI PHOEBE job) a missing or broken
+    PHOEBE fails the test instead of skipping it.
     """
+    if os.environ.get("SPICE_REQUIRE_PHOEBE") == "1":
+        import phoebe
+        return phoebe
     try:
         import phoebe
     except ImportError:

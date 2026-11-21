@@ -507,6 +507,26 @@ def _validate_modes(m_orders, l_degrees) -> None:
             "spherical-harmonic evaluator.")
 
 
+def _validate_unique_modes(m_orders, l_degrees) -> None:
+    """Reject repeated (l, m) pairs in one :func:`add_pulsations` call.
+
+    Modes are stored in one slot per (l, m) (``m + max_mode * l``), so a second
+    mode with the same pair overwrites the first instead of adding to it.
+    """
+    try:
+        ms = np.atleast_1d(np.asarray(m_orders)).astype(int)
+        ls = np.atleast_1d(np.asarray(l_degrees)).astype(int)
+    except Exception:  # traced values: cannot check here
+        return
+    pairs = list(zip(ls.tolist(), ms.tolist()))
+    repeated = sorted({p for p in pairs if pairs.count(p) > 1})
+    if repeated:
+        raise ValueError(
+            f"Repeated (l, m) mode(s) {repeated}: each (l, m) has a single slot on "
+            "the mesh, so a later mode would overwrite an earlier one. Combine them "
+            "into one mode (e.g. extra Fourier terms) or use distinct (l, m).")
+
+
 _TRAVELLING_SENSE = {None: 0., "standing": 0., "prograde": -1., "retrograde": 1.}
 
 
@@ -686,12 +706,17 @@ def add_pulsations(m: MeshModel, m_orders: Float[Array, "n_pulsations"], l_degre
         ValueError: If the mesh model is an instance of PhoebeModel, indicating it is read-only within SPICE.
         ValueError: If the input arrays have inconsistent lengths.
         ValueError: If any degree is ``>= m.max_pulsation_mode``.
+        ValueError: If two modes share the same ``(l, m)``. Each ``(l, m)`` has a
+            single slot on the mesh, so a repeated pair would silently replace
+            the earlier mode.
     """
     if _is_phoebe_model(m):
         raise ValueError("PHOEBE models are read-only in SPICE.")
 
     if not (len(m_orders) == len(l_degrees) == len(periods) == len(fourier_series_parameters)):
         raise ValueError("Input arrays must have consistent lengths.")
+
+    _validate_unique_modes(m_orders, l_degrees)
 
     fourier_series_parameters = jnp.asarray(fourier_series_parameters)
     if fourier_series_parameters.ndim == 3:

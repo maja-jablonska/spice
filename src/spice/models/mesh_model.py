@@ -105,7 +105,7 @@ MeshModelNamedTuple = namedtuple("MeshModel",
 class MeshModel(Model, MeshModelNamedTuple):
     """A triangulated stellar surface registered as a JAX pytree.
 
-    ``MeshModel`` is a :class:`~collections.namedtuple` holding the mesh
+    ``MeshModel`` is a :func:`~collections.namedtuple` holding the mesh
     geometry (vertices, faces, face centroids), per-element physical parameters,
     and the rotation/pulsation/orbit state. Because it is an immutable pytree,
     state is updated functionally via ``_replace`` and the helpers in
@@ -236,7 +236,7 @@ class MeshModel(Model, MeshModelNamedTuple):
 
     @property
     def velocities(self) -> Float[Array, "n_mesh_elements 3"]:
-        """Total per-element velocity: rotation + orbital + pulsation [km/s]."""
+        """Total per-element velocity (rotation + orbital + pulsation), in km/s."""
         return self.rotation_velocities + self.orbital_velocity + self.pulsation_velocities
 
     @property

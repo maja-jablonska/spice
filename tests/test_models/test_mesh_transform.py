@@ -60,15 +60,25 @@ class TestMeshTransformations:
             update_parameters(mesh_model, ["invalid_parameter"], [5000.0])
 
     def test_update_parameters_mismatched_lengths(self, mesh_model):
-        with pytest.raises(ValueError):
-            update_parameters(mesh_model, ["temperature", "gravity"], [5000.0])  # Missing one value
+        names = ["teff", "abun"]          # the names default_icosphere was built with
+        # Valid names, so the only thing wrong is the missing value.
+        with pytest.raises(ValueError, match="number of parameters must match"):
+            update_parameters(mesh_model, names, [5000.0], parameter_names=names)
+        updated = update_parameters(mesh_model, names, [5000.0, 0.1], parameter_names=names)
+        assert jnp.allclose(updated.parameters[:, 0], 5000.0)
+        assert jnp.allclose(updated.parameters[:, 1], 0.1)
 
     def test_add_rotation_to_mesh(self, mesh_model):
-        rotation_velocity = jnp.array([0.1, 0.1, 0.1])
-        rotation_axis = jnp.array([0, 0, 1])
-        rotated_mesh = add_rotation(mesh_model, rotation_velocity, rotation_axis)
-        assert jnp.allclose(rotated_mesh.rotation_velocity,
-                            rotation_velocity), "Mesh rotation velocity should be updated."
+        # Equator-on (axis perpendicular to the default line of sight [0, 0, -1]):
+        # the projected velocities reach +-v_eq at the limbs.
+        rotated_mesh = add_rotation(mesh_model, 10.0, jnp.array([0., 1., 0.]))
+        assert jnp.allclose(rotated_mesh.rotation_velocity, 10.0)
+        vlos = rotated_mesh.los_velocities
+        assert float(jnp.max(vlos)) == pytest.approx(10.0, rel=0.05)
+        assert float(jnp.min(vlos)) == pytest.approx(-10.0, rel=0.05)
+        # Pole-on: no projected rotation at all.
+        pole_on = add_rotation(mesh_model, 10.0, jnp.array([0., 0., 1.]))
+        assert float(jnp.max(jnp.abs(pole_on.los_velocities))) < 1e-10
 
     def test_add_rotation_to_phoebe_model_raises_error(self, phoebe_model):
         rotation_velocity = jnp.array([0.1, 0.1, 0.1])
@@ -172,9 +182,10 @@ class TestMeshTransformations:
                             jnp.zeros_like(mesh_model.vertices_pulsation_offsets)), "Pulsations should be reset."
         
     def test_pulsation_with_tilt(self, mesh_model):
-        t = 1800
+        # Pulsation periods and times are in days.
+        t = 1.0 / 192.0                # an eighth of the period
         m_order, n_degree = 1, 1
-        pulsation_period = 3600  # 1 hour
+        pulsation_period = 1.0 / 24.0  # 1 hour
         fourier_series_parameters = jnp.array([[0.1, 0.0]], dtype=jnp.float64)  # Amplitude 0.1, phase 0.0
         pulsation_axis = jnp.array([0.0, 1.0, 0.0], dtype=jnp.float64)  # Y-axis
         pulsation_angle = 45.  # 45 degrees tilt
@@ -192,8 +203,8 @@ class TestMeshTransformations:
             "Pulsation offsets should change after evaluation"
         
         # Check if pulsation velocities are non-zero
-        assert jnp.any(evaluated_pulsation_mesh.pulsation_velocities != 0), \
-            "Pulsation velocities should be non-zero"
+        assert float(jnp.max(jnp.abs(evaluated_pulsation_mesh.pulsation_velocities))) > 10.0, \
+            "Pulsation velocities should be tens of km/s (A = 0.1 R, P = 1 h)"
         
         # Check if pulsation axis and angle are correctly set
         harmonic_ind = m_order + mesh_model.max_pulsation_mode * n_degree
@@ -205,10 +216,11 @@ class TestMeshTransformations:
             "Pulsation angle should be correctly set"
 
     def test_multiple_pulsations_with_tilt(self, mesh_model):
-        t = 1800
+        # Pulsation periods and times are in days.
+        t = 1.0 / 192.0
         m_orders = jnp.array([1, 2])
         l_degrees = jnp.array([1, 2])
-        periods = jnp.array([3600.0, 7200.0], dtype=jnp.float64)  # 1 hour and 2 hours
+        periods = jnp.array([1.0 / 24.0, 1.0 / 12.0], dtype=jnp.float64)  # 1 hour and 2 hours
         # Legacy radial-only form: (n_pulsations, n_terms, 2) of [amplitude, phase]
         fourier_series_parameters = jnp.array([
             [[0.1, 0.0]],  # Amplitude 0.1, phase 0.0 for first pulsation
@@ -233,8 +245,8 @@ class TestMeshTransformations:
             "Pulsation offsets should change after evaluation"
         
         # Check if pulsation velocities are non-zero
-        assert jnp.any(evaluated_pulsation_mesh.pulsation_velocities != 0), \
-            "Pulsation velocities should be non-zero"
+        assert float(jnp.max(jnp.abs(evaluated_pulsation_mesh.pulsation_velocities))) > 10.0, \
+            "Pulsation velocities should be tens of km/s (A = 0.1 R, P = 1 h)"
         
         # Check if pulsation axes and angles are correctly set for both pulsations
         for i in range(2):
@@ -276,11 +288,11 @@ class TestMeshTransformations:
         """Test dimensions of pulsation function outputs"""
         m_order = 1
         n_degree = 1
-        period = 3600.0
+        period = 1.0 / 24.0            # days
         fourier_params = jnp.array([[0.1, 0.0]])
         pulsation_axis = jnp.array([0., 1., 0.])
         pulsation_angle = 45.0
-        t = 1800.0
+        t = 1.0 / 192.0                # days
 
         # Test add_pulsation
         pulsated = add_pulsation(mesh_model, m_order, n_degree, period, 

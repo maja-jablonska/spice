@@ -34,3 +34,27 @@ jobs:
           pip install -e ".[dev,grid]"
       - name: Run tests
         run: pytest -q -rfEs
+
+  # The PHOEBE extra is not installed in the main job, so the SPICE-vs-PHOEBE
+  # tests skip there. This job installs it and fails (instead of skipping) when
+  # PHOEBE cannot be imported.
+  pytest-phoebe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JAX_PLATFORMS: cpu
+      SPICE_REQUIRE_PHOEBE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package with test, grid and PHOEBE extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,grid,phoebe]"
+      - name: Run PHOEBE tests
+        run: |
+          pytest -q -rfEs tests/test_phoebe_*.py \
+            tests/test_models/test_binary.py -k "phoebe or Phoebe"

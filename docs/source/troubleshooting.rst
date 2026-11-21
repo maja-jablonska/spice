@@ -29,9 +29,9 @@ Unexpected magnitudes or luminosities
   ``luminosity`` take linear wavelengths in Angstroms.
 - Photometry expects ``spectrum[:, 0]`` in erg/s/cm²/Å. It returns a
   magnitude, despite the historical ``*_passband_luminosity`` name.
-- Use a true emergent surface flux for ``luminosity``. ``Blackbody.flux``
-  returns intensity at ``mu=1``; the un-darkened blackbody example in
-  :doc:`synthetic_photometry` supplies the required factor of pi.
+- Use a true emergent surface flux for ``luminosity``, such as an emulator's
+  ``flux`` method (``Blackbody.flux`` returns :math:`\pi B_\lambda` without limb
+  darkening), not an intensity at ``mu=1``.
 - Check wavelength coverage: ``luminosity`` integrates only the range
   supplied. Photometry integrates only the part of the passband the
   wavelengths cover and emits a ``WavelengthCoverageWarning`` when part of the

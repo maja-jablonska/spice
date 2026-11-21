@@ -200,9 +200,41 @@ matching the active precision setting.
 
 .. autofunction:: spice.models.mesh_model.calculate_log_gs
 
+.. autofunction:: spice.models.mesh_generation.icosphere
+
+
+Coordinates and Helpers
+-----------------------
+
+Surface coordinates: ``theta`` is the colatitude measured from the rotation
+axis and ``phi`` the azimuth about it, both in radians; latitudes and
+longitudes are in degrees. See :doc:`conventions`.
+
+.. autofunction:: spice.models.utils.lat_to_theta
+
+.. autofunction:: spice.models.utils.lon_to_phi
+
+.. autofunction:: spice.models.utils.theta_to_lat
+
+.. autofunction:: spice.models.utils.phi_to_lon
+
+.. autofunction:: spice.models.utils.inclination_to_los_axis
+
+.. autofunction:: spice.models.utils.rotation_axis_frame
+
+.. autofunction:: spice.models.utils.velocity_to_period
+
+.. autofunction:: spice.models.utils.period_to_velocity
+
+.. autofunction:: spice.models.utils.horizontal_to_radial_ratio
+
+.. autofunction:: spice.models.utils.cast_to_los
+
 
 Mesh Transformations
 --------------------
+
+.. py:module:: spice.models.mesh_transform
 
 All transformations are functional: they return a new model and never mutate
 in place. See :doc:`conventions` for units and sign conventions.
@@ -271,11 +303,25 @@ Binaries and Orbits
 
 .. autofunction:: spice.models.binary.evaluate_orbit_at_times_stacked
 
+.. autofunction:: spice.models.binary.v_evaluate_orbit
+
+.. autofunction:: spice.models.binary.v_evaluate_orbit_stacked
+
 .. autofunction:: spice.models.eclipse_utils.find_eclipses
 
 .. autofunction:: spice.models.eclipse_utils.find_binary_eclipses
 
 .. autofunction:: spice.models.orbit_utils.get_orbit_jax
+
+.. autofunction:: spice.models.orbit_utils.true_anomaly
+
+.. autofunction:: spice.models.orbit_utils.solve_kepler_E
+
+.. autofunction:: spice.models.orbit_utils.relative_pos_vel_at
+
+.. autofunction:: spice.models.orbit_utils.eclipse_timestamps_kepler
+
+.. autofunction:: spice.models.orbit_utils.warn_if_epoch_precision_lost
 
 
 PHOEBE Integration
@@ -292,6 +338,10 @@ Available with the ``phoebe`` extra; see :doc:`phoebe_integration`.
 .. autoclass:: spice.models.phoebe_utils.PhoebeConfig
    :members:
 
+.. autoclass:: spice.models.phoebe_utils.Component
+   :members:
+   :undoc-members:
+
 
 Spectral Synthesis
 ------------------
@@ -305,6 +355,49 @@ Spectral Synthesis
 .. autofunction:: spice.spectrum.spectrum.absolute_bol_luminosity
 
 .. autofunction:: spice.spectrum.utils.apply_spectral_resolution
+
+.. autofunction:: spice.spectrum.utils.apply_variable_resolution
+
+Constants (``spice.spectrum``):
+
+.. data:: spice.spectrum.utils.ERG_S_TO_W
+   :value: 1e-07
+
+   erg/s to W.
+
+.. data:: spice.spectrum.utils.SPHERE_STERADIAN
+   :value: 4π
+
+   Solid angle of a full sphere [sr].
+
+.. data:: spice.spectrum.utils.ZERO_POINT_LUM_W
+   :value: 3.0128e+28
+
+   Zero-point luminosity of the IAU 2015 absolute bolometric magnitude scale
+   (:math:`M_\mathrm{bol} = 0`) [W].
+   :func:`~spice.spectrum.spectrum.absolute_bol_luminosity` uses the equivalent
+   offset :math:`2.5 \log_{10} L_0 = 71.1974` mag.
+
+Wavelength coverage
+~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: spice.spectrum.wavelength_coverage
+   :members: WavelengthCoverageWarning, emulator_wavelength_range, warn_if_outside_emulator_range, warn_if_passband_uncovered
+
+Limb darkening and line profiles
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Building blocks of :class:`~spice.spectrum.blackbody.Blackbody` (optional limb
+darkening), :class:`~spice.spectrum.physical_line_emulator.PhysicalLineEmulator`
+and custom emulators (see :doc:`custom_emulators`).
+
+.. autofunction:: spice.spectrum.limb_darkening.limb_darkening
+
+.. autofunction:: spice.spectrum.limb_darkening.get_limb_darkening_law_id
+
+.. autofunction:: spice.spectrum.line_profile.line_profile
+
+.. autofunction:: spice.spectrum.line_profile.get_line_profile_id
 
 
 Emulators
@@ -328,7 +421,7 @@ Emulators
 Neural-network bundles (``aemu`` extra; see :doc:`aemu_integration`):
 
 .. autoclass:: spice.spectrum.aemu_spectrum_emulator.AemuSpectrumEmulator
-   :members: flux, intensity, to_parameters
+   :members: stellar_parameter_names, min_stellar_parameters, max_stellar_parameters, wavelength_range, to_parameters, scale_parameters, flux, intensity
 
 .. autoclass:: spice.spectrum.aemu_spectrum_emulator.PretrainedAemuSpectrumEmulator
 
@@ -390,8 +483,25 @@ Plotting
 
 .. autofunction:: spice.plots.plot_mesh.plot_3D_mesh_and_spectrum
 
+Animations (each renders the frames, writes them to ``filename`` with
+:func:`~spice.plots.plot_mesh.smart_save` and returns ``filename``):
+
+.. autofunction:: spice.plots.plot_mesh.animate_single_star
+
+.. autofunction:: spice.plots.plot_mesh.animate_mesh_and_spectra
+
+.. autofunction:: spice.plots.plot_mesh.animate_binary
+
+.. autofunction:: spice.plots.plot_mesh.animate_binary_and_spectrum
+
+.. autofunction:: spice.plots.plot_mesh.animate_binary_and_separate_spectra
+
+.. autofunction:: spice.plots.plot_mesh.animate_binary_and_lightcurve
+
+.. autofunction:: spice.plots.plot_mesh.smart_save
+
 Pulsation visualization helpers (scalar projections of
 ``mesh.pulsation_velocities``):
 
 .. automodule:: spice.plots.plot_pulsations
-   :members: compute_pulsation_scalar, plot_pulsation_map, plot_pulsation_components, plot_pulsation_cross_section, plot_pulsation_phase_grid, animate_pulsation_phase
+   :members: PULSATION_FIELDS, compute_pulsation_scalar, plot_pulsation_map, plot_pulsation_components, plot_pulsation_cross_section, plot_pulsation_phase_grid, animate_pulsation_phase

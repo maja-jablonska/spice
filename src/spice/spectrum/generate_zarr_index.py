@@ -238,6 +238,29 @@ def _load_geometry_from_zarr(group, params, param_names, store_path,
 
 def build_index_frame_from_zarr(store_path, include_mu=True,
                                 include_geometry=True, geometry_from_logg=None):
+    """Build the grid index of a zarr spectral grid as a polars DataFrame.
+
+    Args:
+        store_path: Path to the zarr store. The ``flux``, ``continuum``,
+            ``wavelength`` and ``params`` arrays may sit at the root or inside a
+            single nested wrapper group; ``param_names`` must be next to them.
+        include_mu (bool): Add a ``mu`` column, taken from a ``mu_selected``
+            array when the store has one, else from the ``mu`` parameter column.
+        include_geometry (bool): Add a ``geometry`` provenance column
+            (``"spherical"`` / ``"plane_parallel"``) from the store's ``geometry``
+            array, when present.
+        geometry_from_logg (float, optional): When the store has no ``geometry``
+            array, label nodes with ``logg`` below this threshold as spherical.
+
+    Returns:
+        polars.DataFrame: One row per grid node: ``row_idx`` (the row in
+        ``params``), one column per parameter, and the optional ``mu`` and
+        ``geometry`` columns.
+
+    Raises:
+        KeyError: If the grid arrays, ``param_names`` or a requested ``mu``
+            source are missing.
+    """
     store_path = Path(store_path).expanduser().resolve()
     root = zarr.open(str(store_path), mode="r")
     if not hasattr(root, "array_keys"):
@@ -275,6 +298,22 @@ def write_index_parquet(
     include_geometry=True,
     geometry_from_logg=None,
 ):
+    """Write the ``index.parquet`` a :class:`~spice.spectrum.lazy_zarr_interpolator.LazyZarrInterpolator` needs.
+
+    The Python equivalent of ``python -m spice.spectrum.generate_zarr_index``;
+    the arguments are those of :func:`build_index_frame_from_zarr`.
+
+    Args:
+        store_path: Path to the zarr store.
+        output_path (optional): Where to write the parquet file. Defaults to
+            ``<store_path>/index.parquet``, where the interpolators look for it.
+        compression (str): Parquet compression codec (default ``"zstd"``).
+        include_mu, include_geometry, geometry_from_logg: Passed to
+            :func:`build_index_frame_from_zarr`.
+
+    Returns:
+        pathlib.Path: The absolute path of the written file.
+    """
     store_path = Path(store_path).expanduser().resolve()
     if output_path is None:
         output_path = store_path / "index.parquet"

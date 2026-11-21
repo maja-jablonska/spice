@@ -32,6 +32,10 @@ def _load_module():
     ]
     missing = object()
     saved_modules = {name: sys.modules.get(name, missing) for name in target_module_names}
+    pre_existing_spice_modules = {
+        name for name in sys.modules
+        if name == "spice" or name.startswith("spice.")
+    }
 
     try:
         spice_pkg = types.ModuleType("spice")
@@ -44,7 +48,10 @@ def _load_module():
         sys.modules["spice.spectrum"] = spectrum_pkg
 
         utils_pkg = types.ModuleType("spice.utils")
-        utils_pkg.__path__ = []
+        # A real __path__ lets ``spice.utils.dtypes`` (imported by the interpolator)
+        # resolve from src/ when this file runs on its own; the log shim below
+        # still replaces ``spice.utils.log``.
+        utils_pkg.__path__ = [str(root / "src" / "spice" / "utils")]
 
         class _LogShim:
             class _Timed:
@@ -102,11 +109,15 @@ def _load_module():
         interp_spec.loader.exec_module(interp_module)
         return interp_module
     finally:
+        # Evict every spice.* module cached during the shimmed load (e.g.
+        # spice.utils.dtypes), then restore what was there before.
+        for name in list(sys.modules):
+            if ((name == "spice" or name.startswith("spice."))
+                    and name not in pre_existing_spice_modules):
+                sys.modules.pop(name, None)
         for name in target_module_names:
             old_module = saved_modules[name]
-            if old_module is missing:
-                sys.modules.pop(name, None)
-            else:
+            if old_module is not missing:
                 sys.modules[name] = old_module
 
 

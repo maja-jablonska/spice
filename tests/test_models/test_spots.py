@@ -55,10 +55,14 @@ class TestSpotFunctions:
         with pytest.raises(ValueError):
             add_spherical_harmonic_spot(mock_mesh, 1, 0, 10, 0)
 
+    @pytest.mark.xfail(strict=True, reason=(
+        "src bug: add_spherical_harmonic_spots (plural) does not validate m <= l; "
+        "m=1, l=0 silently adds nothing, while the singular function raises ValueError"))
     def test_raises_error_for_m_larger_than_n_add_spherical_harmonic_spots(self, mock_mesh, spherical_harmonic_params):
         _, _, param_deltas, param_indices = spherical_harmonic_params.values()
         with pytest.raises(ValueError):
-            add_spherical_harmonic_spot(mock_mesh, 1, 0, param_deltas[0], param_indices[0])
+            add_spherical_harmonic_spots(mock_mesh, jnp.array([1]), jnp.array([0]),
+                                         param_deltas[:1], param_indices[:1])
 
     def test_raises_error_for_read_only_phoebe_model_add_spherical_harmonic_spots(self, spherical_harmonic_params, phoebe_model):
         phoebe_mesh = phoebe_model
@@ -104,7 +108,10 @@ class TestSpotFunctions:
             tilt_axis=tilt_axis,
             tilt_angle=tilt_degree
         )
+        untilted = add_spherical_harmonic_spot(mock_mesh, 4, 4, spot_temp - base_temp, 0)
         assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
+        # A 10 degree tilt must move the pattern.
+        assert not jnp.allclose(spotted.parameters[:, 0], untilted.parameters[:, 0], atol=10.0)
 
     def test_add_tilted_spherical_harmonic_spot_with_zero_tilt(self, mock_mesh):
         base_temp = 5700
@@ -121,7 +128,10 @@ class TestSpotFunctions:
             tilt_axis=tilt_axis,
             tilt_angle=tilt_degree
         )
+        untilted = add_spherical_harmonic_spot(mock_mesh, 4, 4, spot_temp - base_temp, 0)
         assert not jnp.allclose(spotted.parameters[:, 0], mock_mesh.parameters[:, 0])
+        # A zero tilt must reproduce the untilted pattern exactly.
+        assert jnp.allclose(spotted.parameters, untilted.parameters, rtol=0, atol=1e-8)
 
     def test_add_tilted_spherical_harmonic_spot_different_tilt_axes(self, mock_mesh):
         base_temp = 5700

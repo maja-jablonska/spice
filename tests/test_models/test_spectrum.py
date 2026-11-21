@@ -134,80 +134,47 @@ class TestSpectrumFunctions:
         
         assert jnp.isscalar(abs_mag)
         assert jnp.isfinite(abs_mag)
-        # Solar absolute bolometric magnitude should be close to 4.75
-        assert jnp.abs(abs_mag - 4.75) < 0.1
+        # IAU 2015 B2: M_bol = 0 at L0 = 3.0128e28 W, so the nominal solar
+        # luminosity 3.828e26 W gives M_bol = 4.74.
+        assert abs(float(abs_mag) - (-2.5 * jnp.log10(3.828e26 / 3.0128e28))) < 1e-4
+        assert abs(float(abs_mag) - 4.74) < 1e-3
 
     def test_doppler_shift(self):
-        """Test Doppler shift in flux calculation"""
-        mesh = default_icosphere()
-        wavelengths = jnp.logspace(3, 4, 100)
+        """Rotation broadens a line only when Doppler shifts are on.
+
+        With ``disable_doppler_shift=True`` a rotating star must give exactly the
+        spectrum of the same star at rest; with Doppler shifts on, the line gets
+        shallower and wider while its equivalent width is conserved.
+        """
+        from spice.models.mesh_transform import add_rotation
+        line_center, sigma = 5500.0, 0.2
+        wavelengths = jnp.linspace(line_center - 3.0, line_center + 3.0, 1201)
         log_wavelengths = jnp.log10(wavelengths)
-        chunk_size = int(mesh.parameters.shape[0])
-        wavelengths_chunk_size = int(log_wavelengths.shape[0])
-        
-        def mock_intensity(wavelengths, mu, params):
-            return jnp.ones((wavelengths.shape[0], 2))
-        
-        # Compare with and without Doppler shift
-        flux_with_doppler = simulate_observed_flux(
-            mock_intensity,
-            mesh,
-            log_wavelengths,
-            chunk_size=chunk_size,
-            wavelengths_chunk_size=wavelengths_chunk_size,
-            disable_doppler_shift=False
-        )
-        flux_without_doppler = simulate_observed_flux(
-            mock_intensity,
-            mesh,
-            log_wavelengths,
-            chunk_size=chunk_size,
-            wavelengths_chunk_size=wavelengths_chunk_size,
-            disable_doppler_shift=True
-        )
-        
-        # Fluxes should be different if mesh has non-zero velocities
-        if jnp.any(mesh.los_velocities != 0):
-            assert not jnp.allclose(flux_with_doppler, flux_without_doppler)
 
-            # Test dimensions of flux arrays
-            chex.assert_shape(flux_with_doppler, (100, 2))
-            chex.assert_shape(flux_without_doppler, (100, 2))
+        def line_intensity(log_wl, mu, params):
+            wl = jnp.power(10.0, log_wl)
+            line = 1.0 - 0.6 * jnp.exp(-0.5 * ((wl - line_center) / sigma) ** 2)
+            return jnp.stack([line, jnp.ones_like(line)], axis=-1)
 
-            # Test dimensions of intermediate arrays
-            test_wavelengths = jnp.logspace(3, 4, 50)
-            test_log_wavelengths = jnp.log10(test_wavelengths)
-            test_areas = jnp.ones((42,))
-            test_vrads = jnp.zeros((42,))
-            test_params = jnp.ones((42, 3))
+        static = default_icosphere()
+        rotating = add_rotation(static, 50.0)          # v_eq = 50 km/s, equator-on
+        assert float(jnp.max(jnp.abs(rotating.los_velocities))) > 40.0
 
-            # Test __spectrum_flash_sum output dimensions
-            flash_sum = __spectrum_flash_sum(mock_intensity,
-                                           test_log_wavelengths,
-                                           test_areas,
-                                           jnp.ones_like(test_areas),
-                                           test_vrads,
-                                           test_params,
-                                           chunk_size=16)
-            chex.assert_shape(flash_sum, (50, 2))
+        def norm_flux(mesh, disable):
+            f = simulate_observed_flux(line_intensity, mesh, log_wavelengths,
+                                       disable_doppler_shift=disable)
+            return f[:, 0] / f[:, 1]
 
-            # Test __flux_flash_sum output dimensions 
-            flux_sum = __flux_flash_sum(mock_intensity,
-                                      test_log_wavelengths,
-                                      test_areas,
-                                      test_vrads,
-                                      test_params,
-                                      chunk_size=16)
-            chex.assert_shape(flux_sum, (50, 2))
+        rest = norm_flux(static, False)
+        no_doppler = norm_flux(rotating, True)
+        with_doppler = norm_flux(rotating, False)
 
-            # Test simulate_monochromatic_luminosity output dimensions
-            test_mesh = default_icosphere()
-            mono_lum = simulate_monochromatic_luminosity(mock_intensity,
-                                                       test_mesh,
-                                                       test_log_wavelengths,
-                                                       chunk_size=int(test_mesh.parameters.shape[0]),
-                                                       wavelengths_chunk_size=int(test_log_wavelengths.shape[0]))
-            chex.assert_shape(mono_lum, (50, 2))
+        assert jnp.allclose(no_doppler, rest, rtol=0, atol=1e-12)
+        # 50 km/s is ~0.9 A at 5500 A, far wider than the 0.2 A line.
+        assert float(jnp.min(with_doppler)) > float(jnp.min(rest)) + 0.2
+        dw = float(wavelengths[1] - wavelengths[0])
+        ew = lambda f: float(jnp.sum(1.0 - f)) * dw
+        assert ew(with_doppler) == pytest.approx(ew(rest), rel=2e-3)
 
     def test_doppler_shift_direction_matches_los_velocity_convention(self):
         """An approaching surface must imprint a BLUEshifted line, a receding one a REDshifted line.
@@ -354,3 +321,24 @@ class TestSpectrumFunctions:
                 f"R={radius} R_sun: monochromatic luminosity ratio vs R=1 "
                 f"was {float(jnp.mean(ratio)):.6e}, expected R^2={expected}"
             )
+
+
+def test_flash_sum_output_shapes():
+    # Module level: inside a class, ``__spectrum_flash_sum`` would be name-mangled.
+    def mock_intensity(wavelengths, mu, params):
+        return jnp.ones((wavelengths.shape[0], 2))
+
+    test_log_wavelengths = jnp.log10(jnp.logspace(3, 4, 50))
+    test_areas = jnp.ones((42,))
+    test_vrads = jnp.zeros((42,))
+    test_params = jnp.ones((42, 3))
+    flash_sum = __spectrum_flash_sum(mock_intensity, test_log_wavelengths, test_areas,
+                                     jnp.ones_like(test_areas), test_vrads, test_params,
+                                     chunk_size=16)
+    chex.assert_shape(flash_sum, (50, 2))
+    def mock_flux(wavelengths, params):
+        return jnp.ones((wavelengths.shape[0], 2))
+
+    flux_sum = __flux_flash_sum(mock_flux, test_log_wavelengths, test_areas,
+                                test_vrads, test_params, chunk_size=16)
+    chex.assert_shape(flux_sum, (50, 2))

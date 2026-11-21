@@ -17,10 +17,8 @@ These tests lock that tolerance down by building fake emulators (plain
 dict lookups, they never call into the toolkit runtime) for both layouts and
 asserting they resolve to equivalent affine blocks / parameter bounds.
 
-The tests run without the ``[aemu]`` optional extra installed: a synthetic
-``astro_emulators_toolkit`` stand-in is injected into ``sys.modules`` before
-the module under test is imported, satisfying its eager
-``_lazy_import_astro_emulators_toolkit`` call.
+The tests run without the ``[aemu]`` optional extra installed: see
+``tests/aemu_helpers.py``, which supplies a stand-in toolkit for the import only.
 """
 
 from __future__ import annotations
@@ -34,33 +32,12 @@ import numpy as np
 import pytest
 
 
-def _install_fake_aemu_modules() -> None:
-    """Inject minimal stand-ins for ``astro_emulators_toolkit`` and
-    ``astro_emulators_toolkit.emulator_runtime`` into ``sys.modules`` so the
-    module under test can be imported without the optional extra installed.
+from tests.aemu_helpers import import_aemu_wrapper
 
-    Only attributes referenced at module import time / by the helpers under
-    test need to exist; the schema helpers themselves never touch the
-    toolkit runtime."""
-    if "astro_emulators_toolkit" not in sys.modules:
-        fake_pkg = types.ModuleType("astro_emulators_toolkit")
-        fake_pkg.Emulator = type("Emulator", (), {})
-        fake_pkg.normalize_tree = lambda tree, *a, **kw: tree
-        fake_pkg.denormalize_tree = lambda tree, *a, **kw: tree
-        sys.modules["astro_emulators_toolkit"] = fake_pkg
-    if "astro_emulators_toolkit.emulator_runtime" not in sys.modules:
-        fake_runtime = types.ModuleType("astro_emulators_toolkit.emulator_runtime")
-        fake_runtime.apply_jax_runtime = lambda *a, **kw: None
-        fake_runtime.make_frozen_apply_runtime = lambda *a, **kw: (lambda x: x)
-        sys.modules["astro_emulators_toolkit.emulator_runtime"] = fake_runtime
-
-
-_install_fake_aemu_modules()
-
-# Import after the shim is in place. If the real toolkit is installed, the
-# shim no-ops and the real module is used -- either way the helpers under
-# test are pure-Python and behave identically.
-aemu_module = importlib.import_module("spice.spectrum.aemu_spectrum_emulator")
+# The schema helpers under test are pure Python; without the [aemu] extra a
+# stand-in toolkit is used for the import only and removed again (it used to stay
+# in sys.modules and leak into later test files).
+aemu_module = import_aemu_wrapper()
 
 _affine_section_of_combined = aemu_module._affine_section_of_combined
 _affine_reference_scaling = aemu_module._affine_reference_scaling

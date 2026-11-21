@@ -55,22 +55,45 @@ Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Getting started
 
    introduction
    installation
    quickstart
    gallery
+
+.. toctree::
+   :maxdepth: 2
+   :caption: User guide
+
    conventions
    mesh
    spectral_synthesis
-   spectral_grids
-   custom_emulators
-   binaries
    aemu_integration
-   phoebe_integration
    synthetic_photometry
+   binaries
+   phoebe_integration
+   gradients
+   performance
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Extending
+
+   custom_emulators
+   spectral_grids
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
    api
    troubleshooting
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Data
+
    paper_data
 
 Citation

@@ -130,28 +130,24 @@ range captures essentially all of the emitted energy.
 
 The emulator must supply a true emergent surface flux,
 :math:`F_\lambda = 2\pi\int_0^1 I_\lambda(\mu)\mu\,d\mu`.
-``Blackbody.flux`` currently returns the intensity at ``mu=1``. For the
-un-darkened ``bb = Blackbody()`` used above, multiply that intensity by
-:math:`\pi` before using the luminosity functions:
+``Blackbody.flux`` returns exactly this (:math:`\pi B_\lambda` for the
+un-darkened ``bb = Blackbody()`` used above), so it can be passed directly to
+the luminosity functions:
 
 .. code-block:: python
 
     from spice.spectrum import (simulate_monochromatic_luminosity,
                                 luminosity, absolute_bol_luminosity)
 
-    def surface_flux(log_wavelengths, parameters):
-        return np.pi * bb.intensity(log_wavelengths, 1., parameters)
-
     lum_wavelengths = np.geomspace(100., 1.e6, 4096)  # Angstroms
     mono_lum = simulate_monochromatic_luminosity(
-        surface_flux, star, np.log10(lum_wavelengths))  # erg/s/Angstrom
-    L = luminosity(surface_flux, star, lum_wavelengths)  # erg/s
+        bb.flux, star, np.log10(lum_wavelengths))  # erg/s/Angstrom
+    L = luminosity(bb.flux, star, lum_wavelengths)  # erg/s
     M_bol = absolute_bol_luminosity(L)
 
-No conversion to centimetres is needed for the integral. For a limb-darkened
-intensity, integrate its angular dependence instead of multiplying its
-``mu=1`` value by :math:`\pi`. Atmosphere emulators that already provide
-surface flux should be passed directly, without another factor of :math:`\pi`.
+No conversion to centimetres is needed for the integral. The ``flux`` methods
+of the other emulators and grid interpolators also return the emergent surface
+flux and can be passed the same way.
 
 Instrumental resolution
 -----------------------
@@ -248,9 +244,6 @@ effects on the mode shape are not included).
 Performance notes
 -----------------
 
-- The first call compiles; subsequent calls with the same shapes reuse the
-  compiled kernel. Keep wavelength-grid and mesh sizes fixed inside loops.
-- Chunk sizes are static arguments — changing them recompiles.
-- For time series, prefer evaluating meshes first (e.g. with
-  ``evaluate_rotation_at_times`` / ``evaluate_orbit_at_times``) and reusing
-  one wavelength grid across all synthesis calls.
+The first call compiles and later calls with the same shapes and chunk sizes
+reuse the compiled code. Chunk sizes, precision, GPU set-up, timings and
+batching of time series are covered in :doc:`performance`.
