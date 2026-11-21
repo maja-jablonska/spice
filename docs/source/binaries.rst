@@ -182,6 +182,21 @@ For the edge-on system above this finds two eclipses per period: at phase
 ``kind='annular'``), and at phase 0.75 the primary hides it completely
 (``front=1``, ``kind='total'``).
 
+.. note::
+
+   **Primary and secondary eclipses.** In the observational literature the
+   *primary eclipse* (primary minimum, Min I) is the deeper of the two: the
+   eclipse of the star with the higher surface brightness. Which one that is
+   depends on the two stars' temperatures and can change with passband, so
+   the eclipse finder does not use the words; it reports ``front``, the
+   component in front. The lower-level
+   :func:`~spice.models.orbit_utils.eclipse_timestamps_kepler` labels its
+   windows geometrically, like PHOEBE's ``t0_supconj``: its "primary" eclipse
+   is the eclipse of ``body1`` (``front=2``). For a circular orbit the
+   eclipse that hides the hotter star is the deeper one, so when ``body2`` is
+   the hotter star, as in TZ For (a cool giant with a hotter companion), Min I
+   is the eclipse with ``front=1``.
+
 The sky plane defaults to the plane perpendicular to ``body1``'s line of
 sight — the same vector the occlusion resolution uses — so the finder agrees
 with what the synthesis will actually eclipse; pass ``los_vector=`` to
